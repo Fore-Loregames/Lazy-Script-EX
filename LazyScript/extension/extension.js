@@ -990,6 +990,36 @@ function currentIdentifierRange(document, position) {
   return new vscode.Range(new vscode.Position(position.line, start), new vscode.Position(position.line, end));
 }
 
+function samePosition(left, right) {
+  return !!left && !!right && left.line === right.line && left.character === right.character;
+}
+
+function sameDocument(left, right) {
+  if (left === right) return true;
+  const leftPath = left?.uri?.fsPath;
+  const rightPath = right?.uri?.fsPath;
+  return !!leftPath && !!rightPath && path.normalize(leftPath) === path.normalize(rightPath);
+}
+
+function completionReplacementRange(document, position) {
+  const editor = vscode.window.activeTextEditor;
+  const selection = editor?.selection;
+  if (editor && sameDocument(editor.document, document) && selection?.start && selection?.end) {
+    const nonEmpty = !samePosition(selection.start, selection.end);
+    const active = selection.active || selection.end;
+    if (nonEmpty && samePosition(active, position)) {
+      return new vscode.Range(selection.start, selection.end);
+    }
+  }
+  return currentIdentifierRange(document, position);
+}
+
+function applyCompletionRange(items, range) {
+  if (!range) return items;
+  for (const item of items || []) item.range = range;
+  return items;
+}
+
 function linePrefixIsCode(document, position) {
   const line = document.lineAt(position.line).text.slice(0, position.character);
   let quote = '';
@@ -2004,6 +2034,7 @@ class CompletionProvider {
     const styleItems = lscssCompletionItems(document, position);
     if (styleItems) return styleItems;
     const record = activeRecord(document);
+    const replacementRange = completionReplacementRange(document, position);
     const scopeSymbols = collectVisibleScopeSymbols(document, position);
     const scopeRecord = { ...record, symbols: [...scopeSymbols, ...record.symbols.filter(symbol => symbol.kind !== 'variable')] };
     const prefix = document.lineAt(position.line).text.slice(0, position.character);
@@ -2029,7 +2060,7 @@ class CompletionProvider {
           );
           for (const item of items) item.additionalTextEdits = [vscode.TextEdit.replace(qualifierRange, canonicalQualifier)];
         }
-        return items;
+        return applyCompletionRange(items, replacementRange);
       }
       if (base[0] === 'self') {
         const object = enclosingObjectAt(record, position.line);
@@ -2037,18 +2068,18 @@ class CompletionProvider {
           const objectItems = object.members
             .filter(sym => !sym.name.startsWith('_'))
             .map(sym => completionFor(record, sym, 'self.', object));
-          return appendObjectBuiltinCompletions(objectItems, 'self');
+          return applyCompletionRange(appendObjectBuiltinCompletions(objectItems, 'self'), replacementRange);
         }
         if (object && base.length === 2) {
           const member = symbolByName(object.members, base[1], true);
-          if (isTableLikeSymbol(member)) return tableBuiltinCompletionItems(`self.${member.name}`);
+          if (isTableLikeSymbol(member)) return applyCompletionRange(tableBuiltinCompletionItems(`self.${member.name}`), replacementRange);
           const typeRef = member?.typeRef || inferTypeFromInitializer(scopeRecord, member?.initializer);
           const resolved = resolveTypeObject(scopeRecord, typeRef);
           if (resolved) {
             const objectItems = resolved.object.members
               .filter(sym => !sym.name.startsWith('_'))
               .map(sym => completionFor(resolved.record, sym, `self.${member.name}.`, resolved.object));
-            return appendObjectBuiltinCompletions(objectItems, `self.${member.name}`);
+            return applyCompletionRange(appendObjectBuiltinCompletions(objectItems, `self.${member.name}`), replacementRange);
           }
         }
       }
@@ -2065,29 +2096,28 @@ class CompletionProvider {
           item.insertText = snippetForCallable(pseudo);
           return item;
         });
-        if (builtinItems.length) return builtinItems;
+        if (builtinItems.length) return applyCompletionRange(builtinItems, replacementRange);
         const variable = scopeSymbols.find(s => s.name === base[0]) || record.symbols.find(s => s.kind === 'variable' && s.name === base[0]);
         if (variable) {
-          if (isTableLikeSymbol(variable)) return tableBuiltinCompletionItems(base[0]);
+          if (isTableLikeSymbol(variable)) return applyCompletionRange(tableBuiltinCompletionItems(base[0]), replacementRange);
           const typeRef = variable.typeRef || inferTypeFromInitializer(scopeRecord, variable.initializer);
           const resolved = resolveTypeObject(scopeRecord, typeRef);
           if (resolved) {
             const objectItems = resolved.object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(resolved.record, sym, `${base[0]}.`, resolved.object));
-            return appendObjectBuiltinCompletions(objectItems, base[0]);
+            return applyCompletionRange(appendObjectBuiltinCompletions(objectItems, base[0]), replacementRange);
           }
-          if (!isTableLikeSymbol(variable)) return objectBuiltinCompletionItems(base[0]);
+          if (!isTableLikeSymbol(variable)) return applyCompletionRange(objectBuiltinCompletionItems(base[0]), replacementRange);
         }
         const object = record.symbols.find(s => s.name === base[0] && s.members);
-        if (object) return object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(record, sym, `${base[0]}.`, object));
+        if (object) return applyCompletionRange(object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(record, sym, `${base[0]}.`, object)), replacementRange);
       }
       if (base.length === 2) {
         const object = record.symbols.find(s => s.name === base[0] && s.members);
         const member = object && symbolByName(object.members, base[1], true);
-        if (isTableLikeSymbol(member)) return tableBuiltinCompletionItems(`${object.name}.${member.name}`);
+        if (isTableLikeSymbol(member)) return applyCompletionRange(tableBuiltinCompletionItems(`${object.name}.${member.name}`), replacementRange);
       }
     }
     const items = KEYWORDS.map(keyword => new vscode.CompletionItem(keyword, vscode.CompletionItemKind.Keyword));
-    const replacementRange = currentIdentifierRange(document, position);
     const addedNames = new Set();
     for (const sym of scopeSymbols.sort((a, b) => (b.depth || 0) - (a.depth || 0))) {
       if (addedNames.has(sym.name)) continue;
@@ -2114,7 +2144,7 @@ class CompletionProvider {
       item.documentation = new vscode.MarkdownString(`Imported from \`${imp.spec}\`. Type \`${alias}.\` to browse its exported API.`);
       items.push(item);
     }
-    return items;
+    return applyCompletionRange(items, replacementRange);
   }
 }
 
@@ -2674,5 +2704,5 @@ function deactivate() {
 }
 module.exports = {
   activate, deactivate, parseText, resolveImport, chainContext, inferTypeFromInitializer,
-  _test: { index, loadRecordSync, importedSymbol, importedCompletionTarget, importEntryForAlias, completionImportEntryForAlias, levenshteinDistance, symbolByName, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, OBJECT_BUILTIN_METHODS, objectBuiltinCompletionItems, resolveObjectBuiltinChain, TABLE_BUILTIN_METHODS, isGrowableTableInitializer, isTableLikeSymbol, tableBuiltinCompletionItems, resolveTableBuiltinChain, HoverProvider, DocumentFormattingProvider, DocumentRangeFormattingProvider, OnTypeFormattingProvider, formatLsxText, collectVisibleScopeSymbols, completionForScopeSymbol, completionForSelfMember, currentIdentifierRange, shouldAutoTriggerSuggestions, desiredIndentAtLine, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs, compilerCheckContext }
+  _test: { index, loadRecordSync, importedSymbol, importedCompletionTarget, importEntryForAlias, completionImportEntryForAlias, levenshteinDistance, symbolByName, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, OBJECT_BUILTIN_METHODS, objectBuiltinCompletionItems, resolveObjectBuiltinChain, TABLE_BUILTIN_METHODS, isGrowableTableInitializer, isTableLikeSymbol, tableBuiltinCompletionItems, resolveTableBuiltinChain, HoverProvider, DocumentFormattingProvider, DocumentRangeFormattingProvider, OnTypeFormattingProvider, formatLsxText, collectVisibleScopeSymbols, completionForScopeSymbol, completionForSelfMember, currentIdentifierRange, completionReplacementRange, applyCompletionRange, shouldAutoTriggerSuggestions, desiredIndentAtLine, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs, compilerCheckContext }
 };

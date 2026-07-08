@@ -350,6 +350,31 @@ for (const expected of ['GetTypeName', 'IsType']) {
 const objectTypeHit = extension._test.resolveObjectBuiltinChain(extension._test.loadRecordSync(unanchoredBehaviorSource), ['behavior', 'IsType']);
 assert(objectTypeHit?.symbol?.signature === 'IsType(typeName) -> bool', 'IsType hover/signature metadata did not resolve');
 
+const partialObjectTypeSource = objectTypeCompletionSource.replace('behavior.', 'behavior.us');
+const partialObjectTypeDoc = {
+  ...mockDocument(partialObjectTypeSource),
+  uri: { fsPath: path.join(sourceDir, 'ObjectTypePartialCompletion.lsx') }
+};
+const partialObjectTypeLine = 2;
+const partialObjectTypePosition = new Position(partialObjectTypeLine, '        behavior.us'.length);
+const partialObjectTypeItems = new extension._test.CompletionProvider().provideCompletionItems(partialObjectTypeDoc, partialObjectTypePosition);
+const partialIsType = partialObjectTypeItems.find(item => (item.label.label || item.label) === 'IsType');
+assert(partialIsType, 'partial object-method completion is missing IsType');
+assert(partialIsType.range, 'partial object-method completion has no replacement range');
+assert.strictEqual(partialObjectTypeDoc.getText(partialIsType.range), 'us', 'partial object-method completion inserts after the typed fragment instead of replacing it');
+
+const selectedRange = new Range(new Position(partialObjectTypeLine, '        behavior.'.length), partialObjectTypePosition);
+vscodeMock.window.activeTextEditor = {
+  document: partialObjectTypeDoc,
+  selection: { start: selectedRange.start, end: selectedRange.end, active: selectedRange.end }
+};
+const selectedObjectTypeItems = new extension._test.CompletionProvider().provideCompletionItems(partialObjectTypeDoc, partialObjectTypePosition);
+const selectedIsType = selectedObjectTypeItems.find(item => (item.label.label || item.label) === 'IsType');
+assert(selectedIsType?.range, 'selected object-method completion has no replacement range');
+assert.strictEqual(selectedIsType.range.start.character, selectedRange.start.character, 'completion did not replace the full highlighted selection');
+assert.strictEqual(selectedIsType.range.end.character, selectedRange.end.character, 'completion selection replacement ended at the wrong position');
+vscodeMock.window.activeTextEditor = null;
+
 const unformatted = `const WindowManager = {
 windowHandle = 0
 CreateWindow = fn(width,height,title)

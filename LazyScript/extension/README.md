@@ -22,6 +22,8 @@ Do not open the `.vsix` with Microsoft Visual Studio's VSIX installer. This exte
 
 ## Features
 
+- Completion replaces the currently typed member fragment or highlighted selection instead of inserting duplicate text.
+
 - Syntax highlighting for LSX, LSHTML, and LSCSS
 - Dedicated LSX file icon in the Explorer, tabs, search results, and other language-aware views
 - Compiler diagnostics while typing and on save
