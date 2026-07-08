@@ -27,7 +27,7 @@ Do not open the `.vsix` with Microsoft Visual Studio's VSIX installer. This exte
 - Compiler diagnostics while typing and on save
 - Exact error ranges in the Problems panel
 - Beginner-oriented hints for common compiler errors
-- Scope-aware completion for function parameters, local variables, loop variables, `self`, object fields, imports, real folders and `.lsx` filenames inside `use` paths, modules, methods, constants, LSHTML tags, attributes, and LSCSS properties
+- Scope-aware completion for function parameters, local variables, loop variables, `self`, object fields, inferred growable-table methods, imports, real folders and `.lsx` filenames inside `use` paths, modules, methods, constants, LSHTML tags, attributes, and LSCSS properties
 - Built-in document formatting for LSX, object methods, control flow, multiline calls, LSHTML, and LSCSS
 - Rich hover explanations with practical LSX examples
 - Go to Definition
@@ -80,6 +80,33 @@ Formatting on save is enabled for LSX by default. To disable it only for LSX in 
 ```
 
 Automatic local suggestions can be changed with `lazyscriptex.completion.autoTrigger` and `lazyscriptex.completion.autoTriggerDelay`.
+
+### Growable-table methods
+
+The compiler gives inferred growable tables their methods directly, so those methods do not appear as declarations in the source file. The extension now recognizes both local tables and object fields initialized with `{}`:
+
+```lsx
+export const GameObject = {
+    lazyBehaviors = {}
+
+    AddLazyBehavior = fn(behavior)
+        self.lazyBehaviors.push(behavior)
+    end
+}
+```
+
+After typing `self.lazyBehaviors.` or `values.`, IntelliSense shows:
+
+- `push(value)`
+- `get(index)`
+- `length()`
+- `remove(index)`
+- `remove_fast(index)`
+- `clear()`
+- `byte_length()`
+- `destroy()`
+
+Each item includes a beginner explanation, a usage example, parameter snippets, hover information, and signature help. The same completion works for table fields reached through imported modules.
 
 ## Diagnostics
 

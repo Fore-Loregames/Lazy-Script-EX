@@ -1,8 +1,8 @@
 {
   "name": "lazyscriptex-native-gamekit",
   "displayName": "LazyScriptEX Native GameKit",
-  "description": "Native LazyScriptEX tooling with reliable local and imported-module IntelliSense, typo-tolerant module qualifiers, scope-aware suggestions, import-path completion, built-in formatting, static objects, beginner API hovers, exact compiler ranges, LSHTML/LSCSS, and O6 compilation.",
-  "version": "0.18.8",
+  "description": "Native LazyScriptEX tooling with scope-aware local and imported-module IntelliSense, compiler-provided growable-table method completion, typo-tolerant module qualifiers, import-path completion, built-in formatting, static objects, beginner API hovers, exact compiler ranges, LSHTML/LSCSS, and O6 compilation.",
+  "version": "0.18.9",
   "publisher": "nissyokugames",
   "license": "MIT",
   "engines": {

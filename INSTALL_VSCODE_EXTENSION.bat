@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-set "VSIX=%~dp0LazyScriptEX-Native-GameKit-0.18.8.vsix"
+set "VSIX=%~dp0LazyScriptEX-Native-GameKit-0.18.9.vsix"
 set "CODE_CLI="
 
 if not exist "%VSIX%" (
@@ -12,20 +12,16 @@ if not exist "%VSIX%" (
   exit /b 1
 )
 
-rem Prefer command-line launchers already registered in PATH.
 for %%C in (code.cmd code-insiders.cmd codium.cmd cursor.cmd code code-insiders codium cursor) do (
   if not defined CODE_CLI for /f "delims=" %%P in ('where %%C 2^>nul') do if not defined CODE_CLI set "CODE_CLI=%%P"
 )
 
-rem Normal per-user and machine-wide VS Code installations.
 if not defined CODE_CLI if exist "%LOCALAPPDATA%\Programs\Microsoft VS Code\bin\code.cmd" set "CODE_CLI=%LOCALAPPDATA%\Programs\Microsoft VS Code\bin\code.cmd"
 if not defined CODE_CLI if exist "%LOCALAPPDATA%\Programs\Microsoft VS Code Insiders\bin\code-insiders.cmd" set "CODE_CLI=%LOCALAPPDATA%\Programs\Microsoft VS Code Insiders\bin\code-insiders.cmd"
 if not defined CODE_CLI if exist "%ProgramFiles%\Microsoft VS Code\bin\code.cmd" set "CODE_CLI=%ProgramFiles%\Microsoft VS Code\bin\code.cmd"
 if not defined CODE_CLI if exist "%ProgramFiles%\Microsoft VS Code Insiders\bin\code-insiders.cmd" set "CODE_CLI=%ProgramFiles%\Microsoft VS Code Insiders\bin\code-insiders.cmd"
 if not defined CODE_CLI if exist "%ProgramFiles(x86)%\Microsoft VS Code\bin\code.cmd" set "CODE_CLI=%ProgramFiles(x86)%\Microsoft VS Code\bin\code.cmd"
 if not defined CODE_CLI if exist "%ProgramFiles(x86)%\Microsoft VS Code Insiders\bin\code-insiders.cmd" set "CODE_CLI=%ProgramFiles(x86)%\Microsoft VS Code Insiders\bin\code-insiders.cmd"
-
-rem Direct executable fallbacks for installations whose bin directory is not present.
 if not defined CODE_CLI if exist "%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe" set "CODE_CLI=%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"
 if not defined CODE_CLI if exist "%LOCALAPPDATA%\Programs\Microsoft VS Code Insiders\Code - Insiders.exe" set "CODE_CLI=%LOCALAPPDATA%\Programs\Microsoft VS Code Insiders\Code - Insiders.exe"
 if not defined CODE_CLI if exist "%ProgramFiles%\Microsoft VS Code\Code.exe" set "CODE_CLI=%ProgramFiles%\Microsoft VS Code\Code.exe"
@@ -39,14 +35,11 @@ if not defined CODE_CLI (
   echo.
   echo Select:
   echo   %VSIX%
-  echo.
-  echo Do NOT double-click the .vsix. Windows may send it to Microsoft
-  echo Visual Studio's VSIXInstaller.exe, which cannot install VS Code extensions.
   pause
   exit /b 1
 )
 
-echo Installing LazyScriptEX Native GameKit 0.18.8 into Visual Studio Code...
+echo Installing LazyScriptEX Native GameKit 0.18.9 into Visual Studio Code...
 echo Using: %CODE_CLI%
 echo.
 call "%CODE_CLI%" --install-extension "%VSIX%" --force
@@ -60,7 +53,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo SUCCESS: LazyScriptEX Native GameKit 0.18.8 is installed.
+echo SUCCESS: LazyScriptEX Native GameKit 0.18.9 is installed.
 echo Restart Visual Studio Code, then open the toolkit root folder.
 pause
 exit /b 0

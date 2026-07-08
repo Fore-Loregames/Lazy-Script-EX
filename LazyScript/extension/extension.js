@@ -45,6 +45,158 @@ const BUILTIN_DOCS = {
   'thread.cpu_count': ['thread.cpu_count() -> i32', 'Returns the number of logical processors visible to the process.']
 };
 
+// Compiler-provided methods available on inferred growable tables such as
+// `local values = {}` and object fields such as `items = {}`. These are not
+// ordinary source members, so IntelliSense adds them from the inferred table
+// shape instead of waiting for a declaration in the current source file.
+const TABLE_BUILTIN_METHODS = [
+  {
+    name: 'push',
+    signature: 'push(value) -> index',
+    parameters: [{ name: 'value', type: 'inferred' }],
+    description: 'Adds one value to the end of this growable table and returns the index where it was stored.',
+    example: 'self.lazyBehaviors.push(behavior)'
+  },
+  {
+    name: 'get',
+    signature: 'get(index) -> value',
+    parameters: [{ name: 'index', type: 'inferred' }],
+    description: 'Returns the value stored at the requested zero-based index.',
+    example: 'local behavior = self.lazyBehaviors.get(0)'
+  },
+  {
+    name: 'length',
+    signature: 'length() -> count',
+    parameters: [],
+    description: 'Returns the number of values currently stored in this table.',
+    example: 'local count = self.lazyBehaviors.length()'
+  },
+  {
+    name: 'remove',
+    signature: 'remove(index) -> success',
+    parameters: [{ name: 'index', type: 'inferred' }],
+    description: 'Removes the value at the requested index while preserving the order of the remaining values.',
+    example: 'self.lazyBehaviors.remove(index)'
+  },
+  {
+    name: 'remove_fast',
+    signature: 'remove_fast(index) -> success',
+    parameters: [{ name: 'index', type: 'inferred' }],
+    description: 'Removes a value quickly by moving the final value into the removed slot. Use it when table order does not matter.',
+    example: 'self.lazyBehaviors.remove_fast(index)'
+  },
+  {
+    name: 'clear',
+    signature: 'clear()',
+    parameters: [],
+    description: 'Removes every stored value while keeping the table allocated and ready to reuse.',
+    example: 'self.lazyBehaviors.clear()'
+  },
+  {
+    name: 'byte_length',
+    signature: 'byte_length() -> bytes',
+    parameters: [],
+    description: 'Returns the contiguous native byte size of the table data. This is mainly used when passing numeric buffers to native APIs.',
+    example: 'local bytes = vertices.byte_length()'
+  },
+  {
+    name: 'destroy',
+    signature: 'destroy()',
+    parameters: [],
+    description: 'Releases storage owned by the table. Call it once when an owned growable table is no longer needed.',
+    example: 'self.lazyBehaviors.destroy()'
+  }
+];
+
+function cleanInitializerText(value) {
+  return String(value || '').replace(/--.*$/, '').trim().replace(/,$/, '').trim();
+}
+
+function isGrowableTableInitializer(value) {
+  return /^\{\s*\}$/.test(cleanInitializerText(value));
+}
+
+function isTableLikeSymbol(symbol) {
+  if (!symbol) return false;
+  const type = String(symbol.type || '').trim().toLowerCase();
+  if (type === 'table' || /^table\s*</.test(type)) return true;
+  if (String(symbol.typeRef?.type || '').toLowerCase() === 'table') return true;
+  return isGrowableTableInitializer(symbol.initializer);
+}
+
+function tableBuiltinMethod(name) {
+  return TABLE_BUILTIN_METHODS.find(method => method.name === name) || null;
+}
+
+function completionForTableBuiltin(method, receiver = 'table') {
+  const item = new vscode.CompletionItem(method.name, vscode.CompletionItemKind.Method);
+  item.detail = `${receiver}.${method.signature}`;
+  item.sortText = `0_${method.name}`;
+  const md = new vscode.MarkdownString();
+  md.appendCodeblock(method.signature, 'lazyscriptex');
+  md.appendMarkdown(`\n${method.description}`);
+  md.appendMarkdown('\n\n**Example**\n');
+  md.appendCodeblock(method.example, 'lazyscriptex');
+  item.documentation = md;
+  item.insertText = snippetForCallable(method);
+  return item;
+}
+
+function tableBuiltinCompletionItems(receiver = 'table') {
+  return TABLE_BUILTIN_METHODS.map(method => completionForTableBuiltin(method, receiver));
+}
+
+function tableBuiltinSymbol(method) {
+  const parts = signatureParts(method.signature);
+  return {
+    name: method.name,
+    kind: 'method',
+    signature: method.signature,
+    parameters: method.parameters,
+    returnType: parts.returnType,
+    documentation: method.description,
+    virtualBuiltin: true,
+    apiMetadata: {
+      friendlyDescription: method.description,
+      example: method.example,
+      exampleNote: 'Growable-table usage'
+    }
+  };
+}
+
+function resolveTableBuiltinChain(record, chain) {
+  if (!Array.isArray(chain) || chain.length < 2) return null;
+  const method = tableBuiltinMethod(chain.at(-1));
+  if (!method) return null;
+  const ownerChain = chain.slice(0, -1);
+
+  if (ownerChain[0] === 'self' && ownerChain.length === 2) {
+    const object = record.symbols.find(symbol => symbol.members?.some(member => member.name === ownerChain[1] && isTableLikeSymbol(member)));
+    const field = object?.members?.find(member => member.name === ownerChain[1]);
+    if (field) return { record, symbol: tableBuiltinSymbol(method), parent: { name: `${object.name}.${field.name}` } };
+  }
+
+  if (ownerChain.length === 1) {
+    const variable = record.symbols.find(symbol => symbol.kind === 'variable' && symbol.name === ownerChain[0]);
+    if (isTableLikeSymbol(variable)) return { record, symbol: tableBuiltinSymbol(method), parent: { name: variable.name } };
+  }
+
+  if (record.imports.has(ownerChain[0])) {
+    const imported = importedCompletionTarget(record, ownerChain);
+    if (imported?.record && isTableLikeSymbol(imported.parent)) {
+      return { record: imported.record, symbol: tableBuiltinSymbol(method), parent: { name: imported.canonicalChain.join('.') } };
+    }
+  }
+
+  if (ownerChain.length === 2) {
+    const object = record.symbols.find(symbol => symbol.name === ownerChain[0] && symbol.members);
+    const field = object?.members?.find(member => member.name === ownerChain[1]);
+    if (isTableLikeSymbol(field)) return { record, symbol: tableBuiltinSymbol(method), parent: { name: `${object.name}.${field.name}` } };
+  }
+
+  return null;
+}
+
 function keyForFile(file) {
   return path.normalize(file).toLowerCase();
 }
@@ -240,14 +392,17 @@ function parseMembers(lines, startLine, owner) {
         signature: `${m[1]}(${m[2].trim()})${returnType ? ` -> ${returnType}` : ''}`,
         line: i, column: raw.indexOf(m[1]), exported: true, documentation: documentationBefore(lines, i)
       });
-    } else if ((m = raw.match(/^\s*([A-Za-z_]\w*)\s*:\s*([^=,]+?)\s*=/))) {
+    } else if ((m = raw.match(/^\s*([A-Za-z_]\w*)\s*:\s*([^=,]+?)\s*=\s*(.+?)\s*,?\s*$/))) {
+      const initializer = m[3].trim();
       members.push({
-        name: m[1], kind: 'field', owner, type: m[2].trim(), signature: `${m[1]}: ${m[2].trim()}`,
+        name: m[1], kind: 'field', owner, type: m[2].trim(), typeRef: parseTypeReference(m[2]), initializer,
+        signature: `${m[1]}: ${m[2].trim()} = ${initializer}`,
         line: i, column: raw.indexOf(m[1]), exported: true, documentation: documentationBefore(lines, i)
       });
-    } else if ((m = raw.match(/^\s*([A-Za-z_]\w*)\s*=\s*(?!fn\b)([^,}]+)[,}]?\s*$/))) {
+    } else if ((m = raw.match(/^\s*([A-Za-z_]\w*)\s*=\s*(?!fn\b)(.+?)\s*,?\s*$/))) {
+      const initializer = m[2].trim();
       members.push({
-        name: m[1], kind: 'field', owner, type: 'inferred', signature: `${m[1]} = ${m[2].trim()}`,
+        name: m[1], kind: 'field', owner, type: 'inferred', initializer, signature: `${m[1]} = ${initializer}`,
         line: i, column: raw.indexOf(m[1]), exported: true, documentation: documentationBefore(lines, i)
       });
     }
@@ -1144,6 +1299,8 @@ function chainContext(document, position) {
 
 function resolveChain(record, chain) {
   if (!chain.length) return null;
+  const tableBuiltin = resolveTableBuiltinChain(record, chain);
+  if (tableBuiltin) return tableBuiltin;
   if (chain.length >= 3 && record.imports.has(chain[0])) return importedSymbol(record, chain[0], chain[1], chain[2]);
   if (chain.length >= 2 && record.imports.has(chain[0])) return importedSymbol(record, chain[0], chain[1]);
   if (chain.length >= 2) {
@@ -1200,8 +1357,12 @@ function markdownForSymbol(record, symbol, parent = null) {
   if (parent?.staticObject) {
     md.appendMarkdown(`\n> **Static object:** Call this directly as \`ModuleAlias.${parent.name}.${symbol.name}(...)\`. Do not create it with \`.new()\`; \`self\` refers to the one shared object.\n`);
   }
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  md.appendMarkdown(`\n**Defined in:** \`${root ? path.relative(root, record.uri.fsPath) : record.uri.fsPath}:${symbol.line + 1}\``);
+  if (!symbol.virtualBuiltin) {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    md.appendMarkdown(`\n**Defined in:** \`${root ? path.relative(root, record.uri.fsPath) : record.uri.fsPath}:${symbol.line + 1}\``);
+  } else {
+    md.appendMarkdown('\n**Provided by:** the LSX compiler for inferred growable tables.');
+  }
   return md;
 }
 
@@ -1777,9 +1938,11 @@ class CompletionProvider {
         if (!importedTarget.record) return [];
         const canonicalQualifier = (importedTarget.canonicalChain || [importedTarget.alias]).join('.');
         const completionPrefix = `${canonicalQualifier}.`;
-        const items = importedTarget.symbols
-          .filter(symbol => !symbol.name.startsWith('_'))
-          .map(symbol => completionFor(importedTarget.record, symbol, completionPrefix, importedTarget.parent));
+        const items = isTableLikeSymbol(importedTarget.parent)
+          ? tableBuiltinCompletionItems(canonicalQualifier)
+          : importedTarget.symbols
+            .filter(symbol => !symbol.name.startsWith('_'))
+            .map(symbol => completionFor(importedTarget.record, symbol, completionPrefix, importedTarget.parent));
         const typedQualifier = chainMatch[1];
         if (typedQualifier !== canonicalQualifier) {
           const qualifierStart = chainMatch.index || 0;
@@ -1791,11 +1954,26 @@ class CompletionProvider {
         }
         return items;
       }
-      if (base.length === 1) {
-        if (base[0] === 'self') {
-          const object = enclosingObjectAt(record, position.line);
-          if (object) return object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(record, sym, 'self.', object));
+      if (base[0] === 'self') {
+        const object = enclosingObjectAt(record, position.line);
+        if (object && base.length === 1) {
+          return object.members
+            .filter(sym => !sym.name.startsWith('_'))
+            .map(sym => completionFor(record, sym, 'self.', object));
         }
+        if (object && base.length === 2) {
+          const member = symbolByName(object.members, base[1], true);
+          if (isTableLikeSymbol(member)) return tableBuiltinCompletionItems(`self.${member.name}`);
+          const typeRef = member?.typeRef || inferTypeFromInitializer(scopeRecord, member?.initializer);
+          const resolved = resolveTypeObject(scopeRecord, typeRef);
+          if (resolved) {
+            return resolved.object.members
+              .filter(sym => !sym.name.startsWith('_'))
+              .map(sym => completionFor(resolved.record, sym, `self.${member.name}.`, resolved.object));
+          }
+        }
+      }
+      if (base.length === 1) {
         const builtinItems = Object.entries(BUILTIN_DOCS).filter(([name]) => name.startsWith(`${base[0]}.`)).map(([name, info]) => {
           const method = name.slice(base[0].length + 1);
           const item = new vscode.CompletionItem(method, vscode.CompletionItemKind.Function);
@@ -1811,12 +1989,18 @@ class CompletionProvider {
         if (builtinItems.length) return builtinItems;
         const variable = scopeSymbols.find(s => s.name === base[0]) || record.symbols.find(s => s.kind === 'variable' && s.name === base[0]);
         if (variable) {
+          if (isTableLikeSymbol(variable)) return tableBuiltinCompletionItems(base[0]);
           const typeRef = variable.typeRef || inferTypeFromInitializer(scopeRecord, variable.initializer);
           const resolved = resolveTypeObject(scopeRecord, typeRef);
           if (resolved) return resolved.object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(resolved.record, sym, `${base[0]}.`, resolved.object));
         }
         const object = record.symbols.find(s => s.name === base[0] && s.members);
         if (object) return object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(record, sym, `${base[0]}.`, object));
+      }
+      if (base.length === 2) {
+        const object = record.symbols.find(s => s.name === base[0] && s.members);
+        const member = object && symbolByName(object.members, base[1], true);
+        if (isTableLikeSymbol(member)) return tableBuiltinCompletionItems(`${object.name}.${member.name}`);
       }
     }
     const items = KEYWORDS.map(keyword => new vscode.CompletionItem(keyword, vscode.CompletionItemKind.Keyword));
@@ -2396,5 +2580,5 @@ function deactivate() {
 }
 module.exports = {
   activate, deactivate, parseText, resolveImport, chainContext, inferTypeFromInitializer,
-  _test: { index, loadRecordSync, importedSymbol, importedCompletionTarget, importEntryForAlias, completionImportEntryForAlias, levenshteinDistance, symbolByName, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, HoverProvider, DocumentFormattingProvider, DocumentRangeFormattingProvider, OnTypeFormattingProvider, formatLsxText, collectVisibleScopeSymbols, completionForScopeSymbol, completionForSelfMember, currentIdentifierRange, shouldAutoTriggerSuggestions, desiredIndentAtLine, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs }
+  _test: { index, loadRecordSync, importedSymbol, importedCompletionTarget, importEntryForAlias, completionImportEntryForAlias, levenshteinDistance, symbolByName, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, TABLE_BUILTIN_METHODS, isGrowableTableInitializer, isTableLikeSymbol, tableBuiltinCompletionItems, resolveTableBuiltinChain, HoverProvider, DocumentFormattingProvider, DocumentRangeFormattingProvider, OnTypeFormattingProvider, formatLsxText, collectVisibleScopeSymbols, completionForScopeSymbol, completionForSelfMember, currentIdentifierRange, shouldAutoTriggerSuggestions, desiredIndentAtLine, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs }
 };
