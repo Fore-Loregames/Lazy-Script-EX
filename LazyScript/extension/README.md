@@ -168,6 +168,20 @@ Additional shared roots may be configured in `lazyscriptex.json`:
 
 Then imports can use `@Engine/...` or `@Shared/...` from any source depth. Shared files outside an executable folder are still checked directly because the extension passes associated roots to the compiler.
 
+
+### Current-scope and imported-module completion
+
+Completion follows the expression being typed instead of mixing every known symbol together:
+
+```lsx
+use "@Engine/Window/WindowManager.lsx" as WindowManagerMod
+
+WindowManagerMod.                 -- shows only exports from WindowManager.lsx
+WindowManagerMod.WindowManager.   -- shows only fields and methods on WindowManager
+```
+
+Without a dotted qualifier, completion shows variables visible in the current function or block, including parameters, locals, loop variables, `self`, and current-object members. After an imported module or exported object qualifier, unrelated current-file variables are excluded. Qualifier matching is case-insensitive for suggestions and accepting a completion restores the declared symbol casing.
+
 ## Settings
 
 | Setting | Purpose |
@@ -182,8 +196,8 @@ Then imports can use `@Engine/...` or `@Shared/...` from any source depth. Share
 | `lazyscriptex.recursiveIndex` | Recursively index workspace, LazyScript, and configured roots |
 | `lazyscriptex.exclude` | Glob excluded from indexing |
 | `lazyscriptex.format.enable` | Enables document, selection, on-type, and save formatting |
-| `lazyscriptex.completion.autoTrigger` | Automatically opens local-scope IntelliSense while typing |
-| `lazyscriptex.completion.autoTriggerDelay` | Delay before the local-variable suggestion list opens |
+| `lazyscriptex.completion.autoTrigger` | Automatically opens scope-aware IntelliSense while typing |
+| `lazyscriptex.completion.autoTriggerDelay` | Delay before the scope-aware suggestion list opens |
 
 ## Testing the extension
 

@@ -958,10 +958,50 @@ function symbolLocation(record, sym) {
   return new vscode.Location(record.uri, new vscode.Range(start, start.translate(0, sym.name.length)));
 }
 
+function importEntryForAlias(record, alias, caseInsensitive = false) {
+  const exact = record.imports.get(alias);
+  if (exact) return { alias, import: exact, exact: true };
+  if (!caseInsensitive) return null;
+  const lowered = String(alias || '').toLowerCase();
+  for (const [declaredAlias, imp] of record.imports) {
+    if (declaredAlias.toLowerCase() === lowered) return { alias: declaredAlias, import: imp, exact: false };
+  }
+  return null;
+}
+
+function symbolByName(symbols, name, caseInsensitive = false) {
+  const exact = (symbols || []).find(symbol => symbol.name === name);
+  if (exact || !caseInsensitive) return exact || null;
+  const lowered = String(name || '').toLowerCase();
+  return (symbols || []).find(symbol => symbol.name.toLowerCase() === lowered) || null;
+}
+
+function importedCompletionTarget(record, chain) {
+  if (!Array.isArray(chain) || chain.length < 1) return null;
+  const aliasEntry = importEntryForAlias(record, chain[0], true);
+  if (!aliasEntry) return null;
+  const target = indexedFile(resolveImport(aliasEntry.import.spec, record.uri.fsPath));
+  if (!target) return { matchedImport: true, alias: aliasEntry.alias, record: null, parent: null, symbols: [] };
+
+  let symbols = target.exports;
+  let parent = null;
+  const canonicalChain = [aliasEntry.alias];
+  for (let index = 1; index < chain.length; index++) {
+    const symbol = symbolByName(symbols, chain[index], true);
+    if (!symbol) {
+      return { matchedImport: true, alias: aliasEntry.alias, record: target, parent, symbols: [], canonicalChain, unresolved: chain[index] };
+    }
+    parent = symbol;
+    canonicalChain.push(symbol.name);
+    symbols = symbol.members || [];
+  }
+  return { matchedImport: true, alias: aliasEntry.alias, record: target, parent, symbols, canonicalChain };
+}
+
 function importedSymbol(record, alias, member, childName = null) {
-  const imp = record.imports.get(alias);
-  if (!imp) return null;
-  const target = indexedFile(resolveImport(imp.spec, record.uri.fsPath));
+  const aliasEntry = importEntryForAlias(record, alias, false);
+  if (!aliasEntry) return null;
+  const target = indexedFile(resolveImport(aliasEntry.import.spec, record.uri.fsPath));
   if (!target) return null;
   const sym = target.exports.find(s => s.name === member);
   if (childName) {
@@ -1683,14 +1723,24 @@ class CompletionProvider {
     const chainMatch = prefix.match(/([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\.([A-Za-z_]\w*)?$/);
     if (chainMatch) {
       const base = chainMatch[1].split('.');
-      if (base.length === 2 && record.imports.has(base[0])) {
-        const hit = importedSymbol(record, base[0], base[1]);
-        if (hit?.symbol?.members) return hit.symbol.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(hit.record, sym, `${base.join('.')}.`, hit.symbol));
-      }
-      if (base.length === 1 && record.imports.has(base[0])) {
-        const imp = record.imports.get(base[0]);
-        const target = indexedFile(resolveImport(imp.spec, record.uri.fsPath));
-        return target ? target.exports.map(sym => completionFor(target, sym, `${base[0]}.`)) : [];
+      const importedTarget = importedCompletionTarget(record, base);
+      if (importedTarget?.matchedImport) {
+        if (!importedTarget.record) return [];
+        const canonicalQualifier = (importedTarget.canonicalChain || [importedTarget.alias]).join('.');
+        const completionPrefix = `${canonicalQualifier}.`;
+        const items = importedTarget.symbols
+          .filter(symbol => !symbol.name.startsWith('_'))
+          .map(symbol => completionFor(importedTarget.record, symbol, completionPrefix, importedTarget.parent));
+        const typedQualifier = chainMatch[1];
+        if (typedQualifier !== canonicalQualifier) {
+          const qualifierStart = chainMatch.index || 0;
+          const qualifierRange = new vscode.Range(
+            new vscode.Position(position.line, qualifierStart),
+            new vscode.Position(position.line, qualifierStart + typedQualifier.length)
+          );
+          for (const item of items) item.additionalTextEdits = [vscode.TextEdit.replace(qualifierRange, canonicalQualifier)];
+        }
+        return items;
       }
       if (base.length === 1) {
         if (base[0] === 'self') {
@@ -2297,5 +2347,5 @@ function deactivate() {
 }
 module.exports = {
   activate, deactivate, parseText, resolveImport, chainContext, inferTypeFromInitializer,
-  _test: { index, loadRecordSync, importedSymbol, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, HoverProvider, DocumentFormattingProvider, DocumentRangeFormattingProvider, OnTypeFormattingProvider, formatLsxText, collectVisibleScopeSymbols, completionForScopeSymbol, completionForSelfMember, currentIdentifierRange, shouldAutoTriggerSuggestions, desiredIndentAtLine, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs }
+  _test: { index, loadRecordSync, importedSymbol, importedCompletionTarget, importEntryForAlias, symbolByName, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, HoverProvider, DocumentFormattingProvider, DocumentRangeFormattingProvider, OnTypeFormattingProvider, formatLsxText, collectVisibleScopeSymbols, completionForScopeSymbol, completionForSelfMember, currentIdentifierRange, shouldAutoTriggerSuggestions, desiredIndentAtLine, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs }
 };

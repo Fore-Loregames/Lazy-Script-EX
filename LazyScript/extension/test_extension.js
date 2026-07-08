@@ -337,4 +337,42 @@ const staticMethodHover = extension._test.markdownForSymbol(staticServiceRecord,
 assert(staticMethodHover.value.includes('Static object'), 'static method hover does not explain direct singleton calls');
 assert(staticMethodHover.value.includes('Do not create it with `.new()`'), 'static method hover does not warn against .new()');
 
-console.log('LazyScriptEX extension navigation, forced local-scope completion, formatting, static objects, LSHTML/LSCSS, and inferred member tests passed.');
+// A dotted imported-module expression must complete from the imported file,
+// not fall back to unrelated symbols from the current source file. Completion
+// matching is case-insensitive so a partially mistyped alias can still expose
+// the correct declared module and let the user accept the proper symbol case.
+const importedCompletionSource = `use "StaticService.lsx" as ServiceMod
+export static const Consumer = {
+    localOnly = 99
+    Run = fn()
+        ServiceMod.
+    end
+}
+`;
+const importedCompletionDoc = {
+  ...mockDocument(importedCompletionSource),
+  uri: { fsPath: path.join(sourceDir, 'ImportedCompletion.lsx') }
+};
+fs.writeFileSync(importedCompletionDoc.uri.fsPath, importedCompletionSource);
+const importedModuleItems = new extension._test.CompletionProvider().provideCompletionItems(importedCompletionDoc, new Position(4, '        ServiceMod.'.length));
+assert(importedModuleItems.some(item => (item.label.label || item.label) === 'StaticService'), 'module alias completion is missing the imported exported object');
+assert(!importedModuleItems.some(item => (item.label.label || item.label) === 'localOnly'), 'module alias completion leaked current-file fields');
+assert(!importedModuleItems.some(item => (item.label.label || item.label) === 'self'), 'module alias completion leaked current-scope variables');
+
+const importedMemberSource = importedCompletionSource.replace('ServiceMod.', 'servicemod.StaticService.');
+const importedMemberDoc = {
+  ...mockDocument(importedMemberSource),
+  uri: { fsPath: path.join(sourceDir, 'ImportedMemberCompletion.lsx') }
+};
+fs.writeFileSync(importedMemberDoc.uri.fsPath, importedMemberSource);
+const memberColumn = '        servicemod.StaticService.'.length;
+const importedMemberItems = new extension._test.CompletionProvider().provideCompletionItems(importedMemberDoc, new Position(4, memberColumn));
+for (const expected of ['value', 'SetValue']) {
+  assert(importedMemberItems.some(item => (item.label.label || item.label) === expected), `imported object completion is missing ${expected}`);
+}
+const importedSetValue = importedMemberItems.find(item => (item.label.label || item.label) === 'SetValue');
+assert(importedSetValue.additionalTextEdits?.[0]?.newText === 'ServiceMod.StaticService', 'imported completion did not correct the qualifier to its declared case');
+assert(!importedMemberItems.some(item => (item.label.label || item.label) === 'localOnly'), 'imported object completion leaked current-file fields');
+assert(!importedMemberItems.some(item => (item.label.label || item.label) === 'Run'), 'imported object completion leaked the current object method');
+
+console.log('LazyScriptEX extension navigation, local and imported-module completion, formatting, static objects, LSHTML/LSCSS, and inferred member tests passed.');
