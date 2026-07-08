@@ -1,81 +1,40 @@
-# LazyScriptEX example projects
+# Example projects
 
-Each folder is a complete LSX project with its own `main.lsx`, `lazyscriptex.json`, and `build.bat`.
+Every folder is an independent LSX project with its own `main.lsx`, `lazyscriptex.json`, and `build.bat`. Copy any example to start a game, or run `new-project.bat Name` from the toolkit root.
 
-From the repository root, prepare the runtime first:
-
-```bat
-setup-runtime.bat
-```
-
-Build one example:
-
-```bat
-Projects\00_glfw_window\build.bat
-```
-
-Create a clean project from the template:
-
-```bat
-new-project.bat MyFirstProject
-```
-
-## Examples
-
-| Project | What it teaches |
+| Project | Demonstrates |
 |---|---|
-| `00_glfw_window` | Complete GLFW window, OpenGL loading, resize-safe viewport, frame loop, and cleanup |
-| `01_input_polling` | Keyboard, mouse, cursor position, and window resize handling |
-| `02_opengl_triangle` | Shader compilation, VAO/VBO setup, packed vertex data, and triangle rendering |
-| `03_indexed_cube_depth` | Indexed geometry, inferred vertex/index buffers, matrices, and depth testing |
-| `04_texture_checkerboard` | Generated RGBA pixels and texture upload |
-| `05_framebuffer_blit` | Offscreen framebuffer rendering and resize-aware blitting |
-| `06_instanced_drawing` | Instanced OpenGL drawing |
-| `07_compute_shader_ssbo` | OpenGL compute shaders and SSBO readback |
-| `08_openal_generated_tone` | Generated PCM data and OpenAL playback |
-| `09_openal_wav_playback` | WAV loading and playback |
-| `10_openal_efx_reverb` | OpenAL EFX reverb and auxiliary effect slots |
-| `11_gamepad_polling` | Reusable gamepad state and button/axis polling |
-| `12_multiple_shared_windows` | Multiple GLFW windows sharing one OpenGL context |
-| `13_window_icon_rgba` | Creating and applying a GLFW window icon from RGBA data |
-| `14_full_game_loop` | Input, rendering, timing, and optional audio in one loop |
-| `15_monitor_video_modes` | Monitor enumeration, work areas, scale, and video modes |
-| `16_shader_diagnostics` | Shader/program status, error logs, and OpenGL information strings |
-| `17_typed_queries` | OpenGL state and resource queries through convenience wrappers |
-| `18_native_threads` | Real OS worker threads, synchronization, and an atomic counter |
-| `19_tcp_loopback` | Local TCP server/client connection and two-way messages |
-| `20_http_client` | WinHTTP request/response flow against a local server |
-| `21_file_io` | UTF-8 text and binary file operations |
-| `22_json` | Loading, traversing, editing, and writing JSON |
-| `23_text_logging` | Persistent flushed logs and runtime lifecycle records |
-| `24_image_loading` | stb_image decoding and OpenGL texture upload |
-| `25_sdf_text` | FreeType SDF glyphs, atlas packing, and batched text rendering |
-| `26_media_self_test` | Console-only image and font validation |
-| `27_glm_camera` | GLM vectors, matrices, quaternions, transforms, cameras, and uniform upload |
-| `28_lazyui_inline` | Retained UI, large scrollable lists, culling, SDF text, and canvas elements |
-| `29_lazyui_controls_gallery` | Inputs, textareas, selection, clipboard, toggles, sliders, scrollbars, and color controls |
-| `30_lazyui_editor_workspace` | Multi-panel tool layout with hierarchy, inspector, browser, and console regions |
-| `31_lazyui_node_graph` | Experimental node-graph layout and interaction test; not recommended as a production reference yet |
-| `32_lazyui_runtime_hud` | Anchored HUD layout, bars, minimap, dialogue, notifications, and inventory slots |
-| `ProjectTemplate` | Minimal project created by `new-project.bat` |
-
-## Suggested learning order
-
-Start with:
-
-1. `00_glfw_window`
-2. `01_input_polling`
-3. `02_opengl_triangle`
-4. `03_indexed_cube_depth`
-5. `14_full_game_loop`
-6. `21_file_io`
-7. `22_json`
-8. `27_glm_camera`
-9. `28_lazyui_inline`
-10. `29_lazyui_controls_gallery`
-
-Use the offline API for explanations of every binding used by these projects:
-
-```bat
-open-api.bat
-```
+| 00_glfw_window | GLFW window/context, OpenGL loading, reusable framebuffer size |
+| 01_input_polling | Keyboard, mouse, cursor position, resize-safe viewport |
+| 02_opengl_triangle | Packed positional LSX vertex data, shader program, VAO/VBO, triangle rendering |
+| 03_indexed_cube_depth | Compiler-inferred packed `f32` vertices and `u32` indices, indexed geometry, and depth testing |
+| 04_texture_checkerboard | Resizable compiler-inferred pixel data and a procedural RGBA texture; no WIC |
+| 05_framebuffer_blit | Offscreen framebuffer and resize-aware blit |
+| 06_instanced_drawing | Instanced rendering |
+| 07_compute_shader_ssbo | OpenGL 4.6 compute and typed object SSBO readback |
+| 08_openal_generated_tone | OpenAL buffer/source helpers and generated compiler-inferred PCM |
+| 09_openal_wav_playback | WAV PCM loading and playback |
+| 10_openal_efx_reverb | OpenAL EFX effect and auxiliary slot |
+| 11_gamepad_polling | Reusable typed gamepad state |
+| 12_multiple_shared_windows | Two GLFW windows with a shared OpenGL context |
+| 13_window_icon_rgba | Full GLFW icon access without manual struct allocation |
+| 14_full_game_loop | Input, rendering, and optional audio together |
+| 15_monitor_video_modes | Typed monitor lists, work area, scale, and video modes |
+| 16_shader_diagnostics | Program status, logs, and OpenGL identity strings |
+| 17_typed_queries | Scalar OpenGL state queries and query resources |
+| 18_native_threads | Four real OS worker threads sharing a native atomic counter |
+| 19_tcp_loopback | Graphical localhost TCP server/client with an open connection and two-way text exchange |
+| 20_http_client | Graphical local HTTP server plus WinHTTP client request/response validation |
+| 21_file_io | Native UTF-8 and binary file operations without exposed handles or memory code |
+| 22_json | Real deep JSON asset loading, nested inferred-variable traversal, console output, persistent stage logging, and serialization |
+| 23_text_logging | Thread-safe flushed text logs plus automatic process lifecycle and native crash records |
+| 24_image_loading | stb_image decode copied into the same inferred packed texture path used by example 04, then rendered in a visible loop |
+| 25_sdf_text | Direct FreeType face loading, FreeType SDF glyphs, one 8-bit single-channel atlas, and batched text rendering |
+| 26_media_self_test | Console-only stb_image and FreeType/SDF validation without GLFW or OpenGL |
+| 27_glm_camera | Normal untyped LSX geometry literals plus fully wrapped GLM vectors, matrices, quaternions, TRS, camera view/projection, and direct OpenGL matrix uniforms |
+| 28_lazyui_inline | 500-row retained hierarchy stress test with foldout, FPS counter, cached instance batches, viewport culling, mouse-wheel/drag scrollbar, declarative canvas, and SDF text |
+| 29_lazyui_controls_gallery | Real editable inputs and textarea, password masking, selection/clipboard, checkboxes, radios, toggles, switches, ranges/sliders, scrollbars, and a live color picker |
+| 30_lazyui_editor_workspace | Full editor composition with hierarchy, scene view, inspector, project browser, console, toolbar, menu, and properties |
+| 31_lazyui_node_graph | Corrected absolute-layout node graph with cards, ports, connections, scrollable palette, minimap, and working inspector controls |
+| 32_lazyui_runtime_hud | Corrected anchored runtime HUD with health/mana, quests, minimap, dialogue, notification, crosshair, hotbar, and inventory slots |
+| ProjectTemplate | Clean starting project |

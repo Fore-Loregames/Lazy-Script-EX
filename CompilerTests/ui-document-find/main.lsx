@@ -1,0 +1,53 @@
+use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
+
+const State = {
+    count = 0
+}
+
+fn clicked(element,event,state)
+    state.count = state.count + 1
+    if event.type == null then state.count = state.count + 100 end
+    if element.id == null then state.count = state.count + 100 end
+end
+
+lshtml TestView() = {
+    <panel id="root" class="screen">
+        <button id="save" class="action primary">Save</button>
+        <button id="cancel" class="action">Cancel</button>
+        <status-bar id="status">Ready</status-bar>
+    </panel>
+}
+
+fn main()
+    local root = TestView()
+    local document = UI.document(root)
+    local state = State.new()
+    local save = document.find("#save")
+    local firstAction = document.find(".action")
+    local firstButton = document.find("button")
+    local statusByKebabTag = document.find("status-bar")
+    local statusByUnderscoreTag = document.find("status_bar")
+    if save == null or firstAction == null or firstButton == null or statusByKebabTag == null or statusByUnderscoreTag == null then return 1 end
+
+    save.add_event_listener_with_context("click",clicked,state)
+    save.add_event_listener_with_context("click",clicked,state)
+
+    local actions = document.find_all(".action")
+    if actions.length() ~= 2 then return 2 end
+    actions.destroy()
+
+    document.resize(640.0,480.0)
+    save.x = 10.0
+    save.y = 10.0
+    save.width = 100.0
+    save.height = 30.0
+    document.pointer_move(20.0,20.0)
+    document.pointer_down()
+    document.pointer_up()
+
+    local ok = state.count == 2
+    document.destroy()
+    state.destroy()
+    if not ok then return 3 end
+    return 0
+end

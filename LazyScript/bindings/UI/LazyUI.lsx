@@ -927,6 +927,22 @@ export const UIEvent = {
 }
 
 
+-- Internal record used by Element.add_event_listener(). Each listener keeps
+-- its own callback and optional LSX context object, allowing multiple runtime
+-- listeners on the same LSHTML element without exposing native pointers.
+const EventListener = {
+    type_hash:u32 = 0,
+    handler:fnptr = null,
+    context:u64 = 0,
+
+    destroy = fn()
+        self.handler = null
+        self.context = 0
+        self.type_hash = 0
+    end
+}
+
+
 -- Persistent numeric text buffer for counters such as FPS displays. The
 -- backing UTF-8 storage is allocated once and updated in place, so changing a
 -- counter does not allocate a new string every frame. Pointer details remain
@@ -1212,6 +1228,8 @@ export const Element = {
 
     tag_hash:u32 = 0,
 
+    _compact_tag_hash:u32 = 0,
+
     source_tag:string = null,
 
     id:string = null,
@@ -1413,6 +1431,8 @@ export const Element = {
     _on_scroll:fnptr = null,
 
     _event_context:u64 = 0,
+
+    _event_listeners = {},
 
 
     -- Dirty state is propagated to the retained root so layout and renderer
@@ -1685,6 +1705,68 @@ export const Element = {
 
 
 
+    -- Adds a runtime event listener to an element returned by Document.find().
+    -- Event names use the normal DOM spelling: click, change, input, focus,
+    -- blur, keydown, keyup, pointerdown, pointerup, pointermove, and scroll.
+    -- More than one listener may be attached to the same event.
+    add_event_listener = fn(type:string,handler) -> Element
+        if type == null or handler == null then return self end
+        local listener = EventListener.new()
+        listener.type_hash = hash(type)
+        listener.handler = handler
+        listener.context = self._event_context
+        self._event_listeners.push(listener)
+        return self
+    end,
+
+    -- Adds a listener with its own ordinary LSX context object. The context is
+    -- passed as the callback's third argument and remains compiler-managed.
+    add_event_listener_with_context = fn(type:string,handler,context_handle:u64) -> Element
+        if type == null or handler == null then return self end
+        local listener = EventListener.new()
+        listener.type_hash = hash(type)
+        listener.handler = handler
+        listener.context = context_handle
+        self._event_listeners.push(listener)
+        return self
+    end,
+
+    -- Removes the first matching runtime listener. Inline LSHTML on... handlers
+    -- are separate and remain attached until replaced through the on_* helpers.
+    remove_event_listener = fn(type:string,handler) -> bool
+        if type == null or handler == null then return false end
+        local typeHash = hash(type)
+        local index = 0
+        while index < self._event_listeners.length() do
+            local listener = self._event_listeners.at(index)
+            if listener.type_hash == typeHash and listener.handler == handler then
+                listener.destroy()
+                self._event_listeners.remove(index)
+                return true
+            end
+            index = index + 1
+        end
+        return false
+    end,
+
+    -- Removes every runtime listener for one event name and returns the count.
+    clear_event_listeners = fn(type:string) -> i64
+        if type == null then return 0 end
+        local typeHash = hash(type)
+        local removed:i64 = 0
+        local index = self._event_listeners.length()
+        while index > 0 do
+            index = index - 1
+            local listener = self._event_listeners.at(index)
+            if listener.type_hash == typeHash then
+                listener.destroy()
+                self._event_listeners.remove(index)
+                removed = removed + 1
+            end
+        end
+        return removed
+    end,
+
     find_id = fn(value:u32) -> Element
         if self.id_hash == value then return self end
         local index = 0
@@ -1721,6 +1803,19 @@ export const Element = {
         return null
     end,
 
+
+    _find_compact_tag = fn(value:u32) -> Element
+        if self._compact_tag_hash == value then return self end
+        local index = 0
+        while index < self.children.length() do
+            local child = self.children.at(index)
+            local found = child._find_compact_tag(value)
+            if found ~= null then return found end
+            index = index + 1
+        end
+        return null
+    end,
+
     current_style = fn() -> Style
         if self.inherit_style and self.parent ~= null then return self.parent.current_style() end
         if self.disabled and self.disabled_style ~= null then return self.disabled_style end
@@ -1733,18 +1828,33 @@ export const Element = {
     end,
 
     emit_click = fn() -> i64
-        if self._on_click == null then return 0 end
-        return ffi.call2(self._on_click,memory.ptr(self,0),self._event_context)
+        local event = UIEvent.new()
+        event.type = "click"
+        event.target = self
+        event.current_target = self
+        local result = dispatch_ui_event(self._on_click,self,event,self._event_context)
+        event.destroy()
+        return result
     end,
 
     emit_change = fn() -> i64
-        if self._on_change == null then return 0 end
-        return ffi.call2(self._on_change,memory.ptr(self,0),self._event_context)
+        local event = UIEvent.new()
+        event.type = "change"
+        event.target = self
+        event.current_target = self
+        local result = dispatch_ui_event(self._on_change,self,event,self._event_context)
+        event.destroy()
+        return result
     end,
 
     emit_input = fn() -> i64
-        if self._on_input == null then return 0 end
-        return ffi.call2(self._on_input,memory.ptr(self,0),self._event_context)
+        local event = UIEvent.new()
+        event.type = "input"
+        event.target = self
+        event.current_target = self
+        local result = dispatch_ui_event(self._on_input,self,event,self._event_context)
+        event.destroy()
+        return result
     end,
 
     destroy = fn()
@@ -1754,6 +1864,13 @@ export const Element = {
             child.destroy()
             index = index + 1
         end
+        index = 0
+        while index < self._event_listeners.length() do
+            local listener = self._event_listeners.at(index)
+            listener.destroy()
+            index = index + 1
+        end
+        self._event_listeners.destroy()
         index = 0
         while index < self.attributes.length() do
             local attribute = self.attributes[index]
@@ -2032,6 +2149,24 @@ export fn hash(value:string) -> u32
     return result
 end
 
+
+-- Tag selectors are ASCII case-insensitive and accept the same kebab-case or
+-- underscore spelling used in LSHTML, even when an older element factory stores
+-- its internal source tag without separators (status-bar -> statusbar).
+fn compact_tag_hash(value:string) -> u32
+    if value == null then return 0 end
+    local result:u64 = 5381
+    local index = 0
+    local length = string.length(value)
+    while index < length do
+        local byte = string.byte_at(value,index)
+        if byte >= 65 and byte <= 90 then byte = byte + 32 end
+        if byte ~= 45 and byte ~= 95 then result = (result * 33 + byte) % 2147483647 end
+        index = index + 1
+    end
+    return result
+end
+
 export fn rgba(red:i32,green:i32,blue:i32,alpha:i32) -> u32
     return red + green * 256 + blue * 65536 + alpha * 16777216
 end
@@ -2041,6 +2176,7 @@ fn create_element(kind:i32,tag:string) -> Element
     value.kind = kind
     value.source_tag = tag
     value.tag_hash = hash(tag)
+    value._compact_tag_hash = compact_tag_hash(tag)
     value.style = Style.new()
     value.creation_kind = CREATION_FUNCTION
     value.runner_ready = true
@@ -4294,6 +4430,22 @@ fn invoke_ui_handler(handler,element:Element,event:UIEvent,context) -> i64
     return ffi.call3(handler,memory.ptr(element,0),event_pointer,context)
 end
 
+fn dispatch_ui_event(handler,element:Element,event:UIEvent,context) -> i64
+    local result:i64 = 0
+    if handler ~= null then result = invoke_ui_handler(handler,element,event,context) end
+    if element == null or event == null then return result end
+    local eventHash = hash(event.type)
+    local index = 0
+    while index < element._event_listeners.length() do
+        local listener = element._event_listeners.at(index)
+        if listener.type_hash == eventHash and listener.handler ~= null then
+            result = invoke_ui_handler(listener.handler,element,event,listener.context)
+        end
+        index = index + 1
+    end
+    return result
+end
+
 fn clear_selected_siblings(element:Element,checkedMode:bool)
     if element == null or element.parent == null then return end
     local siblingIndex = 0
@@ -4334,7 +4486,7 @@ fn apply_default_activation(element:Element,event:UIEvent)
     if changed then
         element.mark_visual_dirty()
         event.type = "change"
-        invoke_ui_handler(element._on_change,element,event,element._event_context)
+        dispatch_ui_event(element._on_change,element,event,element._event_context)
     end
 end
 
@@ -4912,6 +5064,21 @@ fn update_range_from_pointer(element:Element,x:f32) -> bool
     return true
 end
 
+fn collect_selector_matches(element:Element,mode:i32,value:u32,output)
+    if element == null then return end
+    local matches = false
+    if mode == 1 then matches = element.id_hash == value
+    elseif mode == 2 then matches = element.has_class_hash(value)
+    elseif mode == 4 then matches = element._compact_tag_hash == value
+    else matches = element.tag_hash == value end
+    if matches then output.push(element) end
+    local index = 0
+    while index < element.children.length() do
+        collect_selector_matches(element.children.at(index),mode,value,output)
+        index = index + 1
+    end
+end
+
 export const Document = {
     root:Element = null,
     hovered:Element = null,
@@ -4935,6 +5102,57 @@ export const Document = {
     set_root = fn(value:Element)
         self.root = value
         self.pointer_hit_dirty = true
+    end,
+
+    -- Finds the first retained LSHTML element using a simple CSS selector.
+    -- Use #id, .class, or a tag name such as button. Empty or invalid selectors
+    -- return null and do not allocate.
+    find = fn(selector:string) -> Element
+        if self.root == null or selector == null then return null end
+        local length = string.length(selector)
+        if length <= 0 then return null end
+        local first = string.byte_at(selector,0)
+        if first == 35 then
+            if length <= 1 then return null end
+            return self.root.find_id(hash_range(selector,1,length))
+        end
+        if first == 46 then
+            if length <= 1 then return null end
+            return self.root.find_class(hash_range(selector,1,length))
+        end
+        local found = self.root.find_tag(hash(selector))
+        if found ~= null then return found end
+        return self.root._find_compact_tag(compact_tag_hash(selector))
+    end,
+
+    -- Finds every retained LSHTML element matching #id, .class, or a tag. The
+    -- returned table owns only its collection storage; the elements remain owned
+    -- by the document tree. Destroy the result table when it is no longer needed.
+    find_all = fn(selector:string)
+        local result = {}
+        if self.root == null or selector == null then return result end
+        local length = string.length(selector)
+        if length <= 0 then return result end
+        local first = string.byte_at(selector,0)
+        local mode = 3
+        local selectorHash:u32 = 0
+        if first == 35 then
+            if length <= 1 then return result end
+            mode = 1
+            selectorHash = hash_range(selector,1,length)
+        elseif first == 46 then
+            if length <= 1 then return result end
+            mode = 2
+            selectorHash = hash_range(selector,1,length)
+        else
+            selectorHash = hash(selector)
+            if self.root.find_tag(selectorHash) == null then
+                mode = 4
+                selectorHash = compact_tag_hash(selector)
+            end
+        end
+        collect_selector_matches(self.root,mode,selectorHash,result)
+        return result
     end,
 
     _set_hover_target = fn(target:Element)
@@ -4989,13 +5207,13 @@ export const Document = {
         element.mark_visual_dirty()
         local event = self._event("input",element)
         event.text = element.value
-        invoke_ui_handler(element._on_input,element,event,element._event_context)
+        dispatch_ui_event(element._on_input,element,event,element._event_context)
     end,
 
     _emit_change = fn(element:Element)
         if element == null then return end
         local event = self._event("change",element)
-        invoke_ui_handler(element._on_change,element,event,element._event_context)
+        dispatch_ui_event(element._on_change,element,event,element._event_context)
     end,
 
     _try_begin_scrollbar_drag = fn() -> bool
@@ -5131,7 +5349,7 @@ export const Document = {
         if self.active ~= null and self.active._on_pointer_move ~= null then moveTarget = self.active end
         if moveTarget ~= null and moveTarget._on_pointer_move ~= null then
             local event = self._event("pointermove",moveTarget)
-            invoke_ui_handler(moveTarget._on_pointer_move,moveTarget,event,moveTarget._event_context)
+            dispatch_ui_event(moveTarget._on_pointer_move,moveTarget,event,moveTarget._event_context)
         end
     end,
 
@@ -5164,7 +5382,7 @@ export const Document = {
             self.active.mark_visual_dirty()
             local event = self._event("pointerdown",self.active)
             event.button = self.pointer_button
-            invoke_ui_handler(self.active._on_pointer_down,self.active,event,self.active._event_context)
+            dispatch_ui_event(self.active._on_pointer_down,self.active,event,self.active._event_context)
             if is_text_control(self.active) then
                 self.active.ensure_input_buffer()
                 set_input_cursor_from_pointer(self.active,self.pointer_x,self.pointer_y,false)
@@ -5193,7 +5411,7 @@ export const Document = {
         if self.active ~= null then
             local event = self._event("pointerup",self.active)
             event.button = self.pointer_button
-            invoke_ui_handler(self.active._on_pointer_up,self.active,event,self.active._event_context)
+            dispatch_ui_event(self.active._on_pointer_up,self.active,event,self.active._event_context)
             if self.select_press_index >= 0 and is_select_control(self.active) then
                 local releaseIndex = select_popup_index_at(self.active,self.pointer_x,self.pointer_y,self.width,self.height)
                 if releaseIndex == self.select_press_index then
@@ -5217,11 +5435,11 @@ export const Document = {
                 if self.active.open then self.open_select = self.active else self.open_select = null end
                 self.active.mark_visual_dirty()
                 event.type = "click"
-                invoke_ui_handler(self.active._on_click,self.active,event,self.active._event_context)
+                dispatch_ui_event(self.active._on_click,self.active,event,self.active._event_context)
             elseif self.active == self.hovered and not self.active.disabled and not event.default_prevented then
                 apply_default_activation(self.active,event)
                 event.type = "click"
-                invoke_ui_handler(self.active._on_click,self.active,event,self.active._event_context)
+                dispatch_ui_event(self.active._on_click,self.active,event,self.active._event_context)
             end
             self.active.active = false
             self.active.mark_visual_dirty()
@@ -5274,7 +5492,7 @@ export const Document = {
             local customEvent = self._event("scroll",customTarget)
             customEvent.delta_x = deltaX
             customEvent.delta_y = deltaY
-            invoke_ui_handler(customTarget._on_scroll,customTarget,customEvent,customTarget._event_context)
+            dispatch_ui_event(customTarget._on_scroll,customTarget,customEvent,customTarget._event_context)
             if customEvent.default_prevented then return end
         end
         local target = scrollable_at(self.root,self.pointer_x,self.pointer_y)
@@ -5283,7 +5501,7 @@ export const Document = {
         local event = self._event("scroll",target)
         event.delta_x = deltaX
         event.delta_y = deltaY
-        if target ~= customTarget then invoke_ui_handler(target._on_scroll,target,event,target._event_context) end
+        if target ~= customTarget then dispatch_ui_event(target._on_scroll,target,event,target._event_context) end
         if not event.default_prevented then
             local previousX = effective_scroll_x(target)
             local previousY = effective_scroll_y(target)
@@ -5310,7 +5528,7 @@ export const Document = {
             previous.focused = false
             previous.mark_visual_dirty()
             local blurEvent = self._event("blur",previous)
-            invoke_ui_handler(previous._on_blur,previous,blurEvent,previous._event_context)
+            dispatch_ui_event(previous._on_blur,previous,blurEvent,previous._event_context)
             if is_text_control(previous) then self._emit_change(previous) end
         end
         self.focused = element
@@ -5319,7 +5537,7 @@ export const Document = {
             if is_text_control(self.focused) then self.focused.ensure_input_buffer() ensure_input_cursor_visible(self.focused) end
             self.focused.mark_visual_dirty()
             local focusEvent = self._event("focus",self.focused)
-            invoke_ui_handler(self.focused._on_focus,self.focused,focusEvent,self.focused._event_context)
+            dispatch_ui_event(self.focused._on_focus,self.focused,focusEvent,self.focused._event_context)
         end
     end,
 
@@ -5365,7 +5583,7 @@ export const Document = {
         local event = self._event("keydown",self.focused)
         event.key = key
         event.modifiers = modifiers
-        invoke_ui_handler(self.focused._on_key_down,self.focused,event,self.focused._event_context)
+        dispatch_ui_event(self.focused._on_key_down,self.focused,event,self.focused._event_context)
         if event.default_prevented then return end
 
         local control = (modifiers / GLFW.GLFW_MOD_CONTROL % 2) == 1 or (modifiers / GLFW.GLFW_MOD_SUPER % 2) == 1
@@ -5527,7 +5745,7 @@ export const Document = {
         local event = self._event("keyup",self.focused)
         event.key = key
         event.modifiers = modifiers
-        invoke_ui_handler(self.focused._on_key_up,self.focused,event,self.focused._event_context)
+        dispatch_ui_event(self.focused._on_key_up,self.focused,event,self.focused._event_context)
     end,
 
     input_codepoint = fn(codepoint:u32)

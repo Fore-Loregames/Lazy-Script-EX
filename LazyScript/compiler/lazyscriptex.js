@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const { buildNativeBindings } = require('./native_bindings');
 const { compileInlineUiSource } = require('./inline_ui');
 
-const VERSION = '0.18.4';
+const VERSION = '0.18.6';
 
 
 function directoryExists(value) {
@@ -654,9 +654,17 @@ class Parser {
     this.expect('symbol', ')');
     let returnType = null;
     if (this.match('symbol', '->')) returnType = this.parseTypeName();
-    const body = this.parseBlock(new Set(['end']));
-    this.expectKeyword('end');
-    return { kind: 'function_expression', params, returnType, explicitReturnType: Boolean(returnType), body, token: startToken };
+    let body;
+    let bodyStyle = 'end';
+    if (this.match('symbol', '{')) {
+      body = this.parseBlock(new Set(), new Set(['}']));
+      this.expect('symbol', '}');
+      bodyStyle = 'brace';
+    } else {
+      body = this.parseBlock(new Set(['end']));
+      this.expectKeyword('end');
+    }
+    return { kind: 'function_expression', params, returnType, explicitReturnType: Boolean(returnType), body, bodyStyle, token: startToken };
   }
 
   parseTableLiteral(startToken) {
@@ -806,9 +814,11 @@ class Parser {
     return { kind: 'module', filePath: this.filePath, declarations, legacyStatements };
   }
 
-  parseBlock(stopKeywords) {
+  parseBlock(stopKeywords, stopSymbols = new Set()) {
     const statements = [];
-    while (!this.at('eof') && !(this.at('keyword') && stopKeywords.has(this.current().value))) {
+    while (!this.at('eof')
+      && !(this.at('keyword') && stopKeywords.has(this.current().value))
+      && !(this.at('symbol') && stopSymbols.has(this.current().value))) {
       const statement = this.parseStatement();
       if (Array.isArray(statement)) statements.push(...statement);
       else statements.push(statement);
@@ -828,7 +838,7 @@ class Parser {
       return { kind: 'local', name: name.value, declaredType: type, expression, immutable, token };
     }
     if (this.keyword('return')) {
-      if (this.at('keyword', 'end') || this.at('keyword', 'else') || this.at('keyword', 'elseif') || this.at('eof')) {
+      if (this.at('keyword', 'end') || this.at('keyword', 'else') || this.at('keyword', 'elseif') || this.at('symbol', '}') || this.at('eof')) {
         return { kind: 'return', expression: null, token };
       }
       return { kind: 'return', expression: this.parseExpression(), token };
@@ -1070,6 +1080,7 @@ class Program {
     this.imports = new Map();
     this.usesBuiltins = new Set();
     this.anonymousTableCounter = 0;
+    this.constructorsPrepared = false;
   }
 
   symbolExists(module, name) {
@@ -1078,16 +1089,28 @@ class Program {
 
   registerMethod(module, packedType, sourceName, functionDecl, exported = false, forceInstance = null) {
     if (packedType.methods.has(sourceName)) throw new CompileError(`table member '${sourceName}' already exists on ${packedType.name}`, functionDecl.token);
-    const usesSelf = forceInstance === null ? astUsesSelf(functionDecl.body) : Boolean(forceInstance);
+    const isConstructor = sourceName === 'constructor';
+    if (isConstructor && functionDecl.explicitReturnType && canonicalTypeName(functionDecl.returnType) !== 'void') {
+      throw new CompileError(`constructor on '${packedType.name}' cannot declare a return value`, functionDecl.token, null, {
+        code: 'LSX2710',
+        hint: 'Constructors initialize self and are called automatically by Object.new(...). Do not add a return type.',
+      });
+    }
+    const normalizedFunction = isConstructor
+      ? { ...functionDecl, returnType: 'void', explicitReturnType: true }
+      : functionDecl;
+    const usesSelf = isConstructor ? true : (forceInstance === null ? astUsesSelf(normalizedFunction.body) : Boolean(forceInstance));
     // A static object is one persistent compiler-owned instance. Its methods
     // receive self even when a specific method does not currently read a field,
-    // which keeps the call contract stable while the object evolves.
-    const isStatic = packedType.tableModel ? (!packedType.staticObject && !usesSelf) : false;
+    // which keeps the call contract stable while the object evolves. A
+    // constructor is always an instance method even when its body only assigns
+    // values passed through helper functions.
+    const isStatic = isConstructor ? false : (packedType.tableModel ? (!packedType.staticObject && !usesSelf) : false);
     const params = isStatic
-      ? [...functionDecl.params]
-      : [{ name: 'self', type: packedType.name, token: functionDecl.token }, ...functionDecl.params];
+      ? [...normalizedFunction.params]
+      : [{ name: 'self', type: packedType.name, token: normalizedFunction.token }, ...normalizedFunction.params];
     const method = {
-      ...functionDecl,
+      ...normalizedFunction,
       kind: 'function',
       name: `${packedType.name}$${sourceName}`,
       sourceName,
@@ -1164,7 +1187,10 @@ class Program {
     module.structs.set(decl.name, packedType);
     if (tableModel) module.tables.set(decl.name, packedType);
     for (const entry of methodEntries) {
-      this.registerMethod(module, packedType, entry.name, entry.expression, decl.exported, packedType.staticObject ? true : (tableModel ? null : true));
+      const forceInstance = entry.name === 'constructor'
+        ? true
+        : (packedType.staticObject ? true : (tableModel ? null : true));
+      this.registerMethod(module, packedType, entry.name, entry.expression, decl.exported, forceInstance);
       packedType.ownMethods.add(entry.name);
     }
     return packedType;
@@ -1388,6 +1414,38 @@ class Program {
     const own = (struct.fieldDeclarations || []).find((field) => field.name === name) || null;
     if (own) return own;
     return struct.baseType ? this.fieldDeclaration(struct.baseType, name) : null;
+  }
+
+  isInferredEmptyObjectPlaceholder(field) {
+    return Boolean(field
+      && !field.explicitType
+      && field.expression?.kind === 'table_literal'
+      && field.expression.entries?.length === 0);
+  }
+
+  ensureInheritedFieldSpecialization(ownerStruct, inheritedField, token = null) {
+    if (!ownerStruct || !inheritedField) return inheritedField;
+    const declaringStruct = inheritedField.declaringStruct || null;
+    if (!declaringStruct || declaringStruct === ownerStruct || !this.isDerivedFrom(ownerStruct, declaringStruct)) return inheritedField;
+    if (!this.isInferredEmptyObjectPlaceholder(inheritedField)) return inheritedField;
+
+    let override = (ownerStruct.fieldDeclarations || []).find((field) => field.name === inheritedField.name && field.inheritedOverrideOf) || null;
+    if (!override) {
+      override = {
+        name: inheritedField.name,
+        type: 'auto',
+        explicitType: false,
+        expression: null,
+        token: token || inheritedField.token,
+        positionalIndex: inheritedField.positionalIndex ?? null,
+        declaringStruct: ownerStruct,
+        inheritedOverrideOf: inheritedField,
+      };
+      ownerStruct.fieldDeclarations.push(override);
+      ownerStruct.layoutResolved = false;
+      this.inferenceChanged = true;
+    }
+    return override;
   }
 
   methodDeclaration(struct, name) {
@@ -1656,6 +1714,12 @@ class Program {
 
     if (pathParts.length === 2 && pathParts[0] === 'base' && scope?.function?.methodOf) {
       const owner = scope.function.methodOf;
+      if (pathParts[1] === 'constructor' && scope.function.sourceName !== 'constructor') {
+        throw new CompileError('base.constructor(...) may only be called from a derived constructor', call.token, null, {
+          code: 'LSX2716',
+          hint: 'Use base.constructor(...) as the first statement inside constructor = fn(...).',
+        });
+      }
       const base = owner.baseType;
       if (!base) throw new CompileError(`object '${owner.name}' has no base object`, call.token);
       const method = base.methods.get(pathParts[1]);
@@ -1682,9 +1746,17 @@ class Program {
       }
       const table = module.tables.get(pathParts[0]);
       if (table) {
+        if (pathParts[1] === 'constructor') {
+          throw new CompileError('constructors are called automatically', call.token, null, {
+            code: 'LSX2717',
+            hint: table.staticObject
+              ? `The static object '${table.name}' is constructed automatically before main().`
+              : `Replace ${pathParts.join('.')}(...) with ${table.name}.new(...).`,
+          });
+        }
         if (pathParts[1] === 'new') {
           if (table.staticObject) throw new CompileError(`static object '${table.name}' cannot be constructed with .new()`, call.token, null, { code: 'LSX1251', hint: `Call ${table.name}.Method(...) directly. A static object is initialized once and keeps one shared state.` });
-          return { kind: 'struct_new', target: null, returnType: table.name, module: table.module, struct: table };
+          return this.buildObjectConstructionCallable(table, table.name, call, module);
         }
         const method = table.methods.get(pathParts[1]);
         if (method?.isStatic || (method && table.staticObject)) return { kind: 'internal', target: method, returnType: method.returnType, module: method.module, staticObject: table };
@@ -1695,9 +1767,18 @@ class Program {
       const use = module.uses.get(pathParts[0]);
       const table = use?.target.tables.get(pathParts[1]);
       if (table?.exported) {
+        if (pathParts[2] === 'constructor') {
+          throw new CompileError('constructors are called automatically', call.token, null, {
+            code: 'LSX2717',
+            hint: table.staticObject
+              ? `The static object '${table.name}' is constructed automatically before main().`
+              : `Replace ${pathParts.join('.')}(...) with ${pathParts[0]}.${table.name}.new(...).`,
+          });
+        }
         if (pathParts[2] === 'new') {
           if (table.staticObject) throw new CompileError(`static object '${table.name}' cannot be constructed with .new()`, call.token, null, { code: 'LSX1251', hint: `Call ${pathParts[0]}.${table.name}.Method(...) directly. A static object is initialized once and keeps one shared state.` });
-          return { kind: 'struct_new', target: null, returnType: this.translateInferredType(table.name, table.module, module), module, struct: table };
+          const typeName = this.translateInferredType(table.name, table.module, module);
+          return this.buildObjectConstructionCallable(table, typeName, call, module);
         }
         const method = table.methods.get(pathParts[2]);
         if (method?.isStatic || (method && table.staticObject)) return { kind: 'internal', target: method, returnType: method.returnType, module: method.module, staticObject: table };
@@ -1766,6 +1847,12 @@ class Program {
       if (struct.positional && methodName === 'data') return { kind: 'packed_data', target: { params: [], returnType: 'ptr', module }, returnType: 'ptr', module, struct };
       if (methodName === 'clone') return { kind: 'struct_clone', target: { params: [], returnType: receiver.type, module }, returnType: receiver.type, module };
       if (methodName === 'destroy') return { kind: 'struct_destroy', target: { params: [], returnType: 'void', module }, returnType: 'void', module };
+      if (methodName === 'constructor') {
+        throw new CompileError('constructors are called through Object.new(...)', call.token, null, {
+          code: 'LSX2717',
+          hint: `Replace ${receiverPath.join('.')}.constructor(...) with ${struct.name}.new(...).`,
+        });
+      }
       const method = struct.methods.get(methodName);
       if (method && !method.isStatic) return { kind: 'internal', target: method, returnType: method.returnType, module: method.module, receiverExpr };
     }
@@ -1782,7 +1869,7 @@ class Program {
       return resolved ? { type: canonicalTypeName(resolved.type), module: resolved.module } : { type: 'auto', module };
     }
     if (expression.kind === 'table_literal') {
-      if (expression.expectedType) return { type: canonicalTypeName(expression.expectedType), module };
+      const expectedLiteralType = expression.expectedType ? canonicalTypeName(expression.expectedType) : null;
       if (expression.tableStruct) {
         const packed = expression.tableStruct;
         if (packed.runtimeLiteral) {
@@ -1794,10 +1881,13 @@ class Program {
             // Positional literals infer one contiguous native element type from
             // the whole value list. Named object fields continue to infer
             // independently.
-            const expected = packed.positional ? null : (isAutoType(field.type) ? null : field.type);
+            const inferredReferencePlaceholder = !field.explicitType
+              && canonicalTypeName(field.type) === 'ptr'
+              && entry.expression.kind === 'reference';
+            const expected = packed.positional ? null : ((isAutoType(field.type) || inferredReferencePlaceholder) ? null : field.type);
             const actual = this.inferExpression(entry.expression, module, scope, expected, packed.module);
             inferredEntries.push(actual.type);
-            if (isAutoType(field.type) && !isAutoType(actual.type)) {
+            if ((isAutoType(field.type) || inferredReferencePlaceholder) && !isAutoType(actual.type)) {
               this.setInferredSlot(field, 'type', actual.type, actual.module, packed.module, Boolean(field.explicitType), entry.token || expression.token, `object value '${entry.name}'`);
             }
           }
@@ -1812,8 +1902,11 @@ class Program {
             }
           }
         }
-        return { type: packed.name, module: packed.module };
+        return expectedLiteralType
+          ? { type: expectedLiteralType, module }
+          : { type: packed.name, module: packed.module };
       }
+      if (expectedLiteralType) return { type: expectedLiteralType, module };
       return { type: 'auto', module };
     }
     if (expression.kind === 'unary') {
@@ -1966,30 +2059,36 @@ class Program {
       // context object in one hidden binding call. Infer the callback signature
       // from those values so user handlers stay declaration-free.
       const uiBindingName = expression.path[expression.path.length - 1];
-      const isUiEventBinding = new Set([
+      const isInlineUiEventBinding = new Set([
         '_bind_click', '_bind_change', '_bind_input', '_bind_focus', '_bind_blur',
         '_bind_key_down', '_bind_key_up', '_bind_pointer_down', '_bind_pointer_up',
         '_bind_pointer_move', '_bind_scroll',
       ]).has(uiBindingName);
-      if (isUiEventBinding && args.length >= 3 && args[1]?.kind === 'reference') {
-        const entry = this.inferenceReference(module, args[1].path, scope);
-        const element = this.inferExpression(args[0], module, scope);
+      const isRuntimeUiEventBinding = uiBindingName === 'add_event_listener'
+        || uiBindingName === 'add_event_listener_with_context';
+      const handlerExpression = args[1];
+      if ((isInlineUiEventBinding || isRuntimeUiEventBinding) && handlerExpression?.kind === 'reference') {
+        const entry = this.inferenceReference(module, handlerExpression.path, scope);
+        const elementExpression = isInlineUiEventBinding ? args[0] : callable.methodReceiver;
+        const element = elementExpression ? this.inferExpression(elementExpression, module, scope) : { type: 'auto', module };
         let contextExpression = args[2];
         if (contextExpression?.kind === 'call'
           && contextExpression.path?.join('.') === 'memory.ptr'
           && contextExpression.args?.length > 0) {
           contextExpression = contextExpression.args[0];
         }
-        const context = this.inferExpression(contextExpression, module, scope);
+        const context = contextExpression
+          ? this.inferExpression(contextExpression, module, scope)
+          : { type: 'auto', module };
         const use = expression.path.length >= 2 ? module.uses.get(expression.path[0]) : null;
         const uiModule = use?.target || callable.target?.module || module;
         const uiEvent = uiModule.structs.get('UIEvent');
-        if (entry?.function && entry.function.params.length >= 3) {
+        if (entry?.function && entry.function.params.length >= 2) {
           const parameters = entry.function.params;
           if (!isAutoType(element.type)) {
             this.setInferredSlot(
               parameters[0], 'type', element.type, element.module, entry.function.module,
-              Boolean(parameters[0].explicitType), args[1].token || expression.token,
+              Boolean(parameters[0].explicitType), handlerExpression.token || expression.token,
               `parameter '${parameters[0].name}'`,
             );
           }
@@ -1997,14 +2096,14 @@ class Program {
             const eventType = this.translateInferredType(uiEvent.name, uiEvent.module, entry.function.module);
             this.setInferredSlot(
               parameters[1], 'type', eventType, entry.function.module, entry.function.module,
-              Boolean(parameters[1].explicitType), args[1].token || expression.token,
+              Boolean(parameters[1].explicitType), handlerExpression.token || expression.token,
               `parameter '${parameters[1].name}'`,
             );
           }
-          if (!isAutoType(context.type)) {
+          if (parameters.length >= 3 && !isAutoType(context.type)) {
             this.setInferredSlot(
               parameters[2], 'type', context.type, context.module, entry.function.module,
-              Boolean(parameters[2].explicitType), args[1].token || expression.token,
+              Boolean(parameters[2].explicitType), handlerExpression.token || expression.token,
               `parameter '${parameters[2].name}'`,
             );
           }
@@ -2052,7 +2151,8 @@ class Program {
           const actualIsSpecificTable = isTableTypeName(actual.type) && !isGenericTableType(actual.type);
           const actualIsGenericTable = isGenericTableType(actual.type);
           const paramIsSpecificTable = isTableTypeName(param.type) && !isGenericTableType(param.type);
-          if ((isAutoType(param.type) || paramIsGenericTable) && !isAutoType(actual.type) && (!paramIsGenericTable || actualIsSpecificTable) && callable.kind === 'internal') {
+          if ((isAutoType(param.type) || paramIsGenericTable) && !isAutoType(actual.type) && (!paramIsGenericTable || actualIsSpecificTable)
+              && (callable.kind === 'internal' || callable.kind === 'struct_construct')) {
             this.setInferredSlot(param, 'type', actual.type, actual.module, callable.target.module, Boolean(param.explicitType), args[index].token || expression.token, `parameter '${param.name}'`);
           } else if (!opaqueObjectAddress && !isAutoType(param.type) && (isAutoType(actual.type) || (actualIsGenericTable && paramIsSpecificTable))) {
             this.applyInferenceExpected(args[index], param.type, callable.target.module || module, module, scope);
@@ -2110,10 +2210,19 @@ class Program {
         } else if (statement.kind === 'field_assign') {
           const target = this.inferenceReference(fn.module, statement.targetPath, scope);
           const unresolvedMember = Boolean(target?.unresolvedPath?.length);
-          const expected = unresolvedMember ? null : target?.type;
+          const ownerStruct = statement.targetPath?.[0] === 'self' ? fn.methodOf : null;
+          const specializeInherited = Boolean(target?.field
+            && ownerStruct
+            && target.struct !== ownerStruct
+            && this.isInferredEmptyObjectPlaceholder(target.field));
+          const expected = unresolvedMember || specializeInherited ? null : target?.type;
           const inferred = this.inferExpression(statement.expression, fn.module, scope, expected, target?.module || fn.module);
           if (target?.field && !unresolvedMember && !target.field.explicitType && !isAutoType(inferred.type)) {
-            this.setInferredSlot(target.field, 'type', inferred.type, inferred.module, target.struct.module, false, statement.token, `field '${target.struct.name}.${target.field.name}'`);
+            const field = specializeInherited
+              ? this.ensureInheritedFieldSpecialization(ownerStruct, target.field, statement.token)
+              : target.field;
+            const fieldStruct = field.declaringStruct || target.struct;
+            this.setInferredSlot(field, 'type', inferred.type, inferred.module, fieldStruct.module, false, statement.token, `field '${fieldStruct.name}.${field.name}'`);
           }
         } else if (statement.kind === 'index_assign') {
           let target = this.inferExpression(statement.target, fn.module, scope);
@@ -2329,10 +2438,140 @@ class Program {
     return struct;
   }
 
+  constructorMethod(struct) {
+    return struct?.methods.get('constructor') || null;
+  }
+
+  visibleConstructorParams(method) {
+    if (!method) return [];
+    return method.isStatic ? method.params : method.params.slice(1);
+  }
+
+  isBaseConstructorStatement(statement) {
+    return statement?.kind === 'expr'
+      && statement.expression?.kind === 'call'
+      && statement.expression.path?.length === 2
+      && statement.expression.path[0] === 'base'
+      && statement.expression.path[1] === 'constructor';
+  }
+
+  containsBaseConstructorCall(node, seen = new WeakSet()) {
+    if (!node || typeof node !== 'object') return false;
+    if (seen.has(node)) return false;
+    seen.add(node);
+    if (node.kind === 'call' && node.path?.length === 2
+      && node.path[0] === 'base' && node.path[1] === 'constructor') return true;
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'token' || key === 'resolvedCallable' || key === 'resolvedReference'
+          || key === 'typeInfo' || key === 'struct' || key === 'module' || key === 'methodOf') continue;
+      if (Array.isArray(value)) {
+        if (value.some((item) => this.containsBaseConstructorCall(item, seen))) return true;
+      } else if (value && typeof value === 'object' && this.containsBaseConstructorCall(value, seen)) return true;
+    }
+    return false;
+  }
+
+  prepareConstructors() {
+    if (this.constructorsPrepared) return;
+    this.constructorsPrepared = true;
+
+    for (const module of this.moduleOrder) for (const struct of module.structs.values()) {
+      const constructor = this.constructorMethod(struct);
+      if (struct.staticObject && constructor && this.visibleConstructorParams(constructor).length !== 0) {
+        throw new CompileError(`static object '${struct.name}' constructor cannot accept arguments`, constructor.token, null, {
+          code: 'LSX2711',
+          hint: 'Static objects are initialized once before main(), so their constructor must be constructor = fn().',
+        });
+      }
+
+      if (!struct.ownMethods.has('constructor')) continue;
+      const ownConstructor = struct.methods.get('constructor');
+      if (!struct.baseType) continue;
+
+      const explicitBaseCall = this.isBaseConstructorStatement(ownConstructor.body[0]);
+      const anyBaseCall = ownConstructor.body.some((statement) => this.containsBaseConstructorCall(statement));
+      if (anyBaseCall && !explicitBaseCall) {
+        throw new CompileError(`base.constructor(...) must be the first statement in '${struct.name}.constructor'`, ownConstructor.token, null, {
+          code: 'LSX2712',
+          hint: 'Move base.constructor(...) to the first line of the derived constructor so base state is ready before derived state.',
+        });
+      }
+
+      const baseConstructor = this.constructorMethod(struct.baseType);
+      if (explicitBaseCall) {
+        if (!baseConstructor) {
+          throw new CompileError(`base object '${struct.baseType.name}' has no constructor`, ownConstructor.body[0].token || ownConstructor.token, null, {
+            code: 'LSX2713',
+            hint: 'Remove base.constructor(...) or add a constructor to the base object.',
+          });
+        }
+        continue;
+      }
+
+      if (!baseConstructor) continue;
+      const baseParams = this.visibleConstructorParams(baseConstructor);
+      if (baseParams.length !== 0) {
+        throw new CompileError(`constructor on '${struct.name}' must call base.constructor(...) first`, ownConstructor.token, null, {
+          code: 'LSX2714',
+          hint: `The base constructor '${struct.baseType.name}.constructor' needs ${baseParams.length} argument${baseParams.length === 1 ? '' : 's'}. Put base.constructor(...) on the first line.`,
+        });
+      }
+
+      ownConstructor.body.unshift({
+        kind: 'expr',
+        expression: { kind: 'call', path: ['base', 'constructor'], args: [], token: ownConstructor.token },
+        token: ownConstructor.token,
+        syntheticBaseConstructorCall: true,
+      });
+    }
+  }
+
+  buildObjectConstructionCallable(struct, typeName, call, module) {
+    const constructor = this.constructorMethod(struct);
+    if (constructor) {
+      return {
+        kind: 'struct_construct',
+        target: {
+          name: call.path.join('.'),
+          params: this.visibleConstructorParams(constructor),
+          returnType: typeName,
+          module: constructor.module,
+        },
+        returnType: typeName,
+        module,
+        struct,
+        constructor,
+      };
+    }
+    if (call.args.length === 0) {
+      return {
+        kind: 'struct_new',
+        target: { name: call.path.join('.'), params: [], returnType: typeName, module },
+        returnType: typeName,
+        module,
+        struct,
+      };
+    }
+    if (call.args.length === 1) {
+      return {
+        kind: 'struct_clone',
+        target: { name: call.path.join('.'), params: [{ name: 'source', type: typeName }], returnType: typeName, module },
+        returnType: typeName,
+        module,
+        struct,
+      };
+    }
+    throw new CompileError(`${call.path.join('.')} has no constructor and accepts zero arguments, or one existing object to copy`, call.token, null, {
+      code: 'LSX2715',
+      hint: `Add constructor = fn(...) to '${struct.name}' before passing creation arguments.`,
+    });
+  }
+
   resolveInheritance() {
     for (const module of this.moduleOrder) {
       for (const struct of module.structs.values()) this.resolvePackedInheritance(struct);
     }
+    this.prepareConstructors();
   }
 
   isDerivedFrom(candidate, expectedBase) {
@@ -2371,7 +2610,31 @@ class Program {
 
     const fieldList = struct.fieldDeclarations || [];
     for (const fieldDecl of fieldList) {
-      if (struct.fields.has(fieldDecl.name)) throw new CompileError(`duplicate field '${fieldDecl.name}' in ${struct.name}`, fieldDecl.token);
+      const inheritedStorage = struct.fields.get(fieldDecl.name) || null;
+      if (inheritedStorage) {
+        if (!fieldDecl.inheritedOverrideOf) throw new CompileError(`duplicate field '${fieldDecl.name}' in ${struct.name}`, fieldDecl.token);
+        const typeInfo = this.resolveType(struct.module, fieldDecl.type, fieldDecl.token);
+        if (typeInfo.size !== inheritedStorage.size || typeInfo.alignment !== inheritedStorage.alignment) {
+          throw new CompileError(`inherited field '${fieldDecl.name}' on ${struct.name} cannot change its native storage layout`, fieldDecl.token);
+        }
+        const field = {
+          ...inheritedStorage,
+          ...fieldDecl,
+          struct,
+          typeInfo,
+          offset: inheritedStorage.offset,
+          size: inheritedStorage.size,
+          alignment: inheritedStorage.alignment,
+          defaultValue: 0n,
+          defaultType: fieldDecl.type,
+          defaultConstructTable: false,
+          inheritedFrom: inheritedStorage.inheritedFrom || inheritedStorage.struct || struct.baseType,
+        };
+        struct.fields.set(field.name, field);
+        const fieldIndex = struct.fieldOrder.findIndex((candidate) => candidate.name === field.name);
+        if (fieldIndex >= 0) struct.fieldOrder[fieldIndex] = field;
+        continue;
+      }
       const typeInfo = this.resolveType(struct.module, fieldDecl.type, fieldDecl.token);
       const embedded = typeInfo.kind === 'primitive';
       const size = embedded ? typeInfo.size : 8;
@@ -2382,11 +2645,18 @@ class Program {
       let defaultConstructTable = false;
       if (fieldDecl.expression) {
         if (fieldDecl.expression.kind === 'table_literal' && fieldDecl.expression.entries.length === 0 && typeInfo.kind === 'table') {
-          // An inferred `field = {}` means an owned empty native table for every
-          // object instance. A null placeholder crashes on first use.
+          // An inferred growable `field = {}` means an owned empty native table
+          // for every object instance. A null collection would crash on push().
           defaultValue = 0n;
           defaultType = fieldDecl.type;
           defaultConstructTable = true;
+        } else if (fieldDecl.expression.kind === 'table_literal' && fieldDecl.expression.entries.length === 0 && typeInfo.kind === 'struct') {
+          // An empty closed-object field may act as a shape placeholder whose
+          // concrete fields are inferred from constructor assignment. Keep the
+          // initial pointer null so the constructor can install the owned object
+          // without allocating and immediately leaking a redundant default.
+          defaultValue = 0n;
+          defaultType = fieldDecl.type;
         } else {
           const evaluated = this.evalConstantExpression(fieldDecl.expression, struct.module, [`${struct.name}.${fieldDecl.name}`]);
           if (!canAssignType(evaluated.type, fieldDecl.type)) throw new CompileError(`cannot initialize field '${fieldDecl.name}' of type ${fieldDecl.type} with ${evaluated.type}`, fieldDecl.token);
@@ -2553,6 +2823,12 @@ class Program {
 
     if (pathParts.length === 2 && pathParts[0] === 'base' && scope?.function?.methodOf) {
       const owner = scope.function.methodOf;
+      if (pathParts[1] === 'constructor' && scope.function.sourceName !== 'constructor') {
+        throw new CompileError('base.constructor(...) may only be called from a derived constructor', call.token, null, {
+          code: 'LSX2716',
+          hint: 'Use base.constructor(...) as the first statement inside constructor = fn(...).',
+        });
+      }
       const base = owner.baseType;
       if (!base) throw new CompileError(`object '${owner.name}' has no base object`, call.token);
       const method = base.methods.get(pathParts[1]);
@@ -2603,9 +2879,31 @@ class Program {
           call.effectiveArgs = [receiver, ...call.args];
           return callable;
         }
+        if (operation === 'constructor') {
+          throw new CompileError('constructors are called through Object.new(...)', call.token, null, {
+            code: 'LSX2717',
+            hint: `Replace ${receiverPath.join('.')}.constructor(...) with ${receiverType.struct.name}.new(...).`,
+          });
+        }
         const method = receiverType.struct.methods.get(operation);
         const label = receiverType.struct.tableModel ? 'table' : 'struct';
         if (!method) throw new CompileError(`${label} '${receiverType.struct.name}' has no function '${operation}'`, call.token);
+        // LazyUI runtime event listeners accept an ordinary LSX context object.
+        // Lower it to an opaque address before normal call checking so front-end
+        // code never writes pointer syntax and private caller types do not leak
+        // into the public UI binding module.
+        if (operation === 'add_event_listener_with_context' && call.args.length >= 3) {
+          const contextArg = call.args[2];
+          const alreadyLowered = contextArg?.kind === 'call' && contextArg.path?.join('.') === 'memory.ptr';
+          if (!alreadyLowered) {
+            call.args[2] = {
+              kind: 'call',
+              path: ['memory', 'ptr'],
+              args: [contextArg, { kind: 'literal', value: 0n, valueType: 'i64', token: contextArg?.token || call.token }],
+              token: contextArg?.token || call.token,
+            };
+          }
+        }
         call.effectiveArgs = method.isStatic ? [...call.args] : [receiver, ...call.args];
         return { kind: 'internal', target: method, returnType: this.externalizeType(method.returnType, method.module, module), methodReceiver: method.isStatic ? null : receiver };
       }
@@ -2686,6 +2984,12 @@ class Program {
           call.effectiveArgs = [receiver, ...call.args];
           return callable;
         }
+        if (pathParts[1] === 'constructor') {
+          throw new CompileError('constructors are called through Object.new(...)', call.token, null, {
+            code: 'LSX2717',
+            hint: `Replace ${pathParts.slice(0, -1).join('.')}.constructor(...) with ${receiverType.struct.name}.new(...).`,
+          });
+        }
         const method = receiverType.struct.methods.get(pathParts[1]);
         const label = receiverType.struct.tableModel ? 'table' : 'struct';
         if (!method) throw new CompileError(`${label} '${receiverType.struct.name}' has no function '${pathParts[1]}'`, call.token);
@@ -2755,6 +3059,14 @@ class Program {
     if (staticStruct) {
       this.resolveStructLayout(staticStruct);
       const typeName = pathParts.length === 2 ? staticStruct.name : `${pathParts[0]}.${staticStruct.name}`;
+      if (staticOperation === 'constructor') {
+        throw new CompileError('constructors are called through Object.new(...)', call.token, null, {
+          code: 'LSX2717',
+          hint: staticStruct.staticObject
+            ? `The static object '${staticStruct.name}' is constructed automatically before main().`
+            : `Replace ${pathParts.join('.')}(...) with ${pathParts.slice(0, -1).join('.')}.new(...).`,
+        });
+      }
       const staticMethod = staticStruct.methods.get(staticOperation);
       if (staticMethod) {
         if (staticStruct.staticObject) {
@@ -2767,9 +3079,7 @@ class Program {
       }
       if (staticOperation === 'new') {
         if (staticStruct.staticObject) throw new CompileError(`static object '${staticStruct.name}' cannot be constructed with .new()`, call.token, null, { code: 'LSX1251', hint: `Call ${pathParts.slice(0, -1).join('.')}.Method(...) directly. A static object is initialized once and keeps one shared state.` });
-        if (call.args.length === 0) return makeSpecial('struct_new', [], typeName, { struct: staticStruct });
-        if (call.args.length === 1) return makeSpecial('struct_clone', [typeName], typeName, { struct: staticStruct });
-        throw new CompileError(`${pathParts.join('.')} accepts zero arguments for defaults or one existing object to copy`, call.token);
+        return this.buildObjectConstructionCallable(staticStruct, typeName, call, module);
       }
       if (staticOperation === 'size') return makeSpecial('struct_size', [], 'i64', { struct: staticStruct });
       // Legacy typed-container constructor retained for parser compatibility; normal LSX code uses local items = {}
@@ -4649,6 +4959,7 @@ class Optimizer {
       } else if (expr.kind === 'call') {
         const callable = expr.resolvedCallable;
         if (callable?.kind === 'internal' && !callable.target.reachable) queue.push(callable.target);
+        else if (callable?.kind === 'struct_construct' && callable.constructor && !callable.constructor.reachable) queue.push(callable.constructor);
         else if (callable?.kind === 'struct_destroy') queueDestroyImplementation(callable.struct, queue);
         callArguments(expr).forEach((arg) => visitExpression(arg, queue));
       } else if (expr.kind === 'binary') {
@@ -4681,6 +4992,10 @@ class Optimizer {
     for (const module of this.program.moduleOrder) for (const struct of module.structs.values()) {
       const customDestroy = struct.methods.get('destroy');
       if (customDestroy && !customDestroy.isStatic) queue.push(customDestroy);
+      if (struct.staticObject) {
+        const constructor = struct.methods.get('constructor');
+        if (constructor && !constructor.reachable) queue.push(constructor);
+      }
     }
     while (queue.length > 0) {
       const fn = queue.pop();
@@ -4707,7 +5022,7 @@ class Optimizer {
         const callable = expr.resolvedCallable;
         if (callable?.kind === 'builtin') this.program.usesBuiltins.add(callable.target.name);
         else if (callable?.kind === 'extern') this.program.usedExternImports.add(callable.target.importKey);
-        else if (callable?.kind === 'struct_new' || callable?.kind === 'struct_clone') this.program.usesBuiltins.add('memory.alloc');
+        else if (callable?.kind === 'struct_new' || callable?.kind === 'struct_clone' || callable?.kind === 'struct_construct') this.program.usesBuiltins.add('memory.alloc');
         else if (callable?.kind === 'struct_destroy') this.program.usesBuiltins.add('memory.free');
         else if (callable?.kind === 'struct_table') this.program.usesBuiltins.add('table.create');
         else if (callable?.kind === 'table_get' || callable?.kind === 'table_push') this.program.usesBuiltins.add('table.create');
@@ -5276,7 +5591,8 @@ function estimateExpressionTemps(expr, optimizationLevel = 0) {
   if (expr.kind === 'call') {
     const args = callArguments(expr);
     const nested = args.reduce((max, arg) => Math.max(max, estimateExpressionTemps(arg, optimizationLevel)), 0);
-    return args.length + nested;
+    const constructorObjectSlot = expr.resolvedCallable?.kind === 'struct_construct' ? 1 : 0;
+    return constructorObjectSlot + args.length + nested;
   }
   // Non-simple indexed access keeps the object in slot zero and starts nested
   // object/index evaluation at slot two.
@@ -5347,7 +5663,8 @@ function analyzeFunction(fn, optimizationLevel = 2, optimizationStats = null) {
     } else if (expr.kind === 'call') {
       hasCalls = true;
       const args = callArguments(expr);
-      maxArgs = Math.max(maxArgs, args.length);
+      const abiArgCount = args.length + (expr.resolvedCallable?.kind === 'struct_construct' ? 1 : 0);
+      maxArgs = Math.max(maxArgs, abiArgCount);
       args.forEach((arg) => scanExpression(arg, loopDepth));
     } else if (expr.kind === 'binary') {
       scanExpression(expr.left, loopDepth); scanExpression(expr.right, loopDepth);
@@ -5656,6 +5973,11 @@ class CodeGenerator {
       this.program.resolveStructLayout(struct);
       a.leaRip('rcx', struct.singletonLabel);
       a.callLabel(struct.initLabel);
+      const constructor = struct.methods.get('constructor');
+      if (constructor) {
+        a.leaRip('rcx', struct.singletonLabel);
+        a.callLabel(constructor.label);
+      }
     }
     a.callLabel(this.entryFunction.label);
     a.movMemRspReg(40, 'rax');
@@ -6352,6 +6674,57 @@ class CodeGenerator {
       this.compileAsInteger(callArguments(expr)[0], module, info, tempBaseIndex);
       if (callable.struct.positionalDataOffset) a.addRegImm32('rax', callable.struct.positionalDataOffset);
       return 'ptr';
+    }
+    if (callable.kind === 'struct_construct') {
+      const args = callArguments(expr);
+      const signature = callable.target;
+      const objectSlot = this.tempOffset(info, tempBaseIndex);
+      const argBase = tempBaseIndex + 1;
+      const nestedBase = argBase + args.length;
+
+      args.forEach((arg, index) => {
+        const expected = canonicalTypeName(signature.params[index].type);
+        const slot = this.tempOffset(info, argBase + index);
+        if (isFloatType(expected)) {
+          this.compileAsFloat(arg, module, info, nestedBase);
+          a.movssMemRspXmm(slot, 'xmm0');
+        } else {
+          this.compileAsInteger(arg, module, info, nestedBase);
+          if (expected === 'ptr' && isTableTypeName(expressionType(arg))) {
+            a.movRegReg('rcx', 'rax');
+            a.callLabel('__lsx_table_data');
+          }
+          a.movMemRspReg(slot, 'rax');
+        }
+      });
+
+      a.callLabel(callable.struct.newLabel);
+      a.movMemRspReg(objectSlot, 'rax');
+      const constructDone = a.unique(`${callable.struct.name}_construct_done`);
+      a.testRegReg('rax');
+      a.jz(constructDone);
+
+      a.movRegMemRsp('rcx', objectSlot);
+      const gprArgs = ['rcx', 'rdx', 'r8', 'r9'];
+      args.forEach((arg, index) => {
+        const abiIndex = index + 1;
+        const expected = canonicalTypeName(signature.params[index].type);
+        const slot = this.tempOffset(info, argBase + index);
+        if (abiIndex < 4) {
+          if (isFloatType(expected)) a.movssXmmMemRsp(`xmm${abiIndex}`, slot);
+          else a.movRegMemRsp(gprArgs[abiIndex], slot);
+        } else if (isFloatType(expected)) {
+          a.movssXmmMemRsp('xmm0', slot);
+          a.movssMemRspXmm(32 + (abiIndex - 4) * 8, 'xmm0');
+        } else {
+          a.movRegMemRsp('rax', slot);
+          a.movMemRspReg(32 + (abiIndex - 4) * 8, 'rax');
+        }
+      });
+      a.callLabel(callable.constructor.label);
+      a.label(constructDone);
+      a.movRegMemRsp('rax', objectSlot);
+      return callable.returnType;
     }
     if (callable.kind === 'struct_new') { a.callLabel(callable.struct.newLabel); return callable.returnType; }
     if (callable.kind === 'struct_clone') {

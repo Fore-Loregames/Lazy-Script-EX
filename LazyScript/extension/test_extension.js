@@ -279,6 +279,20 @@ assert(formatted.includes('            self.windowHandle = GLFW.glfwCreateWindow
 assert(formatted.includes('                width,'), 'formatter did not indent multiline arguments');
 assert(formatted.includes('            )\n        end\n    end\n}'), 'formatter did not align closing delimiters and end statements');
 
+const braceConstructorFormatted = extension._test.formatLsxText(`const Transform : base(Engine.LazyBehavior) = {
+constructor = fn(){
+self.lazyVars = {
+position = {0, 0, 0}
+rotation = {0, 0, 0}
+scale = {1, 1, 1}
+}
+}
+}
+`, { insertSpaces: true, tabSize: 4 });
+assert(braceConstructorFormatted.includes('    constructor = fn(){'), 'formatter did not preserve the brace-delimited constructor form');
+assert(braceConstructorFormatted.includes('        self.lazyVars = {'), 'brace-delimited constructor body was double-indented');
+assert(braceConstructorFormatted.includes('    }\n}'), 'brace-delimited constructor and object closers are not aligned');
+
 const spacingFormatted = extension._test.formatLsxText(`fn main()
 local width=1280
 if width==1280 then

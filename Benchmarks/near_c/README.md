@@ -1,6 +1,6 @@
 # LSX O6 versus optimized C benchmark suite
 
-This suite measures several code paths targeted by the O6 optimizer:
+This suite measures the code paths targeted by the 0.17.0 optimization pass:
 
 - `scalar_int`: register-resident integer dependency loop.
 - `scalar_f32`: scalar floating-point dependency loop.
@@ -25,4 +25,4 @@ The script rebuilds every LSX workload at O6, builds equivalent C sources at `-O
 
 A ratio of `1.00` means equal elapsed time. Lower is faster. Process launch overhead affects very short workloads, so each workload intentionally performs enough work to dominate startup. Close background applications and use the same power plan for repeatable measurements.
 
-These are focused compiler microbenchmarks, not a claim that every dynamic LSX program equals C. Whole-application performance also depends on data layout, native API use, cache behavior, and whether a code path can be specialized or vectorized.
+These are focused compiler microbenchmarks, not a claim that every dynamic LSX program equals C. Engine performance also depends on data layout, native API use, cache behavior, and whether a code path can be specialized or vectorized.

@@ -1,0 +1,44 @@
+const LazyBehavior = {
+    parent = null
+    lazyVars = {}
+
+    constructor = fn(parent)
+        self.parent = parent
+    end
+
+    Start = fn()
+    end
+
+    Update = fn()
+    end
+
+    Draw = fn()
+    end
+}
+
+const Transform : base(LazyBehavior) = {
+    constructor = fn(parent, position, rotation, scale)
+        base.constructor(parent)
+        self.lazyVars = {
+            position = position
+            rotation = rotation
+            scale = scale
+        }
+    end
+}
+
+fn main()
+    local transform = Transform.new(
+        7,
+        {0, 0, 0},
+        {0, 0, 0},
+        {1, 1, 1}
+    )
+
+    if transform.parent ~= 7 then return 1 end
+    if transform.lazyVars.position.x ~= 0 then return 2 end
+    if transform.lazyVars.scale.x ~= 1 then return 3 end
+
+    transform.destroy()
+    return 0
+end

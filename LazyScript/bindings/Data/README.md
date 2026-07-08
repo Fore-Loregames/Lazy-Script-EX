@@ -1,26 +1,9 @@
-# Data bindings
+# LSX data modules
 
 ## JSON
-
-Import the JSON module:
 
 ```lsx
 use "@LazyScript/bindings/Data/Json.lsx" as Json
 ```
 
-Load and read a JSON file:
-
-```lsx
-local document = Json.load("settings.json")
-
-if document.valid then
-    local volume_node = document.get(document.root, "volume")
-    local volume = document.as_f32(volume_node)
-end
-
-document.destroy()
-```
-
-`Json.lsx` supports parsing, building, editing, serializing, loading, and saving JSON. The document owns its node and string storage, so values and string views should not be used after `document.destroy()`.
-
-See `Projects/22_json` for a complete example.
+`Json.lsx` provides a native LSX JSON DOM, parser, builder, serializer, file loader, and saver. It uses packed LSX objects and typed tables rather than a VM or managed runtime. Parsed string views remain valid until the document's string storage is changed or the document is destroyed.

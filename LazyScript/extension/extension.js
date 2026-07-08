@@ -1849,7 +1849,8 @@ function formatLsxText(text, options = {}) {
     const endCount = countMatches(code, /\bend\b/g);
     let keywordOpens = 0;
     const compact = endCount > 0;
-    if (!compact && (/^(?:export\s+)?fn\s+[A-Za-z_]\w*\s*\(/.test(code) || /^[A-Za-z_]\w*\s*=\s*fn\s*\(/.test(code) || /^local\s+[A-Za-z_]\w*\s*=\s*fn\s*\(/.test(code))) keywordOpens++;
+    const braceDelimitedFunction = /(?:^|=\s*)fn(?:\s+[A-Za-z_]\w*)?\s*\([^)]*\)\s*(?:->\s*[A-Za-z_][A-Za-z0-9_.<>]*)?\s*\{\s*$/.test(code);
+    if (!compact && !braceDelimitedFunction && (/^(?:export\s+)?fn\s+[A-Za-z_]\w*\s*\(/.test(code) || /^[A-Za-z_]\w*\s*=\s*fn\s*\(/.test(code) || /^local\s+[A-Za-z_]\w*\s*=\s*fn\s*\(/.test(code))) keywordOpens++;
     if (!compact && /^if\b.*\bthen\b/.test(code)) keywordOpens++;
     if (!compact && /^while\b.*\bdo\b/.test(code)) keywordOpens++;
     if (!compact && /^for\b.*\bdo\b/.test(code)) keywordOpens++;

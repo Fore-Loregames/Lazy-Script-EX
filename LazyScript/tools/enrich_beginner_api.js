@@ -12,10 +12,10 @@ const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8').replace(/^\uFEFF/, '')
 const MODULE_GUIDES = {
   'Language/Static objects': {
     level: 'beginner', title: 'Static managers and shared services',
-    whatItIs: 'One persistent object with shared fields and methods, initialized once before main() and called without .new().',
+    whatItIs: 'One persistent object with shared fields, methods, and an optional zero-argument constructor, initialized once before main() and called without .new().',
     whenToUse: 'Use it for one-per-program systems such as a window manager, renderer, input service, audio service, application state, or asset registry.',
-    beginnerStart: 'Write export static const Name = { ... }, use self inside its methods, then call ModuleAlias.Name.Method(...).',
-    requires: 'LazyScriptEX 0.18.4 or newer.',
+    beginnerStart: 'Write export static const Name = { ... }, add constructor = fn() when startup setup is needed, use self inside methods, then call ModuleAlias.Name.Method(...).',
+    requires: 'LazyScriptEX 0.18.5 or newer.',
     cleanup: 'Static storage lasts for the process. Add and call an explicit Shutdown method for native resources.'
   },
   'Language/Modules and files': {
@@ -49,6 +49,62 @@ const MODULE_GUIDES = {
     beginnerStart: 'Start with LSHTML and LSCSS. Create a root element, pass it to UI.document(root), connect window input, and submit the root to UI/Renderer each frame.',
     requires: 'A GLFW window and the LazyUI renderer for on-screen rendering.',
     cleanup: 'Destroy window input, the document, retained state objects, and the renderer at shutdown.'
+  },
+  'LazyUI/LSHTML': {
+    level: 'beginner', title: 'LSHTML declarations and bindings',
+    whatItIs: 'Compiler-native retained UI markup written directly inside .lsx files.',
+    whenToUse: 'Use it to declare game HUDs, menus, forms, editor panels, node tools, and reusable UI components without manually creating every element.',
+    beginnerStart: 'Declare lshtml View(props) = { ... }, call View(props), pass the root to UI.document(root), then render that root each frame.',
+    requires: 'LazyScriptEX inline UI lowering and the UI/LazyUI binding.',
+    cleanup: 'The returned retained tree is owned by its Document. Destroy the document at shutdown.'
+  },
+  'LazyUI/LSHTML elements': {
+    level: 'beginner', title: 'All supported LSHTML elements',
+    whatItIs: 'The complete searchable set of element names accepted by the LSHTML compiler.',
+    whenToUse: 'Search this section whenever choosing a layout, control, editor, game HUD, canvas, or semantic element tag.',
+    beginnerStart: 'Place the tag inside an lshtml declaration, add id/class attributes, style it with LSCSS, and retrieve it later with document.find().',
+    requires: 'An lshtml declaration in an .lsx module.',
+    cleanup: 'Elements are retained and owned by the document tree.'
+  },
+  'LazyUI/LSHTML attributes': {
+    level: 'beginner', title: 'LSHTML attributes and expression bindings',
+    whatItIs: 'Every standard attribute recognized by LSHTML, including ids, classes, state, values, component props, and canvas geometry.',
+    whenToUse: 'Use this section when configuring element identity, state, data, images, controls, component arguments, or canvas shapes.',
+    beginnerStart: 'Use static values in quotes and dynamic LSX values in braces, such as class={props.class_name}.',
+    requires: 'An LSHTML element that supports the selected attribute.',
+    cleanup: 'Static attributes need no cleanup. Dynamic bindings live with the retained element.'
+  },
+  'LazyUI/Events': {
+    level: 'beginner', title: 'LSHTML and runtime element events',
+    whatItIs: 'Declarative on... handlers, UIEvent data, document.find(), and JavaScript-style runtime listener attachment.',
+    whenToUse: 'Use it for clicks, edits, focus, keyboard input, pointer dragging, scrolling, and attaching behavior from normal LSX code.',
+    beginnerStart: 'Use onclick={handler} in LSHTML or retrieve an element with document.find("#id") and call add_event_listener().',
+    requires: 'A UI.document(root) receiving pointer/keyboard input.',
+    cleanup: 'Listeners are destroyed with the element. Remove them earlier only when behavior must be detached.'
+  },
+  'LazyUI/LSCSS': {
+    level: 'beginner', title: 'LSCSS declarations and dynamic styles',
+    whatItIs: 'Compiler-native styling for retained LSHTML elements, including direct {expression} bindings.',
+    whenToUse: 'Use it for layout, spacing, colors, borders, text, overflow, states, transforms, gradients, and editor/game styling.',
+    beginnerStart: 'Declare lscss .class = { property = value }, then place that class on one or more LSHTML elements.',
+    requires: 'LSHTML elements in the same compiled UI source tree.',
+    cleanup: 'Styles are retained on elements and cleaned up with the document.'
+  },
+  'LazyUI/LSCSS properties': {
+    level: 'beginner', title: 'All supported LSCSS properties',
+    whatItIs: 'The complete searchable property list accepted by the LSCSS compiler and lowered to LazyUI Style operations.',
+    whenToUse: 'Search this section whenever styling layout, colors, borders, text, scrolling, transforms, images, or transitions.',
+    beginnerStart: 'Set a static value or bind an LSX expression with braces. Use hyphenated CSS-style property names.',
+    requires: 'An lscss rule.',
+    cleanup: 'Property storage belongs to the retained element style.'
+  },
+  'LazyUI/LSCSS selectors': {
+    level: 'beginner', title: 'LSCSS selectors and state selectors',
+    whatItIs: 'Tag, class, id, descendant, direct-child, grouped, and retained-state selector forms supported by LSCSS.',
+    whenToUse: 'Use selectors to target one element, a reusable class, nested UI structure, or hover/focus/checked/disabled states.',
+    beginnerStart: 'Prefer reusable .class selectors, use #id for one element, and add :hover or a nested hover block for state styling.',
+    requires: 'Matching LSHTML tags, classes, or ids.',
+    cleanup: 'Selectors are resolved during compiler lowering and require no runtime cleanup.'
   },
   'UI/Renderer': {
     level: 'intermediate', title: 'LazyUI OpenGL renderer',
@@ -263,8 +319,6 @@ const MODULE_GUIDES = {
 // Preserve every module guide already generated by the beginner guide pass.
 // This enrichment tool adds deeper per-symbol help; it must not rename or
 // discard current language categories such as Language/Tables.
-delete MODULE_GUIDES['Language/Collection'];
-delete MODULE_GUIDES['Language/Packed literals'];
 for (const [moduleName, guide] of Object.entries(data.moduleGuides || {})) {
   if (!MODULE_GUIDES[moduleName]) MODULE_GUIDES[moduleName] = guide;
 }
@@ -792,6 +846,12 @@ function practicalExample(entry) {
     'Math/OpenGL||uniform_mat3': 'use "@LazyScript/bindings/Math/GLM.lsx" as GLM\nuse "@LazyScript/bindings/Math/OpenGL.lsx" as GLMath\n\nlocal normal_matrix = GLM.mat3_identity()\nGLMath.uniform_mat3(uniform_location,normal_matrix)',
     'Math/OpenGL||uniform_mat4': 'use "@LazyScript/bindings/Math/GLM.lsx" as GLM\nuse "@LazyScript/bindings/Math/OpenGL.lsx" as GLMath\n\nlocal model = GLM.mat4_identity()\nGLMath.uniform_mat4(uniform_location,model)',
     'UI/LazyUI|CanvasContext|push': 'use "@LazyScript/bindings/UI/LazyUI.lsx" as UI\n\nlocal canvas_element = UI.canvas()\nlocal canvas = UI.canvas_context(canvas_element)\n\n-- Public drawing methods build and push a complete command for you.\ncanvas.fill_rect(20.0,20.0,160.0,48.0,UI.rgba(65,133,239,255))',
+    'UI/LazyUI|Document|find': 'local save_button = document.find("#save")\nlocal first_toolbar_button = document.find(".toolbar-button")\nlocal first_button = document.find("button")\n\nif save_button ~= null then\n    save_button.text = "Save Scene"\n    save_button.mark_layout_dirty()\nend',
+    'UI/LazyUI|Document|find_all': 'local buttons = document.find_all(".toolbar-button")\nfor button in buttons do\n    button.disabled = false\nend\nbuttons.destroy()',
+    'UI/LazyUI|Element|add_event_listener': 'fn save_clicked(element,event)\n    console.write_line(event.type)\nend\n\nlocal save_button = document.find("#save")\nif save_button ~= null then\n    save_button.add_event_listener("click",save_clicked)\nend',
+    'UI/LazyUI|Element|add_event_listener_with_context': 'fn save_clicked(element,event,editor)\n    editor.save_scene()\nend\n\nlocal save_button = document.find("#save")\nif save_button ~= null then\n    save_button.add_event_listener_with_context("click",save_clicked,editor)\nend',
+    'UI/LazyUI|Element|remove_event_listener': 'save_button.remove_event_listener("click",save_clicked)',
+    'UI/LazyUI|Element|clear_event_listeners': 'local removed = save_button.clear_event_listeners("click")',
     'UI/Renderer||create': 'use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer\n\n-- Create after GLFW/OpenGL initialization. null selects the bundled/default font.\nlocal renderer = UIRenderer.create(null,64)\nif not renderer.ready then\n    console.error_line(renderer.error_message)\nend',
     'OpenAL/WavPCM||load': 'use "@LazyScript/bindings/OpenAL/WavPCM.lsx" as WavPCM\n\nlocal sound = WavPCM.load("Game/Assets/click.wav")\nif sound.error == "OK" then\n    local sample_rate = sound.sample_rate\n    local byte_count = sound.data_size\nend\nsound.release()\nsound.destroy()', 
     'System/Log||open': 'use "@LazyScript/bindings/System/Log.lsx" as Log\n\nlocal logger = Log.open("build/game.log")\nlogger.info("Renderer initialization started")\nlogger.close()',
@@ -1011,7 +1071,7 @@ for (const entry of data.entries) {
 }
 
 data.moduleGuides = MODULE_GUIDES;
-data.generated = { ...(data.generated || {}), beginnerMetadata: '0.18.4' };
+data.generated = { ...(data.generated || {}), beginnerMetadata: '0.18.5' };
 
 fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2) + '\n');
 fs.writeFileSync(jsPath, `window.LSX_API_DATA=${JSON.stringify(data)};\n`);

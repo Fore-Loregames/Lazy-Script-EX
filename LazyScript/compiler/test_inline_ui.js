@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const childProcess = require('child_process');
-const { compileInlineUiSource, scanDeclarations } = require('./inline_ui');
+const { compileInlineUiSource, scanDeclarations, TAG_FUNCTIONS, LSHTML_EVENT_HELPERS, LSHTML_ATTRIBUTES, LSCSS_PROPERTIES, LSCSS_STATE_SELECTORS, LSCSS_SELECTOR_FORMS } = require('./inline_ui');
 
 const source = `
 const Props = {
@@ -310,6 +310,20 @@ const audit = childProcess.spawnSync(process.execPath, [path.join(compilerDir, '
 if (audit.status !== 0) process.stderr.write(audit.stdout + audit.stderr);
 assert.strictEqual(audit.status, 0, 'complete LazyUI tag/style surface audit failed compiler validation');
 
+assert(TAG_FUNCTIONS.size >= 250, 'exported LSHTML tag metadata is incomplete');
+assert(LSHTML_EVENT_HELPERS.size === 22, 'exported LSHTML event metadata is incomplete');
+assert(LSHTML_ATTRIBUTES.length >= 70, 'exported LSHTML attribute metadata is incomplete');
+assert(LSCSS_PROPERTIES.length >= 100, 'exported LSCSS property metadata is incomplete');
+assert(LSCSS_STATE_SELECTORS.length >= 6 && LSCSS_SELECTOR_FORMS.length >= 6, 'exported LSCSS selector metadata is incomplete');
+
+const selectorProject = path.join(toolkit, 'CompilerTests', 'ui-document-find', 'lazyscriptex.json');
+const selectorCheck = childProcess.spawnSync(process.execPath, [path.join(compilerDir, 'lazyscriptex.js'), 'check-project', selectorProject], {
+  cwd: compilerDir,
+  encoding: 'utf8',
+});
+if (selectorCheck.status !== 0) process.stderr.write(selectorCheck.stdout + selectorCheck.stderr);
+assert.strictEqual(selectorCheck.status, 0, 'Document.find/find_all and runtime event listener project failed compiler validation');
+
 for (const relative of [
   'LazyScript/bindings/UI/LazyUI.lsx',
   'LazyScript/bindings/UI/Renderer.lsx',
@@ -384,7 +398,10 @@ assert(elementAddBody.includes('self.children.push(child)') && !elementAddBody.i
   && elementAddBody.includes('return self.children.at(self.children.length()-1)'),
 'Element.add must retain the original child pointer without releasing or copying the object');
 assert(lazyUiRuntime.includes('Event targets are borrowed references') && lazyUiRuntime.includes('self.current_target = null'), 'UIEvent destruction can recursively free borrowed retained elements');
-assert(lazyUiRuntime.includes('Custom surfaces such as infinite node graphs can consume wheel input') && lazyUiRuntime.includes('invoke_ui_handler(customTarget._on_scroll'), 'custom infinite surfaces do not receive wheel input before native finite scrolling');
+assert(lazyUiRuntime.includes('find = fn(selector:string) -> Element') && lazyUiRuntime.includes('find_all = fn(selector:string)'), 'Document.find/find_all selector APIs are missing');
+assert(lazyUiRuntime.includes('add_event_listener = fn(type:string,handler) -> Element') && lazyUiRuntime.includes('add_event_listener_with_context = fn(type:string,handler,context_handle:u64) -> Element'), 'runtime element event listener APIs are missing');
+assert(lazyUiRuntime.includes('dispatch_ui_event(self._on_click,self,event,self._event_context)') && lazyUiRuntime.includes('dispatch_ui_event(self._on_change,self,event,self._event_context)') && lazyUiRuntime.includes('dispatch_ui_event(self._on_input,self,event,self._event_context)'), 'programmatic element emitters do not dispatch runtime listeners');
+assert(lazyUiRuntime.includes('Custom surfaces such as infinite node graphs can consume wheel input') && lazyUiRuntime.includes('dispatch_ui_event(customTarget._on_scroll'), 'custom infinite surfaces do not receive wheel input before native finite scrolling');
 assert(lowered.includes('.mark_layout_dirty()'), 'lowered LSHTML text mutations do not propagate dirtiness to the retained root');
 const lazyUiExample = fs.readFileSync(path.join(toolkit, 'Projects/28_lazyui_inline/main.lsx'), 'utf8');
 assert(!/draw_preview\s*\(/.test(lazyUiExample), 'example still requires an imperative draw function');

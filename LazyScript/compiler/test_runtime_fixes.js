@@ -160,7 +160,8 @@ assert(!audio.includes('table<'), 'generated audio still exposes a typed collect
 assert(!fs.existsSync(path.join(lazy, 'bindings', 'Platform', 'WICImage.lsx')), 'WIC should not be active');
 const api = JSON.parse(fs.readFileSync(path.join(lazy, 'api', 'api-data.json'), 'utf8'));
 assert(api.stats.total >= 9000, 'offline HTML API is incomplete');
-assert(fs.existsSync(path.join(toolkit, 'LazyScriptEX-Native-GameKit-0.18.4.vsix')), 'VS Code VSIX missing');
+const extensionPackage = JSON.parse(fs.readFileSync(path.join(lazy, 'extension', 'package.json'), 'utf8'));
+assert(fs.existsSync(path.join(toolkit, `LazyScriptEX-Native-GameKit-${extensionPackage.version}.vsix`)), 'VS Code VSIX missing');
 assert(fs.existsSync(path.join(toolkit, 'INSTALL_VSCODE_EXTENSION.bat')), 'VS Code extension installer missing');
 assert(api.stats.modules['System/Threading'] > 0, 'threading API is missing from offline docs');
 assert(api.stats.modules['Network/Sockets'] > 0, 'socket API is missing from offline docs');
@@ -178,6 +179,17 @@ assert(api.stats.modules['Math/GLM'] > 0, 'typed GLM API is missing from offline
 assert(api.stats.modules['Math/GLMRaw'] > 0, 'raw GLM bridge API is missing from offline docs');
 assert(api.stats.modules['Math/Camera'] > 0, 'camera math API is missing from offline docs');
 assert(api.stats.modules['Math/OpenGL'] > 0, 'GLM OpenGL API is missing from offline docs');
+assert(api.stats.modules['Language/Objects'] >= 6, 'constructors, object inheritance, or ordinary object API entries are missing');
+assert(api.entries.some(entry => entry.module === 'Language/Objects' && entry.name === 'compile-time object inheritance'), 'compile-time object inheritance is missing from the API');
+assert(api.entries.some(entry => entry.module === 'Language/Objects' && entry.name === 'constructor'), 'object constructor API is missing');
+assert(api.entries.some(entry => entry.module === 'Language/Static objects' && entry.name === 'static constructor'), 'static constructor API is missing');
+assert(api.stats.modules['LazyUI/LSHTML elements'] >= 250, 'complete LSHTML element API is missing');
+assert(api.stats.modules['LazyUI/LSHTML attributes'] >= 50, 'complete LSHTML attribute API is missing');
+assert(api.stats.modules['LazyUI/LSCSS properties'] >= 100, 'complete LSCSS property API is missing');
+assert(api.entries.some(entry => entry.module === 'UI/LazyUI' && entry.owner === 'Document' && entry.name === 'find'), 'Document.find is missing from the API');
+assert(api.entries.some(entry => entry.module === 'UI/LazyUI' && entry.owner === 'Element' && entry.name === 'add_event_listener'), 'Element.add_event_listener is missing from the API');
+const apiApp = fs.readFileSync(path.join(lazy, 'api', 'app.js'), 'utf8');
+assert(apiApp.includes("module.startsWith('UI/') || module.startsWith('LazyUI/')"), 'LSHTML/LSCSS API modules are not grouped under User interface');
 assert(api.stats.kinds.method > 150, 'object methods are missing from rich API metadata');
 assert(api.entries.some((entry) => entry.description && entry.description.length > 10), 'API descriptions are missing');
 console.log('GLM math and cameras, annotation-free inferred collections, strings, files, JSON, direct stb_image, OpenGL textures, direct FreeType SDF fonts, compiler-emitted atomics, real threading, automatic runtime staging, sockets, HTTP, native LSHTML/LSCSS LazyUI, and VS Code package checks passed.');

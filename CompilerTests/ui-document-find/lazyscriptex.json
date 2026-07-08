@@ -1,0 +1,9 @@
+{
+  "entry": "main.lsx",
+  "output": "build/ui-document-find.exe",
+  "subsystem": "console",
+  "optimization": 6,
+  "moduleRoots": {
+    "LazyScript": "../../LazyScript"
+  }
+}

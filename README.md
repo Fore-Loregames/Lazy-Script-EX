@@ -27,7 +27,7 @@ Node.js 18 or newer is required to run the compiler. The runtime setup script do
 
 - Native x64 compilation with optimization levels O0 through O6
 - Inferred variables, parameters, returns, object fields, and tables
-- Closed objects with methods, cloning, ownership, and compile-time inheritance
+- Closed objects with inferred constructors, cloning, ownership, and compile-time inheritance
 - Growable tables and packed numeric buffers using ordinary `{}` syntax
 - Modules through `use "path" as Name`
 - Direct Windows x64 foreign-function bindings
@@ -423,6 +423,32 @@ player.destroy()
 
 LSX does not use a garbage collector. Ownership is explicit so native applications can control allocation and cleanup.
 
+### Constructors
+
+An object can declare an inferred constructor. `.new(...)` applies the object defaults and then calls the constructor with the supplied values:
+
+```lsx
+const Transform = {
+    position = null
+    rotation = null
+    scale = null
+
+    constructor = fn(position, rotation, scale)
+        self.position = position
+        self.rotation = rotation
+        self.scale = scale
+    end
+}
+
+local transform = Transform.new(
+    {0, 0, 0},
+    {0, 0, 0},
+    {1, 1, 1}
+)
+```
+
+Constructor parameters and stored fields use normal LSX inference. Constructors do not return a value and are invoked through `.new(...)`, not by calling `constructor(...)` manually.
+
 ## Compile-time inheritance
 
 A closed object can inherit fields and methods from one base object:
@@ -448,6 +474,21 @@ const Player : base(Actor) = {
 ```
 
 Inheritance is resolved during compilation. It does not introduce a runtime prototype chain or reflection system.
+
+A derived constructor can initialize inherited state. A parameterless base constructor runs automatically; when the base constructor needs arguments, call it first:
+
+```lsx
+const Transform : base(LazyBehavior) = {
+    constructor = fn(parent, position, rotation, scale)
+        base.constructor(parent)
+        self.lazyVars = {
+            position = position
+            rotation = rotation
+            scale = scale
+        }
+    end
+}
+```
 
 ## Modules and imports
 

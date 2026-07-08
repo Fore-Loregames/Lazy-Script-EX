@@ -28,7 +28,7 @@ Do not open the `.vsix` with Microsoft Visual Studio's VSIX installer. This exte
 - Exact error ranges in the Problems panel
 - Beginner-oriented hints for common compiler errors
 - Scope-aware completion for function parameters, local variables, loop variables, `self`, object fields, inferred growable-table methods, imports, real folders and `.lsx` filenames inside `use` paths, modules, methods, constants, LSHTML tags, attributes, and LSCSS properties
-- Built-in document formatting for LSX, object methods, control flow, multiline calls, LSHTML, and LSCSS
+- Built-in document formatting for LSX constructors, object methods, control flow, multiline calls, LSHTML, and LSCSS
 - Rich hover explanations with practical LSX examples
 - Go to Definition
 - Find References
@@ -239,6 +239,48 @@ npm test
 
 The extension is released under the MIT License.
 
+## Object constructors
+
+Closed LSX objects can declare inferred constructors and receive creation arguments through `.new(...)`:
+
+```lsx
+const Transform = {
+    position = null
+    rotation = null
+    scale = null
+
+    constructor = fn(position, rotation, scale)
+        self.position = position
+        self.rotation = rotation
+        self.scale = scale
+    end
+}
+
+local transform = Transform.new(
+    {0, 0, 0},
+    {0, 0, 0},
+    {1, 1, 1}
+)
+```
+
+Derived constructors may call `base.constructor(...)` as their first statement when the base constructor requires arguments. Parameterless base constructors run automatically before the derived constructor body. Constructor parameters, fields, and return use normal LSX inference; constructors themselves return no value.
+
+Object-table methods may also use a brace-delimited body when that reads better beside the surrounding object table:
+
+```lsx
+const Transform : base(Engine.LazyBehavior) = {
+    constructor = fn(){
+        self.lazyVars = {
+            position = {0, 0, 0}
+            rotation = {0, 0, 0}
+            scale = {1, 1, 1}
+        }
+    }
+}
+```
+
+The normal `fn(...) ... end` form remains fully supported. When an exported base object defines an inferred empty placeholder such as `lazyVars = {}`, each derived object may establish its own concrete inherited shape in its constructor without changing the field shape of unrelated derived objects.
+
 ## Static service objects
 
 Use `static const` for managers and services that must exist exactly once:
@@ -263,4 +305,4 @@ WindowManagerMod.WindowManager.CreateWindow(1920, 1080, "LazyEngine")
 local window = WindowManagerMod.WindowManager.windowHandle
 ```
 
-A static object is initialized once before `main()`. `self` points to that one persistent object. Do not call `.new()` on it; provide explicit startup and shutdown methods for native resources.
+A static object is initialized once before `main()`. A zero-argument `constructor = fn()` may prepare its shared state automatically. `self` points to that one persistent object. Do not call `.new()` or `constructor()` on it; provide an explicit shutdown method for native resources.

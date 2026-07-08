@@ -3,7 +3,7 @@
 `WinSockRaw.lsx` contains the direct WinSock2 imports. `Sockets.lsx` wraps those imports in a separate namespace so object methods such as `connect`, `listen`, `send`, and `shutdown` cannot shadow the native entry points.
 
 
-The networking modules call Windows networking APIs directly and use ordinary LSX strings, objects, and tables. Application code does not allocate native address structures or manually write byte offsets.
+The networking modules call Windows networking APIs directly and use ordinary LSX strings, objects, and typed tables. Game code does not allocate native address structures or manually write byte offsets.
 
 ## TCP and UDP sockets
 
@@ -47,7 +47,7 @@ Call `Sockets.initialize()` once during application startup and balance it with 
 use "@LazyScript/bindings/Network/Http.lsx" as Http
 
 fn main()
-    local client = Http.Client.create("LSXApp/1.0")
+    local client = Http.Client.create("MyGame/1.0")
     client.set_timeout(15000)
 
     local response = client.get_port("127.0.0.1","/lsx-test",false,39192)

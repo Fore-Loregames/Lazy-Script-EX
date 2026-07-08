@@ -1,15 +1,17 @@
-# Native runtime files
+# Native runtime DLLs
 
-Run the runtime setup from the repository root:
+Run `..\setup-runtime.bat` from the project root to download:
 
-```bat
-setup-runtime.bat
-```
+- official GLFW 3.4 64-bit `glfw3.dll`
+- official OpenAL Soft 1.25.2 64-bit DLL, copied as `OpenAL32.dll`
 
-The setup prepares the native libraries used by the bundled bindings and examples, including GLFW and OpenAL Soft.
+The toolkit already includes the direct image/font sidecars under `native/`:
 
-Additional native libraries used by image, font, math, and ABI helpers are stored under `LazyScript/native` and copied beside an executable only when the project imports the related module.
+- `stb_image.dll`
+- `libfreetype.dll`
+- `LSXFreeType.dll`
+- the two Visual C++ runtime DLLs required by the bundled FreeType build
 
-Normal projects should not copy DLLs manually. Build through the project `build.bat` or the LSX compiler so imported runtime files are staged automatically.
-
-Third-party licenses and notices are stored under `LazyScript/licenses` and this runtime folder.
+Project configurations copy only the DLLs they import beside the generated
+executable. `LSXGameKit.dll` is also copied from `native/` when OpenGL/GLFW
+bindings require it.

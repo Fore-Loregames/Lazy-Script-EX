@@ -2366,7 +2366,7 @@ function setupGuideSearch() {
 
 const API_CATEGORY_DEFINITIONS = [
   { label: 'Language', description: 'Startup, variables, control flow, functions, tables, objects, modules, strings, and errors', test: module => module.startsWith('Language/') },
-  { label: 'User interface', description: 'LazyUI elements, documents, input, and rendering', test: module => module.startsWith('UI/') },
+  { label: 'User interface', description: 'LazyUI, LSHTML, LSCSS, elements, events, documents, input, and rendering', test: module => module.startsWith('UI/') || module.startsWith('LazyUI/') },
   { label: 'Math and cameras', description: 'GLM vectors, matrices, quaternions, transforms, and cameras', test: module => module.startsWith('Math/') },
   { label: 'Graphics and images', description: 'Images, textures, media, and OpenGL', test: module => module.startsWith('Graphics/') || module === 'OpenGL' || module.startsWith('OpenGL/') },
   { label: 'Windowing and platform', description: 'GLFW and operating-system helpers', test: module => module === 'GLFW' || module.startsWith('Platform/') },

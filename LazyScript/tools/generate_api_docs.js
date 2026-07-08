@@ -2,6 +2,8 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const { TAG_FUNCTIONS, LSHTML_EVENT_HELPERS, LSHTML_ATTRIBUTES, LSCSS_PROPERTIES, LSCSS_STATE_SELECTORS, LSCSS_SELECTOR_FORMS } = require('../compiler/inline_ui');
+const languageApiReference = require('./language_api_reference.json');
 
 const root = path.resolve(__dirname, '..');
 const bindingsRoot = path.join(root, 'bindings');
@@ -73,9 +75,41 @@ function extractObject(lines, start, module, rel, owner) {
   let depth = 0;
   const selected = [];
   const members = [];
+  const startIndent = (lines[start].match(/^\s*/) || [''])[0].length;
+  let memberIndent = null;
   for (let i = start; i < lines.length; i++) {
     const line = lines[i];
     selected.push(line);
+    const trimmed = line.trim();
+    const indent = (line.match(/^\s*/) || [''])[0].length;
+    if (i > start && memberIndent === null && trimmed && !trimmed.startsWith('--') && trimmed !== '}') {
+      if (indent > startIndent) memberIndent = indent;
+    }
+    let match;
+    const atMemberLevel = i > start && memberIndent !== null && indent === memberIndent;
+    if (atMemberLevel && (match = line.match(/^\s*([A-Za-z_]\w*)\s*=\s*fn\s*\(([^)]*)\)\s*(?:->\s*([^\s,}]+))?/))) {
+      if (!match[1].startsWith('_')) {
+        const returnType = match[3] ? ` -> ${match[3]}` : '';
+        const signature = `${match[1]}(${match[2].trim()})${returnType}`;
+        const description = commentBefore(lines, i) || fallbackDescription(module, 'method', match[1], owner);
+        members.push({ module, kind: 'method', owner, name: match[1], signature, description, source: rel, line: i + 1 });
+      }
+    } else if (atMemberLevel && (match = line.match(/^\s*([A-Za-z_]\w*)\s*:\s*([^=,]+?)\s*=/))) {
+      if (!match[1].startsWith('_')) {
+        const signature = `${match[1]}: ${match[2].trim()}`;
+        const description = commentBefore(lines, i) || fallbackDescription(module, 'field', match[1], owner);
+        members.push({ module, kind: 'field', owner, name: match[1], signature, description, source: rel, line: i + 1 });
+      }
+    } else if (atMemberLevel && (match = line.match(/^\s*([A-Za-z_]\w*)\s*=\s*(?!fn\b)(.+?)\s*,?\s*$/))) {
+      if (!match[1].startsWith('_')) {
+        const defaultValue = match[2].trim().replace(/,$/, '').trim();
+        const compactDefault = defaultValue.length > 80 ? `${defaultValue.slice(0, 77)}...` : defaultValue;
+        const signature = `${match[1]} = ${compactDefault}`;
+        const description = commentBefore(lines, i) || `Inferred field ${owner}.${match[1]} stored directly on the LSX object.`;
+        members.push({ module, kind: 'field', owner, name: match[1], signature, description, source: rel, line: i + 1, inferred: true });
+      }
+    }
+
     let inString = false;
     let escaped = false;
     for (const ch of line) {
@@ -85,19 +119,6 @@ function extractObject(lines, start, module, rel, owner) {
       if (inString) continue;
       if (ch === '{') depth++;
       if (ch === '}') depth--;
-    }
-    let match;
-    if ((match = line.match(/^\s*([A-Za-z_]\w*)\s*=\s*fn\s*\(([^)]*)\)\s*(?:->\s*([^\s,}]+))?/))) {
-      if (match[1].startsWith('_')) continue;
-      const returnType = match[3] ? ` -> ${match[3]}` : '';
-      const signature = `${match[1]}(${match[2].trim()})${returnType}`;
-      const description = commentBefore(lines, i) || fallbackDescription(module, 'method', match[1], owner);
-      members.push({ module, kind: 'method', owner, name: match[1], signature, description, source: rel, line: i + 1 });
-    } else if ((match = line.match(/^\s*([A-Za-z_]\w*)\s*:\s*([^=,]+?)\s*=/))) {
-      if (match[1].startsWith('_')) continue;
-      const signature = `${match[1]}: ${match[2].trim()}`;
-      const description = commentBefore(lines, i) || fallbackDescription(module, 'field', match[1], owner);
-      members.push({ module, kind: 'field', owner, name: match[1], signature, description, source: rel, line: i + 1 });
     }
     if (depth <= 0 && i > start) return { text: selected.join('\n'), end: i, members };
   }
@@ -126,7 +147,7 @@ for (const file of walk(bindingsRoot).sort()) {
       entries.push({ module, kind: 'typed function', name: match[1], signature, description, source: rel, line: i + 1 });
       continue;
     }
-    if ((match = trimmed.match(/^export\s+(static\s+)?const\s+([A-Za-z_]\w*)\s*=\s*\{/))) {
+    if ((match = trimmed.match(/^export\s+(static\s+)?const\s+([A-Za-z_]\w*)(?:\s*:\s*base\(([^)]+)\))?\s*=\s*\{/))) {
       const isStaticObject = Boolean(match[1]);
       const objectName = match[2];
       const block = extractObject(lines, i, module, rel, objectName);
@@ -134,7 +155,7 @@ for (const file of walk(bindingsRoot).sort()) {
       const description = commentBefore(lines, i) || (isStaticObject
         ? `One persistent LSX object ${objectName}, initialized once and called directly without .new().`
         : fallbackDescription(module, 'typed object', objectName));
-      entries.push({ module, kind, name: objectName, signature: `${isStaticObject ? 'static ' : ''}const ${objectName}`, description, source: rel, line: i + 1 });
+      entries.push({ module, kind, name: objectName, signature: `${isStaticObject ? 'static ' : ''}const ${objectName}${match[3] ? ` : base(${match[3].trim()})` : ''}`, description, source: rel, line: i + 1, base: match[3]?.trim() || '' });
       entries.push(...block.members);
       i = block.end;
       continue;
@@ -199,14 +220,26 @@ for (const entry of [
   name: entry[0], signature: entry[1], description: entry[2], source: 'docs/LANGUAGE.md', line: 114,
 });
 
+// Keep the complete public language reference in a separate canonical data file.
+// Binding regeneration must never erase language-only syntax such as control
+// flow, functions, ordinary objects, strings, tables, and inferred values.
+entries.push(...languageApiReference.entries.map((entry) => ({ ...entry })));
+
 // BEGIN GENERATED STATIC OBJECT LANGUAGE ENTRIES
 entries.push(...[
   {
     module: 'Language/Static objects', kind: 'compiler feature', name: 'static const object',
     signature: 'export static const Name = { ... }',
-    description: 'Declares one persistent object initialized once before main(). It keeps shared state and is called directly without .new().',
+    description: 'Declares one persistent object initialized once before main(). It keeps shared state, may use a zero-argument constructor for startup setup, and is called directly without .new().',
     source: 'docs/LANGUAGE.md', line: 377,
     example: 'export static const AppState = {\n    running = true\n    Stop = fn()\n        self.running = false\n    end\n}'
+  },
+  {
+    module: 'Language/Static objects', kind: 'compiler feature', name: 'static constructor',
+    signature: 'constructor = fn()',
+    description: 'Runs once automatically after the shared static object fields are initialized and before main(). Static constructors cannot accept arguments and are never called manually.',
+    source: 'docs/LANGUAGE.md', line: 425,
+    example: 'export static const AppState = {\n    ready = false\n\n    constructor = fn()\n        self.ready = true\n    end\n}'
   },
   {
     module: 'Language/Static objects', kind: 'compiler feature', name: 'direct static method call',
@@ -509,6 +542,238 @@ entries.push(...[
 ]);
 // END GENERATED IMPORT LANGUAGE ENTRIES
 
+
+// Language and inline UI syntax are compiler features rather than exported
+// binding declarations. Generate these entries directly from the same metadata
+// used by the LSHTML/LSCSS lowering pass so the API cannot silently omit them.
+entries.push({
+  module: 'Language/Objects',
+  kind: 'compiler feature',
+  name: 'compile-time object inheritance',
+  signature: 'const Player : base(Actor) = { ... }',
+  description: 'Creates a derived closed object whose base fields remain a fixed layout prefix. Same-named methods override the base method, and base.method(...) calls the immediate base implementation without a runtime prototype walk or vtable.',
+  source: 'docs/LANGUAGE.md',
+  line: 212,
+  example: `const Actor = {
+    active = true
+
+    update = fn(delta)
+        return 0
+    end
+}
+
+const Player : base(Actor) = {
+    health = 100
+
+    update = fn(delta)
+        base.update(delta)
+        return 0
+    end
+}
+
+local player = Player.new()
+player.update(0.016)`,
+  exampleNote: 'Inheritance is resolved by the compiler. Derived objects keep normal dot access and dot method calls.',
+  friendlyDescription: 'Inherit the fields and methods of one closed LSX object at compile time.',
+  whatItIs: 'Single-base object inheritance with fixed native layout and direct calls.',
+  whenToUse: 'Use it for reusable behavior and shared object state when composition alone would duplicate the same base fields and methods.',
+  workflow: 'Declare the base first, add : base(BaseName) to the derived object, override methods normally, and call base.method(...) only from a derived method.',
+  commonMistake: 'Do not use colon method syntax. Circular inheritance and inheriting from more than one base object are rejected.',
+  related: ['Language/Objects.dot field access','Language/Objects.dot method call'],
+});
+
+entries.push({
+  module: 'LazyUI/LSHTML', kind: 'compiler feature', name: 'lshtml declaration',
+  signature: 'lshtml View(props) = { <panel>...</panel> }',
+  description: 'Declares a retained LazyUI element tree directly inside an LSX module. The compiler lowers the markup to normal element creation and attachment calls; no browser DOM, parser, or virtual DOM runs at application runtime.',
+  source: 'compiler/inline_ui.js', line: 1,
+  example: `lshtml Toolbar(props) = {
+    <toolbar id="main-toolbar" class="toolbar">
+        <button id="save" class="primary">Save</button>
+    </toolbar>
+}`,
+  exampleNote: 'The generated function returns the retained root element.',
+});
+entries.push({
+  module: 'LazyUI/LSHTML', kind: 'compiler feature', name: 'expression binding',
+  signature: 'attribute={value} / text {value}',
+  description: 'Binds an LSHTML attribute, text node, object property, props field, or supported function result to an ordinary LSX expression. The retained element stores the binding and can be refreshed without reparsing markup.',
+  source: 'compiler/inline_ui.js', line: 1,
+  example: `lshtml Status(props) = {
+    <panel class={props.panel_class}>
+        <text>{props.message}</text>
+        <progress value={props.progress}></progress>
+    </panel>
+}`,
+});
+
+const tagDescriptions = {
+  button: 'Clickable button control.', input: 'Single-line editable input control.', textarea: 'Multiline editable text control.',
+  checkbox: 'Boolean checkbox control.', radio: 'Mutually exclusive radio control.', select: 'Selection control containing option elements.', option: 'Choice inside a select control.',
+  range: 'Numeric range control.', slider: 'Numeric slider control.', color: 'Color input control.', 'color-picker': 'Editor-style color picker control.',
+  panel: 'General retained layout container.', row: 'Flex row container.', column: 'Flex column container.', grid: 'Grid layout container.',
+  scroll: 'Scrollable retained container.', canvas: 'Retained canvas host for declarative shapes or CanvasContext drawing.',
+  img: 'Image element.', image: 'Image element.', text: 'Text element.', label: 'Text label, often associated with a form control.',
+  graph: 'Graph surface container.', nodeeditor: 'Node editor surface.', 'node-editor': 'Node editor surface.', hierarchy: 'Editor hierarchy control.', inspector: 'Editor inspector control.',
+};
+const canvasShapeTags = new Set(['rect','circle','ellipse','line','triangle','polygon','polyline','path','canvas-text','canvas-image']);
+for (const tag of [...TAG_FUNCTIONS].sort()) {
+  const isCanvas = canvasShapeTags.has(tag);
+  const description = tagDescriptions[tag] || (isCanvas
+    ? `Declarative LazyUI canvas ${tag} shape. Geometry comes from LSHTML attributes and appearance comes from LSCSS.`
+    : `Supported LSHTML <${tag}> retained element. It lowers to the matching LazyUI element factory and accepts standard id, class, state, binding, and event attributes.`);
+  entries.push({
+    module: 'LazyUI/LSHTML elements', kind: 'LSHTML element', name: tag,
+    signature: isCanvas ? `<${tag} ...></${tag}>` : `<${tag} id="..." class="...">...</${tag}>`,
+    description, source: 'compiler/inline_ui.js', line: 920,
+    example: isCanvas
+      ? `lshtml ShapeExample() = {
+    <canvas id="drawing"><${tag} x="12" y="12" width="120" height="48"></${tag}></canvas>
+}`
+      : `lshtml ${tag.replace(/[^A-Za-z0-9]/g, '_')}_example() = {
+    <${tag} id="example" class="example">Content</${tag}>
+}`,
+    exampleNote: 'Style the element with LSCSS selectors and retrieve it later with document.find("#example").',
+  });
+}
+
+const eventAttributeNames = new Set(LSHTML_EVENT_HELPERS.keys());
+const attributeDescriptions = {
+  id: 'Assigns the unique element id used by #id LSCSS selectors and document.find("#id").',
+  class: 'Assigns one or more whitespace-separated classes used by .class selectors and document.find(".class").',
+  'class-name': 'Alias of class.', text: 'Sets the retained element text.', value: 'Sets the control value.', placeholder: 'Sets input placeholder text.',
+  title: 'Sets descriptive title text.', src: 'Sets an image/media source.', alt: 'Sets alternate text.', name: 'Sets the form/control group name.',
+  context: 'Associates an ordinary LSX object with event callbacks as the third callback argument.',
+  hidden: 'Hides the element.', disabled: 'Disables interaction and enables :disabled styling.', checked: 'Sets checked state.', selected: 'Sets selected state.',
+  readonly: 'Prevents editing while preserving display and focus behavior.', multiple: 'Allows multiple values where supported.', draggable: 'Marks the element draggable.', focusable: 'Allows keyboard focus.',
+  style: 'Applies an LSX Style object or inline style declaration.', props: 'Passes props to a custom LSHTML component.', function: 'Selects a component function for <component>.', component: 'Alias used to select a component function.',
+  points: 'Static x,y coordinate list for polygon/polyline canvas shapes.', d: 'Static simple M/L/H/V/Z path data for a declarative canvas path.',
+};
+for (const attribute of LSHTML_ATTRIBUTES.filter((name) => !eventAttributeNames.has(name)).sort()) {
+  entries.push({
+    module: 'LazyUI/LSHTML attributes', kind: 'LSHTML attribute', name: attribute,
+    signature: `${attribute}="value" or ${attribute}={expression}`,
+    description: attributeDescriptions[attribute] || `Supported LSHTML ${attribute} attribute. Static values are lowered once; {expression} values become retained LSX bindings where the attribute supports runtime binding.`,
+    source: 'compiler/inline_ui.js', line: 947,
+    example: `lshtml AttributeExample(props) = {
+    <button id="example" ${attribute}={props.value}>Example</button>
+}`,
+  });
+}
+
+const runtimeEventNames = {
+  click: 'click', change: 'change', input: 'input', focus: 'focus', blur: 'blur',
+  key_down: 'keydown', key_up: 'keyup', pointer_down: 'pointerdown', pointer_up: 'pointerup', pointer_move: 'pointermove', scroll: 'scroll',
+};
+const aliasesByEvent = new Map();
+for (const [attribute, helper] of LSHTML_EVENT_HELPERS) {
+  const event = runtimeEventNames[helper] || helper;
+  if (!aliasesByEvent.has(event)) aliasesByEvent.set(event, []);
+  aliasesByEvent.get(event).push(attribute);
+}
+for (const [event, aliases] of [...aliasesByEvent].sort()) {
+  entries.push({
+    module: 'LazyUI/Events', kind: 'UI event', name: event,
+    signature: `${aliases.join(' / ')}={handler}  |  element.add_event_listener("${event}", handler)`,
+    description: `LazyUI ${event} event. LSHTML may attach it declaratively with ${aliases.join(' or ')}, and normal LSX may attach one or more listeners after document.find().`,
+    source: 'compiler/inline_ui.js', line: 947,
+    example: `fn handle_${event}(element,event,props)
+    props.last_event = event.type
+end
+
+local element = document.find("#target")
+element.add_event_listener_with_context("${event}",handle_${event},props)`,
+    exampleNote: 'Callbacks use inferred parameters. No pointer or explicit type syntax is required.',
+  });
+}
+entries.push({
+  module: 'LazyUI/Events', kind: 'compiler feature', name: 'runtime event listener workflow',
+  signature: 'document.find(selector).add_event_listener(event, handler)',
+  description: 'Retrieves retained LSHTML elements from normal LSX and attaches runtime listeners. Multiple listeners may be attached to the same event, and add_event_listener_with_context passes an ordinary LSX context object as the third callback argument.',
+  source: 'bindings/UI/LazyUI.lsx', line: 1700,
+  example: `fn save_clicked(element,event,editor)
+    editor.save_scene()
+end
+
+local save_button = document.find("#save")
+if save_button ~= null then
+    save_button.add_event_listener_with_context("click",save_clicked,editor)
+end`,
+});
+
+const propertyValueHints = {
+  display: 'flex, block, grid, inline, or none', position: 'relative, absolute, fixed, or sticky', width: 'auto, px, %, vw, vh, em, rem, or {expression}',
+  height: 'auto, px, %, vw, vh, em, rem, or {expression}', 'flex-direction': 'row, row-reverse, column, or column-reverse',
+  'justify-content': 'start, center, end, space-between, space-around, or space-evenly', 'align-items': 'auto, stretch, start, center, end, or baseline',
+  overflow: 'visible, hidden, scroll, auto, or clip', cursor: 'default, pointer, text, move, crosshair, grab, grabbing, resize-ew, resize-ns, or not-allowed',
+  'pointer-events': 'true/false or none/auto', visibility: 'true/false or visible/hidden', 'object-fit': 'fill, contain, cover, none, or scale-down',
+  background: 'a color, linear-gradient(...), radial-gradient(...), or {expression}', color: 'RGBA integer, hex-style source value, or {expression}',
+};
+for (const property of [...LSCSS_PROPERTIES].sort()) {
+  const hint = propertyValueHints[property] || 'a supported static value or {expression}';
+  entries.push({
+    module: 'LazyUI/LSCSS properties', kind: 'LSCSS property', name: property,
+    signature: `${property} = value`,
+    description: `Supported LSCSS ${property} property. Accepted values include ${hint}. The compiler lowers it to the retained Style fields and css_* helpers used by LazyUI.`,
+    source: 'compiler/inline_ui.js', line: 451,
+    example: `lscss .example = {
+    ${property} = {props.value}
+}`,
+    exampleNote: 'LSCSS accepts direct LSX {expression} bindings in addition to static values.',
+  });
+}
+entries.push({
+  module: 'LazyUI/LSCSS', kind: 'compiler feature', name: 'lscss declaration',
+  signature: 'lscss selector = { property = value }',
+  description: 'Declares retained styles directly in an LSX module. Rules are matched to LSHTML elements at compile time, and dynamic {expression} values become retained style bindings.',
+  source: 'compiler/inline_ui.js', line: 1,
+  example: `lscss .primary = {
+    display = flex
+    padding = 8px 14px
+    background = #3478F6FF
+    hover = { background = #4A8BFFFF }
+}`,
+});
+for (const selector of LSCSS_SELECTOR_FORMS) {
+  entries.push({
+    module: 'LazyUI/LSCSS selectors', kind: 'LSCSS selector', name: selector,
+    signature: `lscss ${selector} = { ... }`,
+    description: `Supported LSCSS selector form: ${selector}. Selectors are resolved against the LSHTML tree during lowering.`,
+    source: 'compiler/inline_ui.js', line: 786,
+    example: `lscss ${selector === 'tag' ? 'button' : selector === 'ancestor descendant' ? '.toolbar .primary' : selector === 'parent > child' ? '.toolbar > button' : selector === 'selector, selector' ? '.save, .apply' : selector} = {
+    opacity = 1.0
+}`,
+  });
+}
+for (const state of LSCSS_STATE_SELECTORS) {
+  entries.push({
+    module: 'LazyUI/LSCSS selectors', kind: 'LSCSS selector', name: `:${state}`,
+    signature: `lscss .control:${state} = { ... }`,
+    description: `Styles the retained ${state} state. The same state may also be written as a nested ${state} = { ... } block inside a normal rule.`,
+    source: 'compiler/inline_ui.js', line: 1121,
+    example: `lscss .control:${state} = {
+    opacity = 0.8
+}`,
+  });
+}
+
+// These LazyUI methods intentionally hide their native storage details from
+// normal LSX code. The compiler accepts ordinary inferred values and performs
+// any required ABI lowering internally, so the searchable API should show the
+// source syntax users actually write.
+const publicSignatureOverrides = new Map([
+  ['UI/LazyUI|Document|find', 'find(selector) -> Element'],
+  ['UI/LazyUI|Document|find_all', 'find_all(selector)'],
+  ['UI/LazyUI|Element|add_event_listener', 'add_event_listener(event, handler) -> Element'],
+  ['UI/LazyUI|Element|add_event_listener_with_context', 'add_event_listener_with_context(event, handler, context) -> Element'],
+  ['UI/LazyUI|Element|remove_event_listener', 'remove_event_listener(event, handler) -> bool'],
+  ['UI/LazyUI|Element|clear_event_listeners', 'clear_event_listeners(event)'],
+]);
+for (const entry of entries) {
+  const key = `${entry.module}|${entry.owner || ''}|${entry.name}`;
+  if (publicSignatureOverrides.has(key)) entry.signature = publicSignatureOverrides.get(key);
+}
+
 const manifestPath = path.join(bindingsRoot, 'BINDING_MANIFEST.json');
 const manifest = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath, 'utf8')) : {};
 const stats = entries.reduce((acc, e) => {
@@ -518,7 +783,7 @@ const stats = entries.reduce((acc, e) => {
   return acc;
 }, { total: 0, modules: {}, kinds: {} });
 
-const data = { generatedAt: new Date().toISOString(), manifest, stats, entries };
+const data = { generatedAt: new Date().toISOString(), manifest, stats, entries, moduleGuides: languageApiReference.moduleGuides };
 fs.writeFileSync(path.join(outputRoot, 'api-data.json'), JSON.stringify(data, null, 2));
 
 const safeJson = JSON.stringify(data).replace(/</g, '\\u003c').replace(/-->/g, '--\\>');
@@ -551,5 +816,6 @@ function render(){const list=filtered();const pages=Math.max(1,Math.ceil(list.le
 for(const el of [q,moduleSel,kindSel])el.addEventListener(el===q?'input':'change',()=>{page=0;render()});document.getElementById('clear').onclick=()=>{q.value='';moduleSel.value='';kindSel.value='';page=0;render();q.focus()};document.getElementById('prev').onclick=()=>{page--;render();scrollTo(0,0)};document.getElementById('next').onclick=()=>{page++;render();scrollTo(0,0)};addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();q.focus();q.select()}});const params=new URLSearchParams(location.hash.slice(1));q.value=params.get('q')||'';moduleSel.value=params.get('module')||'';kindSel.value=params.get('kind')||'';render();
 </script>
 </body></html>`;
-fs.writeFileSync(path.join(outputRoot, 'index.html'), html);
-console.log(`Generated ${entries.length} API entries in ${path.join(outputRoot, 'index.html')}`);
+const indexPath = path.join(outputRoot, 'index.html');
+if (!fs.existsSync(indexPath)) fs.writeFileSync(indexPath, html);
+console.log(`Generated ${entries.length} API entries in ${path.join(outputRoot, 'api-data.json')}`);

@@ -97,10 +97,10 @@ Table layout is selected from the record's ownership shape:
 - Reference-bearing or owning records containing nested objects, tables, strings, handles, pointers, function pointers, or a custom destructor are stored as eight-byte native object pointers. Their accessors preserve object identity across table growth, and `add()` allocates/initializes the object before storing its pointer.
 - Packed positional numeric values retain their existing inline fixed-layout path.
 
-This split preserves compact contiguous data for application hot loops without allowing retained UI, graph, owner, or resource references to move when a table reallocates.
+This split preserves compact contiguous data for engine hot loops without allowing retained UI, graph, ECS-owner, or resource references to move when a table reallocates.
 
 ## Current limits
 
 O6 automatically vectorizes canonical contiguous f32 loops: four-wide SSE for `baseline`, eight-wide AVX2 for `avx2`, and AVX2 FMA for recognized `a*b+c` forms under `avx2-fma`. PGO generation/use can reorder and prioritize hot functions. General alias analysis across arbitrary pointers, vectorization of irregular control flow, and cross-module link-time SIMD transformation remain outside the current pass.
 
-Closed tables intentionally optimize known shapes. Fully dynamic runtime string keys are not implemented in 0.17.0; adding them later will use a separate slower path rather than weakening the fixed-shape optimized path.
+Closed tables intentionally optimize known shapes. Fully dynamic runtime string keys are not implemented in 0.17.0; adding them later will use a separate slower path rather than weakening the fixed-shape engine path.

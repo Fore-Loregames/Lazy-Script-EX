@@ -209,6 +209,72 @@ transform.destroy()
 
 Objects use fixed field offsets and direct method calls. LSX does not require a garbage collector, runtime reflection table, or prototype chain.
 
+## Constructors
+
+Add a `constructor` function when an object needs initialization arguments or setup code. Calling `.new(...)` allocates the object, applies its field defaults, and then calls the constructor with the supplied values:
+
+```lsx
+const Transform = {
+    position = null
+    rotation = null
+    scale = null
+
+    constructor = fn(position, rotation, scale)
+        self.position = position
+        self.rotation = rotation
+        self.scale = scale
+    end
+}
+
+local transform = Transform.new(
+    {0, 0, 0},
+    {0, 0, 0},
+    {1, 1, 1}
+)
+```
+
+Constructor parameters and stored field representations are inferred normally. Constructors do not return a value and are not called manually through an instance. Use `Object.new(...)` to construct an object.
+
+When inheritance is involved:
+
+- if the derived object does not declare a constructor, it uses the inherited constructor;
+- if the derived constructor has a parameterless base constructor, LSX calls that base constructor automatically before the derived body;
+- if the base constructor needs arguments, put `base.constructor(...)` as the first statement in the derived constructor;
+- all field defaults for the full inherited object are applied before constructor code runs.
+
+```lsx
+const LazyBehavior = {
+    parent = null
+    lazyVars = {}
+
+    constructor = fn(parent)
+        self.parent = parent
+    end
+}
+
+const Transform : base(LazyBehavior) = {
+    constructor = fn(parent, position, rotation, scale)
+        base.constructor(parent)
+        self.lazyVars = {
+            position = position
+            rotation = rotation
+            scale = scale
+        }
+    end
+}
+
+local transform = Transform.new(
+    owner,
+    {0, 0, 0},
+    {0, 0, 0},
+    {1, 1, 1}
+)
+```
+
+A zero-argument constructor on a `static const` object runs once before `main()`. Static constructors cannot accept arguments because static objects are not created with `.new()`.
+
+For copying, prefer `object.clone()`. The older `Object.new(existing)` copy form remains available only for object definitions that do not declare a constructor.
+
 ## Compile-time inheritance
 
 A closed object can inherit from one base object:
@@ -397,6 +463,20 @@ export static const WindowManager = {
 }
 ```
 
+A zero-argument static constructor can prepare shared state. It runs automatically once after field defaults and before `main()`:
+
+```lsx
+export static const AppState = {
+    ready = false
+
+    constructor = fn()
+        self.ready = true
+    end
+}
+```
+
+Static constructors cannot accept arguments and cannot be called manually.
+
 Import and use the exported static object directly:
 
 ```lsx
@@ -414,7 +494,7 @@ Rules:
 - Use `self.field` and `self.Method()` inside its methods.
 - Call methods directly through the static object.
 - Read or write shared fields directly when appropriate.
-- Do not call `.new()`; a static object already exists.
+- Do not call `.new()` or `constructor()`; a static object already exists and its constructor runs automatically.
 - Add an explicit `Shutdown` method for native handles and resources.
 - Static state is shared by every caller. Protect writable state with synchronization when multiple threads can access it.
 
@@ -731,12 +811,45 @@ end
 
 The compiler lowers the markup and styles to retained native LSX UI objects. The UI does not require a browser, JavaScript runtime, DOM, or virtual DOM.
 
+Normal LSX can retrieve retained LSHTML elements through the document:
+
+```lsx
+local continue_button = document.find("#continue")
+local first_action = document.find(".action")
+local first_button = document.find("button")
+```
+
+Bare tag lookup is ASCII case-insensitive and accepts LSHTML kebab-case or underscore aliases such as `status-bar` and `status_bar`. Use `find_all()` for every class or tag match. The returned collection owns only its list storage, so destroy the collection when finished; the document continues to own the elements.
+
+```lsx
+local actions = document.find_all(".action")
+for action in actions do
+    action.disabled = false
+end
+actions.destroy()
+```
+
+Runtime event listeners can then be attached from ordinary LSX instead of only through LSHTML attributes:
+
+```lsx
+fn continue_from_code(element,event,props)
+    props.message = "The listener ran."
+end
+
+local continue_button = document.find("#continue")
+if continue_button ~= null then
+    continue_button.add_event_listener_with_context("click",continue_from_code,props)
+end
+```
+
+`add_event_listener()` accepts a two-parameter handler. `add_event_listener_with_context()` passes an ordinary LSX object as the third callback parameter. Multiple listeners can share one event; use `remove_event_listener()` or `clear_event_listeners()` to detach them.
+
 Supported features include:
 
-- IDs and classes;
+- IDs and classes, including `document.find()` and `document.find_all()` access from normal LSX;
 - LSX expressions inside text, attributes, and styles;
 - reusable components;
-- click, input, change, focus, keyboard, pointer, and scroll events;
+- click, input, change, focus, keyboard, pointer, and scroll events through LSHTML attributes or runtime listeners;
 - flex and grid layout;
 - clipping and scrollable containers;
 - editable text fields and textareas;

@@ -1,0 +1,18 @@
+# Generated project and test output
+**/build/
+**/out/
+**/dist/
+**/coverage/
+
+# Local dependencies and caches
+**/node_modules/
+**/.cache/
+**/__pycache__/
+
+# Temporary/editor files
+*.log
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db

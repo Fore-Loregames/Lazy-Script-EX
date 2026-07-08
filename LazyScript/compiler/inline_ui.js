@@ -944,21 +944,36 @@ function functionForTag(tag) {
   return aliases[tag] || tag.replaceAll('-', '_');
 }
 
+const LSHTML_EVENT_HELPERS = new Map([
+  ['onclick', 'click'], ['on-click', 'click'],
+  ['onchange', 'change'], ['on-change', 'change'],
+  ['oninput', 'input'], ['on-input', 'input'],
+  ['onfocus', 'focus'], ['on-focus', 'focus'],
+  ['onblur', 'blur'], ['on-blur', 'blur'],
+  ['onkeydown', 'key_down'], ['on-key-down', 'key_down'],
+  ['onkeyup', 'key_up'], ['on-key-up', 'key_up'],
+  ['onpointerdown', 'pointer_down'], ['on-pointer-down', 'pointer_down'],
+  ['onpointerup', 'pointer_up'], ['on-pointer-up', 'pointer_up'],
+  ['onpointermove', 'pointer_move'], ['on-pointer-move', 'pointer_move'],
+  ['onscroll', 'scroll'], ['on-scroll', 'scroll'],
+]);
+
+const LSHTML_ATTRIBUTES = Object.freeze([
+  'id','class','class-name','text','value','placeholder','title','src','alt','name','context',
+  'hidden','disabled','checked','selected','readonly','multiple','draggable','focusable',
+  'tabindex','tab-index','min','max','step','number-value','maxlength','max-length','texture','style',
+  'props','function','component',
+  'x','y','x1','y1','x2','y2','x3','y3','cx','cy','width','height','radius','r','rx','ry',
+  'radius-x','radius-y','closed','points','d',
+  ...LSHTML_EVENT_HELPERS.keys(),
+]);
+
+const LSCSS_STATE_SELECTORS = Object.freeze(['hover','active','focus','disabled','checked','selected']);
+const LSCSS_SELECTOR_FORMS = Object.freeze(['tag','.class','#id','ancestor descendant','parent > child','selector, selector']);
+
 function lowerAttributes(nodeVar, node, expressionBindings) {
   const lines = [];
-  const eventHelpers = new Map([
-    ['onclick', 'click'], ['on-click', 'click'],
-    ['onchange', 'change'], ['on-change', 'change'],
-    ['oninput', 'input'], ['on-input', 'input'],
-    ['onfocus', 'focus'], ['on-focus', 'focus'],
-    ['onblur', 'blur'], ['on-blur', 'blur'],
-    ['onkeydown', 'key_down'], ['on-key-down', 'key_down'],
-    ['onkeyup', 'key_up'], ['on-key-up', 'key_up'],
-    ['onpointerdown', 'pointer_down'], ['on-pointer-down', 'pointer_down'],
-    ['onpointerup', 'pointer_up'], ['on-pointer-up', 'pointer_up'],
-    ['onpointermove', 'pointer_move'], ['on-pointer-move', 'pointer_move'],
-    ['onscroll', 'scroll'], ['on-scroll', 'scroll'],
-  ]);
+  const eventHelpers = LSHTML_EVENT_HELPERS;
   const contextAttribute = attr(node, 'context');
   const contextExpression = contextAttribute?.kind === 'expression' ? contextAttribute.value : null;
   const hasBoundEventContext = Boolean(contextExpression)
@@ -1193,6 +1208,10 @@ function compileInlineUiSource(source, filePath = '') {
   return { source: output, declarations };
 }
 
+const LSCSS_PROPERTIES = Object.freeze([...new Set(
+  [...styleCalls.toString().matchAll(/case\s+'([^']+)'/g)].map((match) => match[1])
+)]);
+
 module.exports = {
   hashText,
   scanDeclarations,
@@ -1202,4 +1221,9 @@ module.exports = {
   compileInlineUiSource,
   styleCalls,
   TAG_FUNCTIONS,
+  LSHTML_EVENT_HELPERS,
+  LSHTML_ATTRIBUTES,
+  LSCSS_PROPERTIES,
+  LSCSS_STATE_SELECTORS,
+  LSCSS_SELECTOR_FORMS,
 };

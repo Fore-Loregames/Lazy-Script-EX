@@ -674,6 +674,258 @@ const Second : base(First) = {}
 const circularResult = run(['check', circularInheritance], 1);
 assert(circularResult.stderr.includes('circular base inheritance'), circularResult.stderr);
 
+// Constructors are declaration-free object methods tied to Object.new(...).
+// A parameterless base constructor is inserted automatically. Parameterized
+// base constructors are called explicitly as the first derived statement.
+const constructorMain = write('constructors/main.lsx', `
+const Vec3 = {
+    x = 0
+    y = 0
+    z = 0
+}
+
+const LazyBehavior = {
+    started = false
+
+    constructor = fn()
+        self.started = true
+    end
+}
+
+const Transform : base(LazyBehavior) = {
+    position = null
+    rotation = null
+    scale = null
+
+    constructor = fn(position, rotation, scale)
+        self.position = position
+        self.rotation = rotation
+        self.scale = scale
+    end
+}
+
+const NamedTransform : base(Transform) = {
+    name = ""
+
+    constructor = fn(name, position, rotation, scale)
+        base.constructor(position, rotation, scale)
+        self.name = name
+    end
+}
+
+fn main()
+    local position = Vec3.new()
+    local rotation = Vec3.new()
+    local scale = Vec3.new()
+    scale.x = 1
+    scale.y = 1
+    scale.z = 1
+    local transform = Transform.new(position, rotation, scale)
+    local named = NamedTransform.new("Player", position, rotation, scale)
+    if not transform.started or not named.started then return 1 end
+    named.destroy()
+    transform.destroy()
+    scale.destroy()
+    rotation.destroy()
+    position.destroy()
+    return 0
+end
+`);
+const constructorCheck = compilerApi.checkFile(constructorMain);
+const constructorRoot = constructorCheck.root;
+const transformConstructor = constructorRoot.structs.get('Transform').methods.get('constructor');
+const namedConstructor = constructorRoot.structs.get('NamedTransform').methods.get('constructor');
+assert.strictEqual(transformConstructor.returnType, 'void');
+assert.strictEqual(transformConstructor.params.length, 4, 'constructor ABI should include self plus three visible arguments');
+assert.strictEqual(transformConstructor.body[0].expression.path.join('.'), 'base.constructor', 'parameterless base constructor should be inserted first');
+assert.strictEqual(namedConstructor.body[0].expression.path.join('.'), 'base.constructor', 'explicit base constructor call should remain first');
+const constructorMainFn = constructorRoot.functions.get('main');
+const transformNew = constructorMainFn.body[6].expression;
+const namedNew = constructorMainFn.body[7].expression;
+assert.strictEqual(transformNew.resolvedCallable.kind, 'struct_construct');
+assert.strictEqual(namedNew.resolvedCallable.kind, 'struct_construct');
+assert.strictEqual(transformNew.resolvedCallable.target.params.length, 3);
+assert.strictEqual(namedNew.resolvedCallable.target.params.length, 4);
+const constructorExe = path.join(temp, 'constructors.exe');
+const constructorBuild = run(['build', constructorMain, '-o', constructorExe, '--opt', '6']);
+assert(fs.existsSync(constructorExe));
+assert(constructorBuild.stdout.includes('Optimization: O6'), constructorBuild.stdout);
+
+const inheritedConstructor = write('constructors/inherited.lsx', `
+const Base = {
+    value = 0
+    constructor = fn(value)
+        self.value = value
+    end
+}
+const Child : base(Base) = { extra = 1 }
+fn main()
+    local child = Child.new(42)
+    child.destroy()
+    return 0
+end
+`);
+const inheritedConstructorCheck = compilerApi.checkFile(inheritedConstructor);
+const inheritedRoot = inheritedConstructorCheck.root;
+assert.strictEqual(inheritedRoot.structs.get('Child').methods.get('constructor'), inheritedRoot.structs.get('Base').methods.get('constructor'));
+assert.strictEqual(inheritedRoot.functions.get('main').body[0].expression.resolvedCallable.kind, 'struct_construct');
+
+// The engine-facing LazyBehavior pattern can keep an empty object placeholder
+// in the base and let the derived constructor establish the concrete shape.
+const constructorInheritedObjectField = write('constructors/inherited-object-field.lsx', `
+export const LazyBehavior = {
+    parent = null
+    lazyVars = {}
+
+    Start = fn()
+    end
+
+    Update = fn()
+    end
+
+    Draw = fn()
+    end
+}
+
+const Transform : base(LazyBehavior) = {
+    constructor = fn(position, rotation, scale)
+        self.lazyVars = {
+            position = position
+            rotation = rotation
+            scale = scale
+        }
+    end
+}
+
+fn main()
+    local transform = Transform.new(
+        {0, 0, 0},
+        {0, 0, 0},
+        {1, 1, 1}
+    )
+    if transform.lazyVars.position.x ~= 0 then return 1 end
+    if transform.lazyVars.scale.x ~= 1 then return 2 end
+    transform.destroy()
+    return 0
+end
+`);
+const inheritedObjectFieldCheck = compilerApi.checkFile(constructorInheritedObjectField);
+const inheritedObjectRoot = inheritedObjectFieldCheck.root;
+const inheritedLazyVars = inheritedObjectRoot.structs.get('Transform').fieldDeclarations.find((field) => field.name === 'lazyVars' && field.inheritedOverrideOf);
+assert(inheritedLazyVars, 'constructor assignment should specialize the inherited object-field placeholder on the derived object');
+assert(inheritedLazyVars.type.startsWith('__table_'), 'constructor assignment should infer the inherited object-field shape');
+const baseLazyVarsPlaceholder = inheritedObjectRoot.structs.get('LazyBehavior').fieldDeclarations.find((field) => field.name === 'lazyVars');
+assert.strictEqual(baseLazyVarsPlaceholder.type, 'table<any>', 'derived specialization must not change the base placeholder for every other behavior type');
+const inheritedObjectExe = path.join(temp, 'constructors-inherited-object-field.exe');
+const inheritedObjectBuild = run(['build', constructorInheritedObjectField, '-o', inheritedObjectExe, '--opt', '6']);
+assert(fs.existsSync(inheritedObjectExe));
+assert(inheritedObjectBuild.stdout.includes('Optimization: O6'), inheritedObjectBuild.stdout);
+
+// Exported base objects may keep an empty inferred object placeholder while a
+// derived object in another module specializes that inherited pointer field.
+// Brace-delimited object methods are accepted as an optional C#-style spelling
+// alongside the normal LSX `end` form, and the extension bundles this parser.
+write('constructors/cross-module-base.lsx', `
+export const LazyBehavior = {
+    parent = null
+    lazyVars = {}
+
+    Start = fn()
+    end
+
+    Update = fn()
+    end
+}
+`);
+const crossModuleConstructor = write('constructors/cross-module-transform.lsx', `
+use "cross-module-base.lsx" as Engine
+
+const Transform : base(Engine.LazyBehavior) = {
+    constructor = fn(){
+        self.lazyVars = {
+            position = {0, 0, 0}
+            rotation = {0, 0, 0}
+            scale = {1, 1, 1}
+        }
+    }
+}
+
+fn main()
+    local transform = Transform.new()
+    if transform.lazyVars.position.x ~= 0 then return 1 end
+    if transform.lazyVars.scale.x ~= 1 then return 2 end
+    transform.destroy()
+    return 0
+end
+`);
+const crossModuleConstructorCheck = compilerApi.checkFile(crossModuleConstructor);
+const crossModuleTransform = crossModuleConstructorCheck.root.structs.get('Transform');
+const specializedLazyVars = crossModuleTransform.fieldDeclarations.find((field) => field.name === 'lazyVars' && field.inheritedOverrideOf);
+assert(specializedLazyVars, 'derived constructor should specialize the inherited empty-object placeholder');
+assert(specializedLazyVars.type.startsWith('__table_'), 'specialized inherited object field should use the derived literal shape');
+const crossModuleConstructorExe = path.join(temp, 'constructors-cross-module.exe');
+const crossModuleConstructorBuild = run(['build', crossModuleConstructor, '-o', crossModuleConstructorExe, '--opt', '6']);
+assert(fs.existsSync(crossModuleConstructorExe));
+assert(crossModuleConstructorBuild.stdout.includes('Optimization: O6'), crossModuleConstructorBuild.stdout);
+
+const missingBaseConstructorCall = write('constructors/missing-base-call.lsx', `
+const Base = {
+    value = 0
+    constructor = fn(value)
+        self.value = value
+    end
+}
+const Child : base(Base) = {
+    constructor = fn()
+    end
+}
+`);
+const missingBaseConstructorResult = run(['check', missingBaseConstructorCall], 1);
+assert(missingBaseConstructorResult.stderr.includes('must call base.constructor(...) first'), missingBaseConstructorResult.stderr);
+
+const lateBaseConstructorCall = write('constructors/late-base-call.lsx', `
+const Base = {
+    constructor = fn()
+    end
+}
+const Child : base(Base) = {
+    value = 0
+    constructor = fn()
+        self.value = 1
+        base.constructor()
+    end
+}
+`);
+const lateBaseConstructorResult = run(['check', lateBaseConstructorCall], 1);
+assert(lateBaseConstructorResult.stderr.includes('must be the first statement'), lateBaseConstructorResult.stderr);
+
+const manualConstructorCall = write('constructors/manual-call.lsx', `
+const Value = {
+    constructor = fn(value)
+    end
+}
+fn main()
+    local value = Value.new(1)
+    value.constructor(2)
+    return 0
+end
+`);
+const manualConstructorResult = run(['check', manualConstructorCall], 1);
+assert(manualConstructorResult.stderr.includes('constructors are called through Object.new(...)'), manualConstructorResult.stderr);
+
+const staticConstructorCall = write('constructors/static-manual-call.lsx', `
+static const App = {
+    constructor = fn()
+    end
+}
+fn main()
+    App.constructor()
+    return 0
+end
+`);
+const staticConstructorCallResult = run(['check', staticConstructorCall], 1);
+assert(staticConstructorCallResult.stderr.includes('constructed automatically before main'), staticConstructorCallResult.stderr);
+
 // Closed tables are the public object/class/namespace model. Methods that use
 // self receive an implicit native receiver; pure function-table members compile
 // as direct calls with no receiver argument. Typed tables use hidden contiguous
@@ -1468,4 +1720,4 @@ const badResult = run(['check', bad], 1);
 assert(badResult.stderr.includes(`${bad}:3:`));
 assert(badResult.stderr.includes("unknown module alias or closed table 'Missing'"));
 
-console.log('LazyScriptEX 0.18.4 compiler, raw strings, native objects, persistent logs, file I/O, JSON, direct atomics, threading, automatic runtime crash records, sockets, HTTP, and GameKit tests passed.');
+console.log('LazyScriptEX 0.18.6 compiler, raw strings, native objects, persistent logs, file I/O, JSON, direct atomics, threading, automatic runtime crash records, sockets, HTTP, and GameKit tests passed.');
