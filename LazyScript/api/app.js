@@ -2365,7 +2365,7 @@ function setupGuideSearch() {
 }
 
 const API_CATEGORY_DEFINITIONS = [
-  { label: 'Language', description: 'Startup, variables, control flow, functions, tables, objects, modules, strings, and errors', test: module => module.startsWith('Language/') },
+  { label: 'Language', description: 'Startup, variables, control flow, functions, tables, objects, base-object inheritance, modules, strings, and errors', test: module => module.startsWith('Language/') },
   { label: 'User interface', description: 'LazyUI elements, documents, input, and rendering', test: module => module.startsWith('UI/') },
   { label: 'Math and cameras', description: 'GLM vectors, matrices, quaternions, transforms, and cameras', test: module => module.startsWith('Math/') },
   { label: 'Graphics and images', description: 'Images, textures, media, and OpenGL', test: module => module.startsWith('Graphics/') || module === 'OpenGL' || module.startsWith('OpenGL/') },
@@ -2399,7 +2399,7 @@ function buildSpecialTopLevelGroups(module, topEntries) {
       ['Conditions and loops', entry => namesContain(entry, ['if', 'elseif', 'else', 'while', 'for', 'break', 'condition'])],
       ['Functions', entry => namesContain(entry, ['function', 'parameter', 'return', 'call'])],
       ['Tables and buffers', entry => namesContain(entry, ['table', 'push', 'get', 'length', 'remove', 'clear', 'buffer', 'positional', 'byte'])],
-      ['Objects and modules', entry => namesContain(entry, ['object', 'field', 'method', 'new', 'destroy', 'module', 'import', 'use'])]
+      ['Objects, inheritance, and modules', entry => namesContain(entry, ['object', 'field', 'method', 'new', 'destroy', 'base', 'inherit', 'override', 'derived', 'module', 'import', 'use'])]
     );
   } else if (module === 'Math/GLM') {
     rules.push(

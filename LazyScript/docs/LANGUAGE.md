@@ -209,20 +209,120 @@ transform.destroy()
 
 Objects use fixed field offsets and direct method calls. LSX does not require a garbage collector, runtime reflection table, or prototype chain.
 
-## Compile-time inheritance
+## Base-object inheritance
 
-A closed object can inherit from one base object:
+Base-object inheritance lets one closed object reuse the fields and methods of one other closed object. It is useful when several objects are genuinely the same kind of thing and should share a common foundation, such as `Actor` → `Player`, `Component` → `CameraComponent`, or `LazyBehavior` → a game behavior.
+
+Declare the child with `: base(Parent)`:
 
 ```lsx
 const Actor = {
+    name = "Actor"
     active = true
+    x = 0.0
+
+    set_active = fn(value)
+        self.active = value
+    end
 
     update = fn(delta)
+        if self.active then
+            self.x = self.x + delta
+        end
         return 0
     end
 }
 
 const Player : base(Actor) = {
+    health = 100
+
+    heal = fn(amount)
+        self.health = self.health + amount
+        if self.health > 100 then self.health = 100 end
+    end
+
+    update = fn(delta)
+        base.update(delta)
+        if self.health < 100 then self.health = self.health + 1 end
+        return 0
+    end
+}
+
+fn main()
+    local player = Player.new()
+
+    -- These fields and methods came from Actor.
+    player.name = "Hero"
+    player.set_active(true)
+
+    -- This calls Player.update(), which then calls Actor.update().
+    player.update(0.016)
+
+    player.heal(10)
+    player.destroy()
+    return 0
+end
+```
+
+### What the child receives
+
+A child object receives the base object's fields and methods automatically:
+
+```lsx
+local player = Player.new()
+
+player.name = "Hero"       -- inherited field
+player.active = false      -- inherited field
+player.set_active(true)    -- inherited method
+player.heal(25)            -- Player method
+
+player.destroy()
+```
+
+The inherited fields are part of the same object allocation. Do not create or destroy a separate `Actor` object for a `Player`.
+
+### Overriding a method
+
+Give the child a method with the same name to replace the inherited version for that child type:
+
+```lsx
+const Player : base(Actor) = {
+    health = 100
+
+    update = fn(delta)
+        base.update(delta)
+        -- Player-only update work goes here.
+        return 0
+    end
+}
+```
+
+Inside an overriding method, `base.method(...)` calls the implementation on the immediate base object. It does not require `self` as an argument.
+
+### Multi-level inheritance
+
+A child can become the base of another object:
+
+```lsx
+const FastPlayer : base(Player) = {
+    speed = 12.0
+}
+
+local runner = FastPlayer.new()
+runner.name = "Runner"     -- from Actor
+runner.health = 100        -- from Player
+runner.speed = 18.0        -- from FastPlayer
+runner.destroy()
+```
+
+### Inheriting from an imported module
+
+The base object may come from another LSX file:
+
+```lsx
+use "../Engine/LazyBehavior.lsx" as Engine
+
+const PlayerBehavior : base(Engine.LazyBehavior) = {
     health = 100
 
     update = fn(delta)
@@ -232,14 +332,20 @@ const Player : base(Actor) = {
 }
 ```
 
-Inheritance is resolved at compile time:
+### Rules to remember
 
-- inherited fields remain a fixed prefix of the derived layout;
-- derived fields are appended;
-- a same-named method overrides the base method;
-- `base.method(...)` calls the immediate base implementation;
-- circular inheritance is rejected;
-- no runtime vtable or prototype walk is added.
+- An object can have one direct base object.
+- The base must be a closed object that the current file can access directly or through an imported module alias.
+- Inherited fields become part of the child's fixed object layout.
+- New child fields are appended after the inherited fields.
+- A child cannot declare a field with the same name as an inherited field.
+- A same-named child method overrides the inherited method.
+- `base.method(...)` calls the immediate base implementation.
+- Circular inheritance and inheriting from the object itself are compile errors.
+- Create the final child with `.new()` and destroy that one instance once with `.destroy()`.
+- Inheritance is resolved during compilation. LSX adds no runtime prototype walk, reflection lookup, or virtual-table cost.
+
+Use inheritance for a real “is a kind of” relationship. Use normal object fields when one object merely contains or uses another object.
 
 ## Tables and native storage
 

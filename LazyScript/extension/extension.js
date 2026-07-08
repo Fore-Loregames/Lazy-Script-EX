@@ -39,7 +39,9 @@ const BUILTIN_DOCS = {
   'thread.start': ['thread.start(entry:fnptr, context:ptr) -> handle', 'Starts a real Windows operating-system thread at a compiled LSX function entry point.'],
   'thread.join': ['thread.join(handle:handle) -> bool', 'Waits until a native LSX worker thread exits.'],
   'thread.close': ['thread.close(handle:handle) -> bool', 'Closes a native thread handle.'],
-  'thread.cpu_count': ['thread.cpu_count() -> i32', 'Returns the number of logical processors visible to the process.']
+  'thread.cpu_count': ['thread.cpu_count() -> i32', 'Returns the number of logical processors visible to the process.'],
+  'base': ['const Child : base(Parent) = { ... }', 'Declares one compile-time base object for a closed child object. The child receives the base fields and methods. Use base.method(...) inside an override to call the immediate base implementation.'],
+  'base.method': ['base.method(arguments)', 'Calls the immediate base implementation from inside a child method. Do not pass self manually.']
 };
 
 function keyForFile(file) {
@@ -309,9 +311,10 @@ function parseText(uri, text) {
       symbols.push({ name: m[2], kind: 'function', parameters: parameterInfo(m[3]), returnType, signature: `${m[2]}(${m[3].trim()})${returnType ? ` -> ${returnType}` : ''}`, line: i, column: raw.indexOf(m[2]), exported: Boolean(m[1]), documentation: documentationBefore(lines, i) });
       continue;
     }
-    if ((m = raw.match(/^\s*(export\s+)?const\s+([A-Za-z_]\w*)\s*(?::\s*base\s*\([^)]*\))?\s*=\s*\{/))) {
+    if ((m = raw.match(/^\s*(export\s+)?const\s+([A-Za-z_]\w*)\s*(?::\s*base\s*\(([^)]+)\))?\s*=\s*\{/))) {
       const parsed = parseMembers(lines, i, m[2]);
-      symbols.push({ name: m[2], kind: 'object', signature: `const ${m[2]}`, line: i, column: raw.indexOf(m[2]), exported: Boolean(m[1]), members: parsed.members, endLine: parsed.endLine, documentation: documentationBefore(lines, i) });
+      const baseRef = m[3]?.trim() || '';
+      symbols.push({ name: m[2], kind: 'object', signature: `const ${m[2]}${baseRef ? ` : base(${baseRef})` : ''}`, baseRef, line: i, column: raw.indexOf(m[2]), exported: Boolean(m[1]), members: parsed.members, endLine: parsed.endLine, documentation: documentationBefore(lines, i) });
       i = parsed.endLine;
       continue;
     }
@@ -500,18 +503,60 @@ function resolveTypeObject(record, typeRef) {
   return null;
 }
 
-function resolveInstanceMember(record, variableName, memberName) {
+function resolveObjectReference(record, reference) {
+  if (!reference) return null;
+  const parts = reference.split('.').map(part => part.trim()).filter(Boolean);
+  if (parts.length === 2 && record.imports.has(parts[0])) {
+    const hit = importedSymbol(record, parts[0], parts[1]);
+    return hit?.symbol?.members ? { record: hit.record, object: hit.symbol } : null;
+  }
+  if (parts.length === 1) {
+    const local = record.symbols.find(symbol => symbol.name === parts[0] && symbol.members);
+    if (local) return { record, object: local };
+    for (const [alias] of record.imports) {
+      const hit = importedSymbol(record, alias, parts[0]);
+      if (hit?.symbol?.members) return { record: hit.record, object: hit.symbol };
+    }
+  }
+  return null;
+}
+
+function inheritedMembers(record, object, visited = new Set()) {
+  if (!object) return [];
+  const key = `${record.uri.fsPath}|${object.name}`.toLowerCase();
+  if (visited.has(key)) return object.members || [];
+  visited.add(key);
+  const own = object.members || [];
+  const base = resolveObjectReference(record, object.baseRef);
+  if (!base) return own;
+  const inherited = inheritedMembers(base.record, base.object, visited);
+  const overridden = new Set(own.map(member => member.name));
+  return [...own, ...inherited.filter(member => !overridden.has(member.name))];
+}
+
+function memberFromHierarchy(record, object, memberName) {
+  const own = object?.members?.find(member => member.name === memberName);
+  if (own) return { record, symbol: own, parent: object };
+  const base = resolveObjectReference(record, object?.baseRef);
+  if (!base) return null;
+  const hit = memberFromHierarchy(base.record, base.object, memberName);
+  return hit ? { ...hit, inheritedBy: object } : null;
+}
+
+function containingObject(record, line) {
+  return record.symbols.find(symbol => symbol.members && symbol.line <= line && symbol.endLine >= line) || null;
+}
+
+function resolveInstanceMember(record, variableName, memberName, line = -1) {
   if (variableName === 'self') {
-    const object = record.symbols.find(s => s.members?.some(m => m.name === memberName));
-    const member = object?.members?.find(m => m.name === memberName);
-    return member ? { record, symbol: member, parent: object } : null;
+    const object = line >= 0 ? containingObject(record, line) : record.symbols.find(symbol => symbol.members);
+    return object ? memberFromHierarchy(record, object, memberName) : null;
   }
   const variable = record.symbols.find(s => s.kind === 'variable' && s.name === variableName);
   if (!variable) return null;
   const typeRef = variable.typeRef || inferTypeFromInitializer(record, variable.initializer);
   const resolved = resolveTypeObject(record, typeRef);
-  const member = resolved?.object?.members?.find(m => m.name === memberName);
-  return member ? { record: resolved.record, symbol: member, parent: resolved.object } : null;
+  return resolved ? memberFromHierarchy(resolved.record, resolved.object, memberName) : null;
 }
 
 function chainContext(document, position) {
@@ -530,12 +575,17 @@ function chainContext(document, position) {
   return { chain, word: wordRange ? document.getText(wordRange) : chain.at(-1) || '', range: wordRange, line, text };
 }
 
-function resolveChain(record, chain) {
+function resolveChain(record, chain, line = -1) {
   if (!chain.length) return null;
+  if (chain.length >= 2 && chain[0] === 'base') {
+    const object = containingObject(record, line);
+    const base = resolveObjectReference(record, object?.baseRef);
+    if (base) return memberFromHierarchy(base.record, base.object, chain[1]);
+  }
   if (chain.length >= 3 && record.imports.has(chain[0])) return importedSymbol(record, chain[0], chain[1], chain[2]);
   if (chain.length >= 2 && record.imports.has(chain[0])) return importedSymbol(record, chain[0], chain[1]);
   if (chain.length >= 2) {
-    const instance = resolveInstanceMember(record, chain[0], chain[1]);
+    const instance = resolveInstanceMember(record, chain[0], chain[1], line);
     if (instance) return instance;
     const object = record.symbols.find(s => s.name === chain[0] && s.members);
     const member = object?.members?.find(m => m.name === chain[1]);
@@ -914,7 +964,12 @@ class CompletionProvider {
         return target ? target.exports.map(sym => completionFor(target, sym, `${base[0]}.`)) : [];
       }
       if (base.length === 1) {
-        const builtinItems = Object.entries(BUILTIN_DOCS).filter(([name]) => name.startsWith(`${base[0]}.`)).map(([name, info]) => {
+        if (base[0] === 'base') {
+          const object = containingObject(record, position.line);
+          const resolvedBase = resolveObjectReference(record, object?.baseRef);
+          if (resolvedBase) return inheritedMembers(resolvedBase.record, resolvedBase.object).filter(sym => sym.kind === 'method' && !sym.name.startsWith('_')).map(sym => completionFor(resolvedBase.record, sym, 'base.', resolvedBase.object));
+        }
+        const builtinItems = Object.entries(BUILTIN_DOCS).filter(([name]) => name.startsWith(`${base[0]}.`) && name !== 'base.method').map(([name, info]) => {
           const method = name.slice(base[0].length + 1);
           const item = new vscode.CompletionItem(method, vscode.CompletionItemKind.Function);
           item.detail = info[0];
@@ -931,10 +986,10 @@ class CompletionProvider {
         if (variable) {
           const typeRef = variable.typeRef || inferTypeFromInitializer(record, variable.initializer);
           const resolved = resolveTypeObject(record, typeRef);
-          if (resolved) return resolved.object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(resolved.record, sym, `${base[0]}.`, resolved.object));
+          if (resolved) return inheritedMembers(resolved.record, resolved.object).filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(resolved.record, sym, `${base[0]}.`, resolved.object));
         }
         const object = record.symbols.find(s => s.name === base[0] && s.members);
-        if (object) return object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(record, sym, `${base[0]}.`, object));
+        if (object) return inheritedMembers(record, object).filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(record, sym, `${base[0]}.`, object));
       }
     }
     const items = KEYWORDS.map(keyword => new vscode.CompletionItem(keyword, vscode.CompletionItemKind.Keyword));
@@ -959,7 +1014,7 @@ class HoverProvider {
       return new vscode.Hover(markdownForLscssProperty(ctx.word));
     }
     const record = activeRecord(document);
-    const hit = resolveChain(record, ctx.chain);
+    const hit = resolveChain(record, ctx.chain, position.line);
     if (hit) return new vscode.Hover(markdownForSymbol(hit.record, hit.symbol, hit.parent));
     const builtinKey = ctx.chain.slice(-2).join('.');
     const builtin = BUILTIN_DOCS[builtinKey];
@@ -988,7 +1043,7 @@ class DefinitionProvider {
       const target = indexedFile(resolveImport(imp.spec, record.uri.fsPath));
       if (target) return new vscode.Location(target.uri, new vscode.Position(0, 0));
     }
-    const hit = resolveChain(record, ctx.chain);
+    const hit = resolveChain(record, ctx.chain, position.line);
     if (hit) return symbolLocation(hit.record, hit.symbol);
     for (const r of index.values()) {
       const sym = r.exports.find(s => s.name === word);
@@ -1410,5 +1465,5 @@ function deactivate() {
 }
 module.exports = {
   activate, deactivate, parseText, resolveImport, chainContext, inferTypeFromInitializer,
-  _test: { index, loadRecordSync, importedSymbol, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, HoverProvider, parseCompilerDiagnostics }
+  _test: { index, loadRecordSync, importedSymbol, resolveChain, resolveInstanceMember, inheritedMembers, memberFromHierarchy, resolveObjectReference, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, HoverProvider, parseCompilerDiagnostics }
 };

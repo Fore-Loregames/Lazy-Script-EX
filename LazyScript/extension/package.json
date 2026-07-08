@@ -2,7 +2,7 @@
   "name": "lazyscriptex-native-gamekit",
   "displayName": "LazyScriptEX Native GameKit",
   "description": "Native LazyScriptEX tooling with beginner-friendly API hovers, exact compiler ranges, project diagnostics, LSHTML/LSCSS support, inferred LSX syntax, and O6 native compilation.",
-  "version": "0.18.1",
+  "version": "0.18.2",
   "publisher": "nissyokugames",
   "license": "MIT",
   "engines": {

@@ -440,5 +440,46 @@
       "renderer.destroy()"
     ],
     "description": "Create and render a retained LazyUI tree without exposed pointers"
+  },
+  "Base-object inheritance": {
+    "prefix": "lsx-inherit",
+    "body": [
+      "const ${1:Actor} = {",
+      "    ${2:active} = true",
+      "",
+      "    ${3:update} = fn(${4:delta})",
+      "        ${5:-- shared behavior}",
+      "        return 0",
+      "    end",
+      "}",
+      "",
+      "const ${6:Player} : base(${1:Actor}) = {",
+      "    ${7:health} = 100",
+      "",
+      "    ${3:update} = fn(${4:delta})",
+      "        base.${3:update}(${4:delta})",
+      "        $0",
+      "        return 0",
+      "    end",
+      "}"
+    ],
+    "description": "Define a child object that inherits fields and methods from one base object"
+  },
+  "Imported base-object inheritance": {
+    "prefix": "lsx-inherit-imported",
+    "body": [
+      "use \"${1:../Engine/LazyBehavior.lsx}\" as ${2:Engine}",
+      "",
+      "const ${3:PlayerBehavior} : base(${2:Engine}.${4:LazyBehavior}) = {",
+      "    ${5:health} = 100",
+      "",
+      "    ${6:update} = fn(${7:delta})",
+      "        base.${6:update}(${7:delta})",
+      "        $0",
+      "        return 0",
+      "    end",
+      "}"
+    ],
+    "description": "Inherit from an exported base object in another LSX module"
   }
 }

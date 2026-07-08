@@ -174,4 +174,45 @@ const canvasSnippet = snippets['Declarative LazyUI canvas'];
 assert(canvasSnippet && canvasSnippet.body.some(line => line.includes('<rect class="${2:preview-shape}"')), 'declarative canvas snippet is missing');
 assert(!snippetsText.includes('context.fill_rounded_rect'), 'extension still advertises imperative canvas drawing');
 assert(canvasSnippet.body.some(line => line.includes('background = {${3:props.accent}}')), 'LSCSS {var} snippet is missing');
+
+
+// Base-object inheritance is indexed for hover and completion without duplicate child members.
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lsx-extension-inheritance-'));
+  const file = path.join(tmp, 'main.lsx');
+  fs.writeFileSync(file, `
+const Actor = {
+    active = true
+    update = fn(delta)
+        return 0
+    end
+}
+
+const Player : base(Actor) = {
+    health = 100
+    update = fn(delta)
+        base.update(delta)
+        return 0
+    end
+}
+
+fn main()
+    local player = Player.new()
+    player.active = true
+    player.update(0.016)
+    player.destroy()
+    return 0
+end
+`);
+  const record = extension._test.loadRecordSync(file);
+  const playerObject = record.symbols.find(symbol => symbol.name === 'Player');
+  assert.strictEqual(playerObject.baseRef, 'Actor', 'base object reference was not indexed');
+  const inherited = extension._test.resolveInstanceMember(record, 'player', 'active');
+  assert(inherited && inherited.symbol.name === 'active', 'inherited field was not resolved on a child instance');
+  const baseCall = extension._test.resolveChain(record, ['base', 'update'], playerObject.line + 3);
+  assert(baseCall && baseCall.symbol.name === 'update', 'base.method was not resolved to the immediate base method');
+  const allMembers = extension._test.inheritedMembers(record, playerObject).map(member => member.name);
+  assert(allMembers.includes('health') && allMembers.includes('active') && allMembers.includes('update'), 'child completion list is missing inherited members');
+}
+
 console.log('LazyScriptEX extension navigation, LSHTML/LSCSS symbols, and inferred member tests passed.');
