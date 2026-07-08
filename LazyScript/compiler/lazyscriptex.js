@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const { buildNativeBindings } = require('./native_bindings');
 const { compileInlineUiSource } = require('./inline_ui');
 
-const VERSION = '0.18.9';
+const VERSION = '0.18.10';
 const PE_IMAGE_BASE = 0x140000000n;
 
 
@@ -357,6 +357,32 @@ function canonicalTypeName(type) {
   const generic = /^table<(.+)>$/.exec(compact);
   if (generic) return `table<${canonicalTypeName(generic[1])}>`;
   return compact;
+}
+const INTERNAL_STRUCT_TYPE_PREFIX = '$lsx$';
+function internalStructTypeName(struct) {
+  return `${INTERNAL_STRUCT_TYPE_PREFIX}${struct.module.id}$${struct.name}`;
+}
+function parseInternalStructTypeName(typeName) {
+  const name = canonicalTypeName(typeName);
+  if (!name.startsWith(INTERNAL_STRUCT_TYPE_PREFIX)) return null;
+  const body = name.slice(INTERNAL_STRUCT_TYPE_PREFIX.length);
+  const separator = body.lastIndexOf('$');
+  if (separator <= 0 || separator >= body.length - 1) return null;
+  return { moduleId: body.slice(0, separator), structName: body.slice(separator + 1) };
+}
+function syntacticReferenceOwnership(expression) {
+  if (!expression) return 'unknown';
+  if (expression.kind === 'reference' || expression.kind === 'index') return 'borrowed';
+  if (expression.kind === 'table_literal') return 'owned';
+  if (expression.kind === 'call') {
+    const operation = expression.path?.[expression.path.length - 1] || '';
+    if (operation === 'new' || operation === 'clone') return 'owned';
+    return 'borrowed';
+  }
+  return 'unknown';
+}
+function fieldOwnsStructStorage(field) {
+  return Boolean(field?.typeInfo?.kind === 'struct' && field.ownership !== 'borrowed');
 }
 function callArguments(expr) { return expr.effectiveArgs || expr.args || []; }
 function expressionType(expr) { return expr?.inferredType || expr?.valueType || 'i64'; }
@@ -1078,6 +1104,7 @@ class Program {
     if (!mergedRoots.LazyScript && bundledRoot) mergedRoots.LazyScript = bundledRoot;
     this.moduleRoots = new Map(Object.entries(mergedRoots).map(([name, value]) => [name, path.resolve(value)]));
     this.modules = new Map();
+    this.modulesById = new Map();
     this.moduleOrder = [];
     this.imports = new Map();
     this.usesBuiltins = new Set();
@@ -1148,7 +1175,15 @@ class Program {
         }
         const literalType = inferLiteralType(entry.expression);
         const type = entry.declaredType ? canonicalTypeName(entry.declaredType) : ((literalType === 'ptr' && entry.expression.kind === 'literal' && entry.expression.value === 0n) ? 'auto' : (literalType || 'auto'));
-        fieldDeclarations.push({ name: entry.name, type, explicitType: Boolean(entry.declaredType), expression: runtimeLiteral ? null : entry.expression, token: entry.token, positionalIndex: entry.positionalIndex ?? null });
+        fieldDeclarations.push({
+          name: entry.name,
+          type,
+          explicitType: Boolean(entry.declaredType),
+          expression: runtimeLiteral ? null : entry.expression,
+          token: entry.token,
+          positionalIndex: entry.positionalIndex ?? null,
+          ownership: runtimeLiteral ? 'unknown' : syntacticReferenceOwnership(entry.expression),
+        });
         const emptySequenceField = entry.expression.kind === 'table_literal' && entry.expression.entries.length === 0;
         if (!runtimeLiteral && !emptySequenceField) staticValues.set(entry.name, {
           kind: 'constant', name: entry.name, expression: entry.expression, exported: decl.exported,
@@ -1156,7 +1191,10 @@ class Program {
         });
       }
     } else {
-      fieldDeclarations.push(...(decl.fields || []));
+      fieldDeclarations.push(...(decl.fields || []).map((field) => ({
+        ...field,
+        ownership: field.ownership || syntacticReferenceOwnership(field.expression),
+      })));
       for (const method of decl.methods || []) methodEntries.push({ name: method.name, expression: { ...method, kind: 'function_expression' }, token: method.token });
     }
     const packedType = {
@@ -1222,7 +1260,15 @@ class Program {
     }
     const literalType = inferLiteralType(decl.expression);
     const type = (literalType === 'ptr' && decl.expression.kind === 'literal' && decl.expression.value === 0n) ? 'auto' : (literalType || 'auto');
-    table.fieldDeclarations.push({ name: decl.memberName, type, explicitType: false, expression: decl.expression, token: decl.token, declaringStruct: table });
+    table.fieldDeclarations.push({
+      name: decl.memberName,
+      type,
+      explicitType: false,
+      expression: decl.expression,
+      token: decl.token,
+      declaringStruct: table,
+      ownership: syntacticReferenceOwnership(decl.expression),
+    });
     table.staticValues.set(decl.memberName, {
       kind: 'constant', name: decl.memberName, expression: decl.expression, exported: table.exported,
       module, resolved: false, resolving: false, value: null, type: null, token: decl.token,
@@ -1267,6 +1313,7 @@ class Program {
       legacyStatements: ast.legacyStatements,
     };
     this.modules.set(absolute, module);
+    this.modulesById.set(module.id, module);
     this.moduleOrder.push(module);
 
     for (const decl of ast.declarations) {
@@ -1338,6 +1385,8 @@ class Program {
   resolveStructIdentity(module, typeName) {
     const name = canonicalTypeName(typeName);
     if (isAutoType(name) || PRIMITIVE_TYPES.has(name) || isTableTypeName(name)) return null;
+    const internal = parseInternalStructTypeName(name);
+    if (internal) return this.modulesById.get(internal.moduleId)?.structs.get(internal.structName) || null;
     const parts = name.split('.');
     if (parts.length === 1) return module.structs.get(parts[0]) || null;
     if (parts.length === 2) {
@@ -1360,7 +1409,11 @@ class Program {
     for (const [alias, use] of toModule.uses) {
       if (use.target === struct.module) return `${alias}.${struct.name}`;
     }
-    throw new CompileError(`module cannot name inferred type '${struct.name}' because its source module is not imported`, struct.token);
+    // Inferred object identities are compiler-owned metadata, not source-level
+    // dependencies. Keep the concrete struct identity internally so a module
+    // can retain a borrowed object passed by another module without requiring a
+    // reverse import and creating an artificial dependency cycle.
+    return internalStructTypeName(struct);
   }
 
   inferenceTypesSame(leftType, leftModule, rightType, rightModule) {
@@ -1387,12 +1440,9 @@ class Program {
     const currentStructBeforeTranslation = this.resolveStructIdentity(currentModule, current);
     const incomingStructBeforeTranslation = this.resolveStructIdentity(incomingModule, incoming);
     if (!explicit && (isAutoType(current) || current === 'any') && incomingStructBeforeTranslation) {
-      const nameable = this.nameableInferenceAncestor(incomingStructBeforeTranslation, currentModule);
-      if (nameable) return this.translateInferredType(nameable.name, nameable.module, currentModule);
-      // The receiving module cannot legally name this concrete object yet.
-      // Leave the slot open so its own method/field use can infer an imported
-      // base on a later pass instead of reporting a false cross-module error.
-      return current;
+      const nameable = this.nameableInferenceAncestor(incomingStructBeforeTranslation, currentModule)
+        || incomingStructBeforeTranslation;
+      return this.translateInferredType(nameable.name, nameable.module, currentModule);
     }
     if (!explicit && currentStructBeforeTranslation && incomingStructBeforeTranslation) {
       const common = this.nearestCommonInferenceBase([currentStructBeforeTranslation, incomingStructBeforeTranslation]);
@@ -1404,11 +1454,9 @@ class Program {
       const incomingElement = this.resolveStructIdentity(incomingModule, tableElementTypeName(incoming));
       if (incomingElement) {
         const nameable = this.nameableInferenceAncestor(incomingElement, currentModule);
-        if (nameable) {
-          const commonName = this.translateInferredType(nameable.name, nameable.module, currentModule);
-          return `table<${commonName}>`;
-        }
-        return current;
+        const inferredElement = nameable || incomingElement;
+        const commonName = this.translateInferredType(inferredElement.name, inferredElement.module, currentModule);
+        return `table<${commonName}>`;
       }
     }
 
@@ -1515,6 +1563,7 @@ class Program {
         positionalIndex: inheritedField.positionalIndex ?? null,
         declaringStruct: ownerStruct,
         inheritedOverrideOf: inheritedField,
+        ownership: 'unknown',
       };
       ownerStruct.fieldDeclarations.push(override);
       ownerStruct.layoutResolved = false;
@@ -1556,6 +1605,28 @@ class Program {
       current = current.baseType || null;
     }
     return depth;
+  }
+
+  mergeFieldOwnership(field, incomingOwnership) {
+    if (!field || !incomingOwnership || incomingOwnership === 'unknown') return false;
+    const current = field.ownership || 'unknown';
+    if (current === incomingOwnership) return false;
+    if (current === 'unknown') {
+      field.ownership = incomingOwnership;
+      this.inferenceChanged = true;
+      return true;
+    }
+    // A field that ever receives an existing object reference is a borrowed
+    // alias. Borrowed wins over owned because recursively freeing a live alias
+    // is unsafe; replacing an owned value remains the caller's responsibility.
+    if (incomingOwnership === 'borrowed' && current !== 'borrowed') {
+      field.ownership = 'borrowed';
+      field.mixedOwnership = true;
+      this.inferenceChanged = true;
+      return true;
+    }
+    if (current === 'borrowed' && incomingOwnership === 'owned') field.mixedOwnership = true;
+    return false;
   }
 
   commonInferenceAncestors(matches) {
@@ -2002,14 +2073,16 @@ class Program {
     if (!expression) return { type: 'void', module };
     if (!isAutoType(expectedType)) this.applyInferenceExpected(expression, expectedType, expectedModule, module, scope);
 
-    if (expression.kind === 'literal') return { type: canonicalTypeName(expression.valueType), module };
+    if (expression.kind === 'literal') return { type: canonicalTypeName(expression.valueType), module, ownership: 'unknown' };
     if (expression.kind === 'reference') {
       const resolved = this.inferenceReference(module, expression.path, scope);
       // A parameter that only received the final integer fallback is still
       // semantically unanchored. Do not let that fallback leak into growable
       // tables or loop items during the last inference wave.
-      if (resolved?.variable?.param?.inferenceDefaulted) return { type: 'auto', module: resolved.module || module };
-      return resolved ? { type: canonicalTypeName(resolved.type), module: resolved.module } : { type: 'auto', module };
+      if (resolved?.variable?.param?.inferenceDefaulted) return { type: 'auto', module: resolved.module || module, ownership: 'borrowed' };
+      return resolved
+        ? { type: canonicalTypeName(resolved.type), module: resolved.module, ownership: 'borrowed' }
+        : { type: 'auto', module, ownership: 'borrowed' };
     }
     if (expression.kind === 'table_literal') {
       const expectedLiteralType = expression.expectedType ? canonicalTypeName(expression.expectedType) : null;
@@ -2033,6 +2106,7 @@ class Program {
             if ((isAutoType(field.type) || inferredReferencePlaceholder) && !isAutoType(actual.type)) {
               this.setInferredSlot(field, 'type', actual.type, actual.module, packed.module, Boolean(field.explicitType), entry.token || expression.token, `object value '${entry.name}'`);
             }
+            this.mergeFieldOwnership(field, actual.ownership || syntacticReferenceOwnership(entry.expression));
           }
           if (packed.positional) {
             const commonType = inferPositionalNativeElementType(expression.entries || [], inferredEntries);
@@ -2046,11 +2120,11 @@ class Program {
           }
         }
         return expectedLiteralType
-          ? { type: expectedLiteralType, module }
-          : { type: packed.name, module: packed.module };
+          ? { type: expectedLiteralType, module, ownership: 'owned' }
+          : { type: packed.name, module: packed.module, ownership: 'owned' };
       }
-      if (expectedLiteralType) return { type: expectedLiteralType, module };
-      return { type: 'auto', module };
+      if (expectedLiteralType) return { type: expectedLiteralType, module, ownership: 'owned' };
+      return { type: 'auto', module, ownership: 'owned' };
     }
     if (expression.kind === 'unary') {
       if (expression.operator === 'not') {
@@ -2085,8 +2159,8 @@ class Program {
       if (comparison) return { type: 'bool', module };
       if (isFloatType(canonicalTypeName(left.type)) || isFloatType(canonicalTypeName(right.type))) return { type: 'f32', module };
       if (!isAutoType(left.type) || !isAutoType(right.type)) return { type: 'i64', module };
-      if (!isAutoType(expectedType)) return { type: canonicalTypeName(expectedType), module: expectedModule };
-      return { type: 'auto', module };
+      if (!isAutoType(expectedType)) return { type: canonicalTypeName(expectedType), module: expectedModule, ownership: 'borrowed' };
+      return { type: 'auto', module, ownership: 'borrowed' };
     }
     if (expression.kind === 'index') {
       const object = this.inferExpression(expression.object, module, scope);
@@ -2096,11 +2170,11 @@ class Program {
         if (element === 'any') {
           if (!isAutoType(expectedType)) {
             this.applyInferenceExpected(expression.object, `table<${this.translateInferredType(expectedType, expectedModule, module)}>`, module, module, scope);
-            return { type: canonicalTypeName(expectedType), module: expectedModule };
+            return { type: canonicalTypeName(expectedType), module: expectedModule, ownership: 'borrowed' };
           }
-          return { type: 'auto', module };
+          return { type: 'auto', module, ownership: 'borrowed' };
         }
-        return { type: element, module: object.module };
+        return { type: element, module: object.module, ownership: 'borrowed' };
       }
       const positionalStruct = this.resolveStructIdentity(object.module, object.type);
       if (positionalStruct?.positional) {
@@ -2109,18 +2183,18 @@ class Program {
           .sort((left, right) => left.positionalIndex - right.positionalIndex);
         if (expression.index.kind === 'literal' && typeof expression.index.value === 'bigint') {
           const field = fields[Number(expression.index.value)];
-          if (field) return { type: canonicalTypeName(field.type), module: positionalStruct.module };
+          if (field) return { type: canonicalTypeName(field.type), module: positionalStruct.module, ownership: 'borrowed' };
         }
         const firstType = fields[0]?.type;
         if (firstType && !isAutoType(firstType) && fields.every((field) => canonicalTypeName(field.type) === canonicalTypeName(firstType))) {
-          return { type: canonicalTypeName(firstType), module: positionalStruct.module };
+          return { type: canonicalTypeName(firstType), module: positionalStruct.module, ownership: 'borrowed' };
         }
       }
       if (!isAutoType(expectedType)) {
         this.applyInferenceExpected(expression.object, `table<${this.translateInferredType(expectedType, expectedModule, module)}>`, module, module, scope);
-        return { type: canonicalTypeName(expectedType), module: expectedModule };
+        return { type: canonicalTypeName(expectedType), module: expectedModule, ownership: 'borrowed' };
       }
-      return { type: 'auto', module };
+      return { type: 'auto', module, ownership: 'borrowed' };
     }
     if (expression.kind === 'call') {
       let callable = this.inferenceCallable(module, expression, scope);
@@ -2310,7 +2384,11 @@ class Program {
         this.setInferredSlot(callable.target, 'returnType', expectedType, expectedModule, callable.target.module, Boolean(callable.target.explicitReturnType), expression.token, `return type of '${callable.target.sourceName || callable.target.name}'`);
       }
       const returnType = callable.kind === 'internal' ? callable.target.returnType : callable.returnType;
-      return { type: canonicalTypeName(returnType), module: callable.module || module };
+      const returnStruct = this.resolveStructIdentity(callable.module || module, returnType);
+      const ownership = ['struct_new', 'struct_clone', 'struct_construct'].includes(callable.kind)
+        ? 'owned'
+        : (returnStruct ? 'borrowed' : 'unknown');
+      return { type: canonicalTypeName(returnType), module: callable.module || module, ownership };
     }
     return { type: 'auto', module };
   }
@@ -2370,6 +2448,12 @@ class Program {
               : target.field;
             const fieldStruct = field.declaringStruct || target.struct;
             this.setInferredSlot(field, 'type', inferred.type, inferred.module, fieldStruct.module, false, statement.token, `field '${fieldStruct.name}.${field.name}'`);
+            this.mergeFieldOwnership(field, inferred.ownership || syntacticReferenceOwnership(statement.expression));
+          } else if (target?.field && !unresolvedMember) {
+            const field = specializeInherited
+              ? this.ensureInheritedFieldSpecialization(ownerStruct, target.field, statement.token)
+              : target.field;
+            this.mergeFieldOwnership(field, inferred.ownership || syntacticReferenceOwnership(statement.expression));
           }
         } else if (statement.kind === 'index_assign') {
           let target = this.inferExpression(statement.target, fn.module, scope);
@@ -2498,10 +2582,13 @@ class Program {
       }
       return { kind: 'table', name, size: 8, alignment: 8, element };
     }
+    const internal = parseInternalStructTypeName(name);
     const parts = name.split('.');
-    let struct = null;
-    if (parts.length === 1) struct = module.structs.get(parts[0]);
-    else if (parts.length === 2) {
+    let struct = internal
+      ? (this.modulesById.get(internal.moduleId)?.structs.get(internal.structName) || null)
+      : null;
+    if (!internal && parts.length === 1) struct = module.structs.get(parts[0]);
+    else if (!internal && parts.length === 2) {
       const use = module.uses.get(parts[0]);
       if (!use) throw new CompileError(`unknown module alias '${parts[0]}' in type '${name}'`, token);
       struct = use.target.structs.get(parts[1]);
@@ -2517,16 +2604,17 @@ class Program {
 
   externalizeType(typeName, declarationModule, callerModule) {
     const name = canonicalTypeName(typeName || 'i64');
-    if (!declarationModule || declarationModule === callerModule || PRIMITIVE_TYPES.has(name)) return name;
+    if (PRIMITIVE_TYPES.has(name)) return name;
     if (isTableTypeName(name)) {
       return `table<${this.externalizeType(tableElementTypeName(name), declarationModule, callerModule)}>`;
     }
-    if (name.includes('.')) return name;
-    if (!declarationModule.structs.has(name)) return name;
+    const struct = this.resolveStructIdentity(declarationModule || callerModule, name);
+    if (!struct) return name;
+    if (struct.module === callerModule) return struct.name;
     for (const [alias, use] of callerModule.uses) {
-      if (use.target === declarationModule) return `${alias}.${name}`;
+      if (use.target === struct.module) return `${alias}.${struct.name}`;
     }
-    return name;
+    return internalStructTypeName(struct);
   }
 
   compatibleTypes(fromType, fromModule, toType, toModule, token = null) {
@@ -2904,6 +2992,7 @@ class Program {
           defaultType: fieldDecl.type,
           defaultConstructTable: false,
           inheritedFrom: inheritedStorage.inheritedFrom || inheritedStorage.struct || struct.baseType,
+          ownership: fieldDecl.ownership || inheritedStorage.ownership || 'unknown',
         };
         struct.fields.set(field.name, field);
         const fieldIndex = struct.fieldOrder.findIndex((candidate) => candidate.name === field.name);
@@ -2941,7 +3030,18 @@ class Program {
       } else if (typeInfo.kind === 'primitive') {
         defaultValue = typeInfo.name === 'string' ? '' : (typeInfo.name === 'f32' ? 0.0 : 0n);
       } else defaultValue = 0n;
-      const field = { ...fieldDecl, struct, typeInfo, offset, size, alignment, defaultValue, defaultType, defaultConstructTable };
+      const field = {
+        ...fieldDecl,
+        struct,
+        typeInfo,
+        offset,
+        size,
+        alignment,
+        defaultValue,
+        defaultType,
+        defaultConstructTable,
+        ownership: fieldDecl.ownership || syntacticReferenceOwnership(fieldDecl.expression),
+      };
       struct.fields.set(field.name, field);
       struct.fieldOrder.push(field);
       offset += size;
@@ -5264,7 +5364,7 @@ class Optimizer {
         return;
       }
       for (const field of struct.fieldOrder) {
-        if (field.typeInfo.kind === 'struct') queueDestroyImplementation(field.typeInfo.struct, queue);
+        if (fieldOwnsStructStorage(field)) queueDestroyImplementation(field.typeInfo.struct, queue);
       }
     };
     const visitExpression = (expr, queue) => {
@@ -5366,6 +5466,10 @@ class Optimizer {
     for (const module of this.program.moduleOrder) for (const fn of module.functions.values()) {
       if (fn.reachable !== false) scanStatements(fn.body);
     }
+    // Runtime type-name helpers are emitted as one shared ancestry walker. If
+    // any validated IsType(name) path requested that helper, retain the string
+    // comparison primitive even when the original method was stripped later.
+    if (this.program.usesObjectTypeNameChecks) this.program.usesBuiltins.add('string.equals');
     this.stats.strippedExternImports = Math.max(0, priorExternCount - this.program.usedExternImports.size);
     const families = ['window', 'memory', 'table', 'simd', 'debug', 'console', 'system', 'string', 'thread', 'ffi'];
     const usedFamilies = new Set([...this.program.usesBuiltins].map((name) => name.split('.')[0]));
@@ -8157,7 +8261,7 @@ class CodeGenerator {
       }
       a.movMemRspReg(48, 'rax');
       for (const field of struct.fieldOrder) {
-        if (field.typeInfo.kind === 'struct') {
+        if (fieldOwnsStructStorage(field)) {
           const nestedNull = a.unique(`${struct.name}_${field.name}_clone_null`);
           const nestedStored = a.unique(`${struct.name}_${field.name}_clone_stored`);
           a.movRegMemRsp('r10', 40);
@@ -8199,7 +8303,7 @@ class CodeGenerator {
         a.callLabel(customDestroy.label);
       } else {
         for (const field of struct.fieldOrder) {
-          if (field.typeInfo.kind === 'struct') {
+          if (fieldOwnsStructStorage(field)) {
             a.movRegMemRsp('r10', 40);
             a.movRegMemBase('rcx', 'r10', field.offset, 8);
             a.testRegReg('rcx');

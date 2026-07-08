@@ -91,6 +91,8 @@ LSX modules
 - inherited objects use a hidden compiler-owned type ID without changing visible field offsets
 - `GetTypeName()` lowers to a direct header load and indexed static-table load with no allocation
 - literal `IsType(...)` checks lower to integer type-ID ancestry comparisons; dynamic interned names use pointer equality before string fallback
+- borrowed object fields are resolved entirely at compile time; they add no ownership header, reference count, runtime branch, or lookup
+- automatic clone/destruction emits nested calls only for statically owned object fields and copies borrowed aliases as one pointer
 
 ## Record and object table storage
 

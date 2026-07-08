@@ -91,7 +91,7 @@ assert(!`${bundledBehaviorCheck.stdout}
 ${bundledBehaviorCheck.stderr}`.includes("unknown module or API namespace 'behavior'"), 'bundled extension compiler still treats local behavior values as namespaces');
 const bundledVersion = cp.spawnSync(process.execPath, [bundledCompilerPath, '--version'], { encoding: 'utf8' });
 assert.strictEqual(bundledVersion.status, 0, bundledVersion.stderr);
-assert.strictEqual(bundledVersion.stdout.trim(), '0.18.9', 'extension did not bundle compiler 0.18.9');
+assert.strictEqual(bundledVersion.stdout.trim(), '0.18.10', 'extension did not bundle compiler 0.18.10');
 
 const runtimeTypeDir = path.join(sourceDir, 'RuntimeTypes');
 fs.mkdirSync(runtimeTypeDir, { recursive: true });

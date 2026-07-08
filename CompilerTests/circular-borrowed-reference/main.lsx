@@ -1,0 +1,11 @@
+use "@Engine/Core/GameObject.lsx" as GameObjectMod
+fn main()
+    local gameObject = GameObjectMod.GameObject.new()
+    gameObject.AddLazyBehavior(gameObject.transform)
+    local found = gameObject.GetLazyBehavior("Transform")
+    if gameObject.transform.lazyVars.parent.value == gameObject then
+        gameObject.destroy()
+        return 0
+    end
+    return 1
+end

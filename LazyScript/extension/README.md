@@ -313,6 +313,10 @@ local window = WindowManagerMod.WindowManager.windowHandle
 
 A static object is initialized once before `main()`. A zero-argument `constructor = fn()` may prepare its shared state automatically. `self` points to that one persistent object. Do not call `.new()` or `constructor()` on it; provide an explicit shutdown method for native resources.
 
+## 0.18.17 circular object reference fix
+
+The bundled compiler now supports direct circular engine graphs without reverse imports. Inferred object identities can cross module boundaries internally, `.new()`/`.clone()`/object-literal fields remain owned, and assignments from existing objects become borrowed aliases. Automatic cloning and destruction skip borrowed back-references with no runtime reference count or ownership branch.
+
 ## 0.18.16 autocomplete replacement fix
 
 LSX completion items now use the same explicit replacement range for both VS Code insert and replace modes. Partial names and highlighted text are replaced instead of appended, reverse-direction selections are supported, and completing a method before an existing `(` no longer inserts duplicate call parentheses.

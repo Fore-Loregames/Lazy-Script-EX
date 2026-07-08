@@ -1876,6 +1876,97 @@ assert(runtimeTypeBytes.includes(Buffer.from([0x48, 0x39, 0xD1])), 'dynamic IsTy
 const runtimeTypePe = parsePe(runtimeTypeBytes);
 assert(!runtimeTypePe.imports.some((entry) => /reflect|rtti|typeinfo/i.test(entry.dll)), 'runtime object types added an external reflection/RTTI dependency');
 
+
+// Engine-style circular object graphs retain direct native references without
+// requiring a reverse source import. Ownership is inferred statically: a field
+// receiving Object.new(...) owns that object, while a field receiving an
+// existing parameter/reference borrows it. Clone/destruction therefore copy and
+// skip the Transform -> GameObject back-reference instead of recursing forever.
+write('circular-borrow/Engine/LazyBehavior.lsx', `
+export const LazyBehavior = {
+    lazyVars = {}
+    Start = fn() end
+    Update = fn() end
+    Draw = fn() end
+}
+`);
+write('circular-borrow/Engine/Transform.lsx', `
+use "@Engine/LazyBehavior.lsx" as B
+export const Transform : base(B.LazyBehavior) = {
+    constructor = fn(parent)
+        self.lazyVars = {
+            parent = {type = "gameObject", visible = false, value = parent}
+            position = {type = "vec3", visible = true, value = {0,0,0}}
+        }
+    end
+}
+`);
+write('circular-borrow/Engine/GameObject.lsx', `
+use "@Engine/Transform.lsx" as T
+export const GameObject = {
+    transform = null
+    lazyBehaviors = {}
+    constructor = fn()
+        self.transform = T.Transform.new(self)
+    end
+    AddLazyBehavior = fn(behavior)
+        self.lazyBehaviors.push(behavior)
+        behavior.Start()
+    end
+    GetLazyBehavior = fn(typeName)
+        for behavior in self.lazyBehaviors do
+            if behavior.IsType(typeName) then return behavior end
+        end
+        return null
+    end
+}
+`);
+const circularBorrowMain = write('circular-borrow/main.lsx', `
+use "@Engine/GameObject.lsx" as GO
+fn main()
+    local gameObject = GO.GameObject.new()
+    gameObject.AddLazyBehavior(gameObject.transform)
+    local found = gameObject.GetLazyBehavior("Transform")
+    if found == null or gameObject.transform.lazyVars.parent.value ~= gameObject then return 1 end
+    gameObject.destroy()
+    return 0
+end
+`);
+const circularEngineRoot = path.join(temp, 'circular-borrow', 'Engine');
+const circularBorrowCheck = compilerApi.checkFile(circularBorrowMain, { Engine: circularEngineRoot });
+const circularStructs = new Map();
+for (const module of circularBorrowCheck.program.moduleOrder) {
+  for (const struct of module.structs.values()) {
+    circularBorrowCheck.program.resolveStructLayout(struct);
+    circularStructs.set(struct.name, struct);
+  }
+}
+const circularGameObject = circularStructs.get('GameObject');
+const circularTransform = circularStructs.get('Transform');
+assert(circularGameObject && circularTransform, 'circular object test did not resolve GameObject and Transform');
+const transformField = circularGameObject.fields.get('transform');
+assert.strictEqual(transformField?.typeInfo?.struct, circularTransform, 'GameObject.transform did not resolve to Transform');
+assert.strictEqual(transformField?.ownership, 'owned', 'Object.new(...) field was not classified as owned');
+const lazyVarsField = circularTransform.fields.get('lazyVars');
+assert.strictEqual(lazyVarsField?.ownership, 'owned', 'nested lazyVars object was not classified as owned');
+const lazyVarsStruct = lazyVarsField?.typeInfo?.struct;
+const parentMetadata = lazyVarsStruct?.fields.get('parent')?.typeInfo?.struct;
+const parentValue = parentMetadata?.fields.get('value');
+assert(parentValue, 'Transform lazyVars.parent.value metadata was not resolved');
+assert.strictEqual(parentValue.typeInfo?.struct, circularGameObject, 'borrowed parent did not retain the concrete GameObject identity');
+assert.strictEqual(parentValue.ownership, 'borrowed', 'existing constructor parameter was not classified as borrowed');
+const transformModule = circularTransform.module;
+assert(![...transformModule.uses.values()].some((use) => use.target === circularGameObject.module), 'Transform unexpectedly required a reverse GameObject import');
+const circularBorrowConfig = path.join(temp, 'circular-borrow', 'lazyscriptex.json');
+fs.writeFileSync(circularBorrowConfig, JSON.stringify({
+  entry: 'main.lsx',
+  output: 'build/circular-borrow.exe',
+  subsystem: 'console',
+  optimization: 6,
+  moduleRoots: { Engine: 'Engine' },
+}, null, 2));
+run(['build', circularBorrowConfig]);
+
 // Actual syntax and symbol errors still point to the correct source line.
 const bad = write('bad.lsx', `
 fn main()
@@ -1886,4 +1977,4 @@ const badResult = run(['check', bad], 1);
 assert(badResult.stderr.includes(`${bad}:3:`));
 assert(badResult.stderr.includes("unknown module alias or closed table 'Missing'"));
 
-console.log('LazyScriptEX 0.18.9 compiler, compact runtime object types, raw strings, native objects, persistent logs, file I/O, JSON, direct atomics, threading, automatic runtime crash records, sockets, HTTP, and GameKit tests passed.');
+console.log('LazyScriptEX 0.18.10 compiler, compact runtime object types, raw strings, native objects, persistent logs, file I/O, JSON, direct atomics, threading, automatic runtime crash records, sockets, HTTP, and GameKit tests passed.');

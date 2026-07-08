@@ -246,6 +246,33 @@ transform.destroy()
 
 Objects use fixed field offsets and direct method calls. LSX does not require a garbage collector, prototype chain, or general reflection system. Objects that participate in inheritance receive one compiler-owned eight-byte runtime type ID immediately before the visible object body. This hidden header does not move or enlarge any user field offset. Plain objects that do not participate in inheritance keep their previous layout with no runtime type header.
 
+### Owned and borrowed object fields
+
+Ownership is inferred from how an object field receives its value:
+
+- `.new(...)`, `.clone()`, and nested object literals create owned storage.
+- Assigning an existing parameter, local, table item, or object field creates a borrowed alias.
+- Borrowed aliases are copied as one native pointer and skipped by automatic recursive clone/destruction.
+- Cross-module inferred aliases retain a compiler-internal type identity and do not require a reverse `use` import.
+
+This supports direct circular engine references without a garbage collector or runtime reference counting:
+
+```lsx
+-- GameObject.lsx owns its Transform
+constructor = fn()
+    self.transform = Transform.Transform.new(self)
+end
+
+-- Transform.lsx borrows the same GameObject
+constructor = fn(parent)
+    self.lazyVars = {
+        parent = {type = "gameObject", visible = false, value = parent}
+    }
+end
+```
+
+The generated object layout gains no ownership tag. The distinction exists only in compiler metadata, so ordinary field access remains a direct pointer load at native speed. Destroy the owning root object; do not separately destroy a borrowed back-reference.
+
 ## Constructors
 
 Add a `constructor` function when an object needs initialization arguments or setup code. Calling `.new(...)` allocates the object, applies its field defaults, and then calls the constructor with the supplied values:

@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/circular-borrowed-reference.exe",
+  "optimization": 6,
+  "moduleRoots": { "Engine": "Engine" }
+}

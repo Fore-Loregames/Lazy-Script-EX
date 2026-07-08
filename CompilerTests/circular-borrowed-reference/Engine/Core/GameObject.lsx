@@ -1,0 +1,35 @@
+use "@Engine/Core/LazyBehaviors/Transform.lsx" as TransForm
+
+export const GameObject = {
+    name = "GameObject"
+    tag = "Default"
+    transform = null
+    children = {}
+    lazyBehaviors = {}
+
+    constructor = fn()
+        self.transform = TransForm.Transform.new(self)
+    end
+
+    AddLazyBehavior = fn(behavior)
+        self.lazyBehaviors.push(behavior)
+        behavior.Start()
+    end
+
+    GetLazyBehavior = fn(behavior)
+        for lb in self.lazyBehaviors do
+            if lb.IsType(behavior) then
+                return lb
+            end
+        end
+        return null
+    end
+
+    Start = fn() end
+    Update = fn()
+        for behavior in self.lazyBehaviors do behavior.Update() end
+    end
+    Draw = fn()
+        for behavior in self.lazyBehaviors do behavior.Draw() end
+    end
+}

@@ -1,0 +1,12 @@
+use "@Engine/Core/LazyBehaviors/LazyBehavior.lsx" as LazyBehaviorMod
+
+export const Transform : base(LazyBehaviorMod.LazyBehavior) = {
+    constructor = fn(parent){
+        self.lazyVars = {
+            parent = {type = "gameObject", visible = false, value = parent}
+            position = {type = "vec3", visible = true, value = {0, 0, 0}}
+            rotation = {type = "vec3", visible = true, value = {0, 0, 0}}
+            scale = {type = "vec3", visible = true, value = {1, 1, 1}}
+        }
+    }
+}

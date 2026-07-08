@@ -1,8 +1,8 @@
 {
   "name": "lazyscriptex-native-gamekit",
   "displayName": "LazyScriptEX Native GameKit",
-  "description": "Native LazyScriptEX tooling with inferred object constructors, compact GetTypeName/IsType object metadata, cross-module inherited object fields, brace or end object-method bodies, compile-time inheritance, common-base parameter and loop inference, scope-aware IntelliSense with replacement-safe completion, project-aware diagnostics, import-path completion, built-in formatting, static objects, beginner API hovers, exact compiler ranges, LSHTML/LSCSS, and O6 compilation.",
-  "version": "0.18.16",
+  "description": "Native LazyScriptEX tooling with inferred object constructors, compact GetTypeName/IsType metadata, circular object graphs with compiler-inferred borrowed back-references, cross-module inferred object identities without reverse imports, compile-time inheritance, common-base parameter and loop inference, scope-aware IntelliSense with replacement-safe completion, project-aware diagnostics, import-path completion, built-in formatting, static objects, beginner API hovers, exact compiler ranges, LSHTML/LSCSS, and O6 compilation.",
+  "version": "0.18.17",
   "publisher": "nissyokugames",
   "license": "MIT",
   "engines": {

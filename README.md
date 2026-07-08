@@ -422,7 +422,7 @@ copy.destroy()
 player.destroy()
 ```
 
-LSX does not use a garbage collector. Ownership is explicit so native applications can control allocation and cleanup.
+LSX does not use a garbage collector. Ownership is explicit so native applications can control allocation and cleanup. Object fields created with `.new()`, `.clone()`, or an object literal are compiler-owned by that field. Existing object values passed through parameters or assigned from another field are borrowed aliases. Borrowed fields keep direct native pointer access, but automatic clone and destruction copy or skip the alias instead of recursively cloning or freeing it. This allows fast circular engine graphs such as `GameObject -> Transform -> GameObject` without reference counting, scene-wide ID lookups, or reverse source imports.
 
 ### Constructors
 
@@ -859,6 +859,11 @@ Contributions are welcome. Keep public LSX examples inference-first:
 LazyScriptEX is released under the [MIT License](LICENSE).
 
 Bundled third-party components are covered by their own licenses and notices under [`LazyScript/licenses`](LazyScript/licenses) and [`LazyScript/runtime`](LazyScript/runtime).
+
+
+## 0.18.17 circular object reference fix
+
+LSX now keeps cross-module inferred object identities internally, so a constructor can receive and store an object from another module without adding a reverse `use` import. Direct assignments from existing objects are classified as borrowed aliases at compile time, while `.new()`, `.clone()`, and nested object literals remain owned. Automatic clone/destruction copies or skips borrowed back-references, preventing recursive `GameObject -> Transform -> GameObject` cleanup while adding no runtime ownership flag, reference count, branch, or extra object storage.
 
 ## 0.18.16 autocomplete replacement fix
 
