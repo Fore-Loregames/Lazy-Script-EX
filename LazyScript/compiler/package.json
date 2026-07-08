@@ -1,8 +1,8 @@
 {
   "name": "lazyscriptex-compiler",
-  "version": "0.18.2",
+  "version": "0.18.4",
   "private": true,
-  "description": "Direct native x64 LazyScriptEX compiler with beginner-readable source diagnostics, structured VS Code errors, LSHTML/LSCSS, inferred collections, native bindings, and O0-O6 optimization.",
+  "description": "Direct native x64 LazyScriptEX compiler with static objects, beginner-readable diagnostics, structured VS Code errors, LSHTML/LSCSS, inferred tables, native bindings, and O0-O6 optimization.",
   "bin": {
     "lsx": "lazyscriptex.js"
   },
@@ -12,7 +12,8 @@
     "test:bindings": "node test_sync_contract.js",
     "test:glm": "node test_glm_binding.js",
     "test:ui": "node test_inline_ui.js",
-    "test:diagnostics": "node test_diagnostics.js"
+    "test:diagnostics": "node test_diagnostics.js",
+    "test:static": "node test_static_objects.js"
   },
   "engines": {
     "node": ">=18"

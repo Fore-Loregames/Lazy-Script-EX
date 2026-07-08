@@ -258,4 +258,40 @@ const canvasSnippet = snippets['Declarative LazyUI canvas'];
 assert(canvasSnippet && canvasSnippet.body.some(line => line.includes('<rect class="${2:preview-shape}"')), 'declarative canvas snippet is missing');
 assert(!snippetsText.includes('context.fill_rounded_rect'), 'extension still advertises imperative canvas drawing');
 assert(canvasSnippet.body.some(line => line.includes('background = {${3:props.accent}}')), 'LSCSS {var} snippet is missing');
-console.log('LazyScriptEX extension navigation, local-scope completion, formatting, LSHTML/LSCSS, and inferred member tests passed.');
+
+// Static objects are indexed as one shared service and their methods resolve
+// directly through an imported module without suggesting .new().
+const staticServiceFile = path.join(sourceDir, 'StaticService.lsx');
+fs.writeFileSync(staticServiceFile, `
+export static const StaticService = {
+    value = 0
+    SetValue = fn(value)
+        self.value = value
+    end
+}
+`);
+const staticConsumerFile = path.join(sourceDir, 'StaticConsumer.lsx');
+fs.writeFileSync(staticConsumerFile, `
+use "StaticService.lsx" as ServiceMod
+fn main()
+    ServiceMod.StaticService.SetValue(4)
+    return ServiceMod.StaticService.value
+end
+`);
+const staticServiceRecord = extension._test.loadRecordSync(staticServiceFile);
+const staticServiceSymbol = staticServiceRecord.exports.find(symbol => symbol.name === 'StaticService');
+assert(staticServiceSymbol?.staticObject, 'static const object was not marked as a static object');
+assert(staticServiceSymbol.signature.startsWith('static const'), 'static object hover signature is missing static');
+const staticConsumerRecord = extension._test.loadRecordSync(staticConsumerFile);
+const staticMethod = extension._test.resolveChain(staticConsumerRecord, ['ServiceMod', 'StaticService', 'SetValue']);
+assert(staticMethod?.symbol?.name === 'SetValue', 'imported static object method did not resolve');
+assert(staticMethod.parent?.staticObject, 'static method parent lost its static-object identity');
+const staticFormatted = extension._test.formatLsxText(`export static const App = {\nrunning = true\nStop = fn()\nself.running = false\nend\n}\n`, { insertSpaces: true, tabSize: 4 });
+assert(staticFormatted.includes('export static const App = {'), 'formatter damaged static const declaration');
+assert(grammarText.includes('export|static|local|const'), 'syntax grammar does not highlight static');
+
+const staticMethodHover = extension._test.markdownForSymbol(staticServiceRecord, staticMethod.symbol, staticMethod.parent);
+assert(staticMethodHover.value.includes('Static object'), 'static method hover does not explain direct singleton calls');
+assert(staticMethodHover.value.includes('Do not create it with `.new()`'), 'static method hover does not warn against .new()');
+
+console.log('LazyScriptEX extension navigation, local-scope completion, formatting, static objects, LSHTML/LSCSS, and inferred member tests passed.');

@@ -2365,7 +2365,7 @@ function setupGuideSearch() {
 }
 
 const API_CATEGORY_DEFINITIONS = [
-  { label: 'Language', description: 'Startup, variables, control flow, functions, tables, objects, base-object inheritance, modules, strings, and errors', test: module => module.startsWith('Language/') },
+  { label: 'Language', description: 'Startup, variables, control flow, functions, tables, objects, modules, strings, and errors', test: module => module.startsWith('Language/') },
   { label: 'User interface', description: 'LazyUI elements, documents, input, and rendering', test: module => module.startsWith('UI/') },
   { label: 'Math and cameras', description: 'GLM vectors, matrices, quaternions, transforms, and cameras', test: module => module.startsWith('Math/') },
   { label: 'Graphics and images', description: 'Images, textures, media, and OpenGL', test: module => module.startsWith('Graphics/') || module === 'OpenGL' || module.startsWith('OpenGL/') },
@@ -2399,7 +2399,8 @@ function buildSpecialTopLevelGroups(module, topEntries) {
       ['Conditions and loops', entry => namesContain(entry, ['if', 'elseif', 'else', 'while', 'for', 'break', 'condition'])],
       ['Functions', entry => namesContain(entry, ['function', 'parameter', 'return', 'call'])],
       ['Tables and buffers', entry => namesContain(entry, ['table', 'push', 'get', 'length', 'remove', 'clear', 'buffer', 'positional', 'byte'])],
-      ['Objects, inheritance, and modules', entry => namesContain(entry, ['object', 'field', 'method', 'new', 'destroy', 'base', 'inherit', 'override', 'derived', 'module', 'import', 'use'])]
+      ['Static managers and services', entry => entry.module === 'Language/Static objects' || namesContain(entry, ['static object', 'singleton', 'shared static', 'static method', 'static field', 'shutdown'])],
+      ['Objects and modules', entry => namesContain(entry, ['object', 'field', 'method', 'new', 'destroy', 'module', 'import', 'use'])]
     );
   } else if (module === 'Math/GLM') {
     rules.push(
@@ -2483,7 +2484,7 @@ function buildSpecialTopLevelGroups(module, topEntries) {
   });
 
   const unmatched = topEntries.filter(entry => remaining.has(apiEntryKey(entry)));
-  const kindOrder = ['typed function', 'raw function', 'constant', 'typed object', 'typed struct', 'compiler feature', 'compiler method'];
+  const kindOrder = ['typed function', 'raw function', 'constant', 'static object', 'typed object', 'typed struct', 'compiler feature', 'compiler method'];
   kindOrder.forEach(kind => {
     const matched = unmatched.filter(entry => entry.kind === kind);
     if (matched.length) groups.push({ label: kind.replace(/\b\w/g, char => char.toUpperCase()), entries: matched });

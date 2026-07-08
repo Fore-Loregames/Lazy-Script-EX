@@ -126,10 +126,15 @@ for (const file of walk(bindingsRoot).sort()) {
       entries.push({ module, kind: 'typed function', name: match[1], signature, description, source: rel, line: i + 1 });
       continue;
     }
-    if ((match = trimmed.match(/^export\s+const\s+([A-Za-z_]\w*)\s*=\s*\{/))) {
-      const block = extractObject(lines, i, module, rel, match[1]);
-      const description = commentBefore(lines, i) || fallbackDescription(module, 'typed object', match[1]);
-      entries.push({ module, kind: 'typed object', name: match[1], signature: `const ${match[1]}`, description, source: rel, line: i + 1 });
+    if ((match = trimmed.match(/^export\s+(static\s+)?const\s+([A-Za-z_]\w*)\s*=\s*\{/))) {
+      const isStaticObject = Boolean(match[1]);
+      const objectName = match[2];
+      const block = extractObject(lines, i, module, rel, objectName);
+      const kind = isStaticObject ? 'static object' : 'typed object';
+      const description = commentBefore(lines, i) || (isStaticObject
+        ? `One persistent LSX object ${objectName}, initialized once and called directly without .new().`
+        : fallbackDescription(module, 'typed object', objectName));
+      entries.push({ module, kind, name: objectName, signature: `${isStaticObject ? 'static ' : ''}const ${objectName}`, description, source: rel, line: i + 1 });
       entries.push(...block.members);
       i = block.end;
       continue;
@@ -193,6 +198,53 @@ for (const entry of [
   module: 'Language/Collection', kind: 'compiler method', owner: 'collection',
   name: entry[0], signature: entry[1], description: entry[2], source: 'docs/LANGUAGE.md', line: 114,
 });
+
+// BEGIN GENERATED STATIC OBJECT LANGUAGE ENTRIES
+entries.push(...[
+  {
+    module: 'Language/Static objects', kind: 'compiler feature', name: 'static const object',
+    signature: 'export static const Name = { ... }',
+    description: 'Declares one persistent object initialized once before main(). It keeps shared state and is called directly without .new().',
+    source: 'docs/LANGUAGE.md', line: 377,
+    example: 'export static const AppState = {\n    running = true\n    Stop = fn()\n        self.running = false\n    end\n}'
+  },
+  {
+    module: 'Language/Static objects', kind: 'compiler feature', name: 'direct static method call',
+    signature: 'ModuleAlias.StaticObject.Method(arguments)',
+    description: 'Calls a method on the one shared static object while the compiler supplies that object as self.',
+    source: 'docs/LANGUAGE.md', line: 400,
+    example: 'WindowManagerMod.WindowManager.CreateWindow(1920, 1080, "LazyEngine")'
+  },
+  {
+    module: 'Language/Static objects', kind: 'compiler feature', name: 'shared static field',
+    signature: 'ModuleAlias.StaticObject.field',
+    description: 'Reads or changes a field stored on the one shared static object.',
+    source: 'docs/LANGUAGE.md', line: 411,
+    example: 'local window = WindowManagerMod.WindowManager.windowHandle'
+  },
+  {
+    module: 'Language/Static objects', kind: 'compiler feature', name: 'self in a static object',
+    signature: 'self.field / self.Method()',
+    description: 'Refers to the single persistent static object from inside one of its methods.',
+    source: 'docs/LANGUAGE.md', line: 413,
+    example: 'Stop = fn()\n    self.running = false\nend'
+  },
+  {
+    module: 'Language/Static objects', kind: 'compiler feature', name: 'static object shutdown',
+    signature: 'StaticObject.Shutdown()',
+    description: 'Provides explicit cleanup for native handles and resources owned by a static object.',
+    source: 'docs/LANGUAGE.md', line: 418,
+    example: 'WindowManagerMod.WindowManager.Shutdown()'
+  },
+  {
+    module: 'Language/Static objects', kind: 'compiler feature', name: 'static object new error',
+    signature: 'StaticObject.new()  -- invalid',
+    description: 'A static object already has one compiler-created instance and therefore cannot be constructed with .new().',
+    source: 'docs/LANGUAGE.md', line: 417,
+    example: 'WindowManagerMod.WindowManager.CreateWindow(1280, 720, "LazyEngine")'
+  }
+]);
+// END GENERATED STATIC OBJECT LANGUAGE ENTRIES
 
 // BEGIN GENERATED IMPORT LANGUAGE ENTRIES
 entries.push(...[

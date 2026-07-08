@@ -40,7 +40,7 @@
             <a href="#functions" class="nav-link nav-sub">Functions and return</a>
             <a href="#tables" class="nav-link nav-sub">Tables and buffers</a>
             <a href="#objects" class="nav-link nav-sub">Objects and methods</a>
-            <a href="#inheritance" class="nav-link nav-sub">Base-object inheritance</a>
+            <a href="#static-objects" class="nav-link nav-sub">Static managers and services</a>
             <a href="#modules" class="nav-link nav-sub">Modules and imports</a>
           </div>
           <div class="guide-nav-group">
@@ -407,104 +407,51 @@ player.destroy()</code></pre></div>
             <div class="plain-language"><strong>Ownership rule:</strong> when your code creates an owned object with <code>.new()</code>, keep it while needed and call <code>.destroy()</code> when finished unless the API entry says another object owns it.</div>
           </article>
 
-          <article class="lesson-block" id="inheritance" data-search="base object inheritance inherit parent child derived actor player lazybehavior inherited fields methods override base method multi level imported base composition">
-            <div class="lesson-copy"><span class="lesson-number">2.7</span><h3>Base-object inheritance</h3><p>Inheritance lets one closed object reuse the fields and methods of one other closed object. Use it when the child really <em>is a kind of</em> the base, such as <code>Player</code> being an <code>Actor</code> or a game behavior being a <code>LazyBehavior</code>.</p></div>
+          <article class="lesson-block" id="static-objects" data-search="static const singleton manager service shared global state self no new shutdown">
+            <div class="lesson-copy"><span class="lesson-number">2.7</span><h3>Static managers and services</h3><p>Use <code>static const</code> when the program must have exactly one shared object. The compiler creates it once before <code>main()</code>, and every caller uses the same fields and methods without calling <code>.new()</code>.</p></div>
+            <div class="code-card"><div class="code-card-head"><span>One shared window manager</span><button class="copy-button" data-copy-target="static-object-code">Copy</button></div><pre id="static-object-code"><code>export static const WindowManager = {
+    windowHandle = 0
+    width = 1280
+    height = 720
 
-            <div class="code-card"><div class="code-card-head"><span>Complete inheritance example</span><button class="copy-button" data-copy-target="inheritance-code">Copy</button></div><pre id="inheritance-code"><code>const Actor = {
-    name = "Actor"
-    active = true
-    x = 0.0
-
-    set_active = fn(value)
-        self.active = value
+    CreateWindow = fn(width, height, title)
+        self.width = width
+        self.height = height
+        self.windowHandle = GLFW.glfwCreateWindow(
+            width,
+            height,
+            title,
+            0,
+            0
+        )
+        return self.windowHandle
     end
 
-    update = fn(delta)
-        if self.active then
-            self.x = self.x + delta
+    Shutdown = fn()
+        if self.windowHandle ~= 0 then
+            GLFW.glfwDestroyWindow(self.windowHandle)
+            self.windowHandle = 0
         end
-        return 0
-    end
-}
-
-const Player : base(Actor) = {
-    health = 100
-
-    heal = fn(amount)
-        self.health = self.health + amount
-        if self.health &gt; 100 then self.health = 100 end
-    end
-
-    update = fn(delta)
-        base.update(delta)
-        if self.health &lt; 100 then self.health = self.health + 1 end
-        return 0
-    end
-}
-
-fn main()
-    local player = Player.new()
-
-    player.name = "Hero"
-    player.set_active(true)
-    player.update(0.016)
-    player.heal(10)
-
-    if player.x &gt; 0.0 then
-        console.write_line("The inherited Actor update ran.")
-    end
-
-    player.destroy()
-    return 0
-end</code></pre></div>
-
-            <div class="table-use-grid">
-              <article><span class="table-kind">Inherited field</span><h4>Use base state directly</h4><pre><code>player.name = "Hero"
-player.active = true</code></pre><p><code>name</code> and <code>active</code> are stored inside the same <code>Player</code> instance. There is no separate hidden <code>Actor</code> allocation.</p></article>
-              <article><span class="table-kind">Inherited method</span><h4>Call shared behavior normally</h4><pre><code>player.set_active(false)</code></pre><p>The child receives methods that it does not replace. Call them with the same dot syntax used by every other LSX method.</p></article>
-              <article><span class="table-kind">Override</span><h4>Replace behavior for the child</h4><pre><code>update = fn(delta)
-    base.update(delta)
-    return 0
-end</code></pre><p>A child method with the same name overrides the inherited method. <code>base.update(delta)</code> runs the immediate parent's version first.</p></article>
-              <article><span class="table-kind">Derived instance</span><h4>Create and destroy only the final object</h4><pre><code>local player = Player.new()
-player.update(0.016)
-player.destroy()</code></pre><p>The inherited and child fields share one owned object. Destroy the final instance once when you are finished with it.</p></article>
-            </div>
-
-            <div class="method-reference">
-              <h4>The inheritance syntax, piece by piece</h4>
-              <div><code>const Player</code><span>Defines the new child object type.</span></div>
-              <div><code>: base(Actor)</code><span>Makes <code>Actor</code> the one direct base object.</span></div>
-              <div><code>player.name</code><span>Reads or changes an inherited field exactly like a child field.</span></div>
-              <div><code>player.set_active(...)</code><span>Calls an inherited method exactly like a child method.</span></div>
-              <div><code>update = fn(...)</code><span>Overrides a same-named method from the base object.</span></div>
-              <div><code>base.update(...)</code><span>Calls the immediate base implementation from inside the child method.</span></div>
-            </div>
-
-            <div class="code-card"><div class="code-card-head"><span>Use a base object from another file</span><button class="copy-button" data-copy-target="imported-inheritance-code">Copy</button></div><pre id="imported-inheritance-code"><code>-- Engine/LazyBehavior.lsx
-export const LazyBehavior = {
-    enabled = true
-
-    update = fn(delta)
-        return 0
-    end
-}
-
--- Game/PlayerBehavior.lsx
-use "../Engine/LazyBehavior.lsx" as Engine
-
-const PlayerBehavior : base(Engine.LazyBehavior) = {
-    health = 100
-
-    update = fn(delta)
-        base.update(delta)
-        return 0
+        GLFW.glfwTerminate()
+        GLFW.lsxUnloadLibraries()
     end
 }</code></pre></div>
+            <div class="code-card"><div class="code-card-head"><span>Import and call it directly</span><button class="copy-button" data-copy-target="static-use-code">Copy</button></div><pre id="static-use-code"><code>use "@Engine/Window/WindowManager.lsx" as WindowManagerMod
 
-            <div class="callout good"><strong>Multi-level inheritance is supported.</strong><p><code>FastPlayer : base(Player)</code> receives the fields and methods from both <code>Player</code> and <code>Actor</code>. Each level still has only one direct base.</p></div>
-            <div class="callout warning"><strong>Do not use inheritance only to borrow one helper function.</strong><p>Use it for a real “is a kind of” relationship. When one object merely owns or uses another object, store that object in a normal field instead.</p></div>
-            <div class="plain-language"><strong>Compiler rules:</strong> inherited fields cannot be redeclared by the child, circular inheritance is rejected, <code>base.method(...)</code> targets the immediate base, and the complete layout is resolved at compile time without a runtime prototype chain or virtual-table lookup.</div>
+fn main()
+    local window = WindowManagerMod.WindowManager.CreateWindow(
+        1920,
+        1080,
+        "LazyEngine"
+    )
+
+    -- Run the application here.
+
+    WindowManagerMod.WindowManager.Shutdown()
+    return 0
+end</code></pre></div>
+            <div class="plain-language"><strong>Read the path in three parts:</strong> <code>WindowManagerMod</code> is the imported module, <code>WindowManager</code> is the exported static object, and <code>CreateWindow</code> is its method. Inside the method, <code>self</code> means the one shared static object.</div>
+            <div class="callout warning"><strong>Do not call <code>.new()</code>.</strong><p>A static object already exists. Use a normal <code>const</code> object with <code>.new()</code> only when several independent instances are required.</p></div>
           </article>
 
           <article class="lesson-block" id="modules" data-search="module use import alias LazyScript bindings file split code export">

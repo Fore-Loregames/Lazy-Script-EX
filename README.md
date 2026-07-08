@@ -191,6 +191,23 @@ The same program is available in [`Projects/00_glfw_window`](Projects/00_glfw_wi
 
 ## Language overview
 
+### Static managers and services
+
+Use `static const` when a system must have one shared state and be called without creating an instance:
+
+```lsx
+export static const AppState = {
+    running = true
+
+    Stop = fn()
+        self.running = false
+    end
+}
+```
+
+The compiler initializes the object once before `main()`. Imported code calls `Module.AppState.Stop()` directly.
+
+
 ### Variables and inferred values
 
 ```lsx

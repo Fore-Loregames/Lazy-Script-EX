@@ -156,33 +156,36 @@
       "patterns": [
         {
           "name": "meta.table.declaration.lazyscriptex",
-          "match": "\\b(export\\s+)?(const)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?:(:)\\s*(base)\\s*(\\()\\s*([A-Za-z_][A-Za-z0-9_.]*)\\s*(\\)))?\\s*=\\s*(\\{)",
+          "match": "\\b(export\\s+)?(static\\s+)?(const)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?:(:)\\s*(base)\\s*(\\()\\s*([A-Za-z_][A-Za-z0-9_.]*)\\s*(\\)))?\\s*=\\s*(\\{)",
           "captures": {
             "1": {
               "name": "storage.modifier.export.lazyscriptex"
             },
             "2": {
-              "name": "storage.modifier.const.lazyscriptex"
+              "name": "storage.modifier.static.lazyscriptex"
             },
             "3": {
-              "name": "entity.name.type.table.lazyscriptex"
+              "name": "storage.modifier.const.lazyscriptex"
             },
             "4": {
-              "name": "punctuation.separator.inheritance.lazyscriptex"
+              "name": "entity.name.type.table.lazyscriptex"
             },
             "5": {
-              "name": "keyword.other.inheritance.lazyscriptex"
+              "name": "punctuation.separator.inheritance.lazyscriptex"
             },
             "6": {
-              "name": "punctuation.section.group.begin.lazyscriptex"
+              "name": "keyword.other.inheritance.lazyscriptex"
             },
             "7": {
-              "name": "entity.other.inherited-class.lazyscriptex"
+              "name": "punctuation.section.group.begin.lazyscriptex"
             },
             "8": {
-              "name": "punctuation.section.group.end.lazyscriptex"
+              "name": "entity.other.inherited-class.lazyscriptex"
             },
             "9": {
+              "name": "punctuation.section.group.end.lazyscriptex"
+            },
+            "10": {
               "name": "punctuation.section.block.begin.lazyscriptex"
             }
           }
@@ -259,7 +262,7 @@
       "patterns": [
         {
           "name": "storage.modifier.lazyscriptex",
-          "match": "\\b(export|local|const|extern|struct|lshtml|lscss)\\b"
+          "match": "\\b(export|static|local|const|extern|struct|lshtml|lscss)\\b"
         },
         {
           "name": "keyword.control.lazyscriptex",

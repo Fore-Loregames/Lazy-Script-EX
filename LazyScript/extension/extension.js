@@ -20,7 +20,7 @@ const checkTimers = new Map();
 let lastCheckGeneration = 0;
 
 const KEYWORDS = [
-  'use','as','export','extern','fn','const','lshtml','lscss','local','return','if','then','else','elseif','end','while','do','for','in','break','continue',
+  'use','as','export','extern','fn','const','static','lshtml','lscss','local','return','if','then','else','elseif','end','while','do','for','in','break','continue',
   'true','false','null','and','or','not','self','struct','i8','u8','i16','u16','i32','u32','i64','u64','f32','ptr','handle','fnptr','string','void','bool','table'
 ];
 
@@ -311,9 +311,13 @@ function parseText(uri, text) {
       symbols.push({ name: m[2], kind: 'function', parameters: parameterInfo(m[3]), returnType, signature: `${m[2]}(${m[3].trim()})${returnType ? ` -> ${returnType}` : ''}`, line: i, column: raw.indexOf(m[2]), exported: Boolean(m[1]), documentation: documentationBefore(lines, i) });
       continue;
     }
-    if ((m = raw.match(/^\s*(export\s+)?const\s+([A-Za-z_]\w*)\s*(?::\s*base\s*\([^)]*\))?\s*=\s*\{/))) {
-      const parsed = parseMembers(lines, i, m[2]);
-      symbols.push({ name: m[2], kind: 'object', signature: `const ${m[2]}`, line: i, column: raw.indexOf(m[2]), exported: Boolean(m[1]), members: parsed.members, endLine: parsed.endLine, documentation: documentationBefore(lines, i) });
+    if ((m = raw.match(/^\s*(export\s+)?(static\s+)?const\s+([A-Za-z_]\w*)\s*(?::\s*base\s*\([^)]*\))?\s*=\s*\{/))) {
+      const parsed = parseMembers(lines, i, m[3]);
+      const isStaticObject = Boolean(m[2]);
+      const defaultDocs = isStaticObject
+        ? 'One compiler-owned static object. It is initialized once, keeps shared mutable state, and its methods are called directly while self refers to the singleton.'
+        : '';
+      symbols.push({ name: m[3], kind: 'object', staticObject: isStaticObject, signature: `${isStaticObject ? 'static ' : ''}const ${m[3]}`, line: i, column: raw.indexOf(m[3]), exported: Boolean(m[1]), members: parsed.members, endLine: parsed.endLine, documentation: documentationBefore(lines, i) || defaultDocs });
       i = parsed.endLine;
       continue;
     }
@@ -1040,6 +1044,9 @@ function markdownForSymbol(record, symbol, parent = null) {
   if (api?.related?.length) md.appendMarkdown(`\n**Related:** ${api.related.map(value => `\`${value}\``).join(', ')}\n`);
   if (symbol.dll) md.appendMarkdown(`\n**Native library:** \`${symbol.dll}\`\n`);
   if (parent) md.appendMarkdown(`\n**Part of:** \`${parent.name}\`\n`);
+  if (parent?.staticObject) {
+    md.appendMarkdown(`\n> **Static object:** Call this directly as \`ModuleAlias.${parent.name}.${symbol.name}(...)\`. Do not create it with \`.new()\`; \`self\` refers to the one shared object.\n`);
+  }
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   md.appendMarkdown(`\n**Defined in:** \`${root ? path.relative(root, record.uri.fsPath) : record.uri.fsPath}:${symbol.line + 1}\``);
   return md;

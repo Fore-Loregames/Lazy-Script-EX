@@ -202,3 +202,29 @@ npm test
 ## License
 
 The extension is released under the MIT License.
+
+## Static service objects
+
+Use `static const` for managers and services that must exist exactly once:
+
+```lsx
+export static const WindowManager = {
+    windowHandle = 0
+
+    CreateWindow = fn(width, height, title)
+        self.windowHandle = GLFW.glfwCreateWindow(width, height, title, 0, 0)
+        return self.windowHandle
+    end
+}
+```
+
+Imported static objects are called directly through the module export:
+
+```lsx
+use "@Engine/Window/WindowManager.lsx" as WindowManagerMod
+
+WindowManagerMod.WindowManager.CreateWindow(1920, 1080, "LazyEngine")
+local window = WindowManagerMod.WindowManager.windowHandle
+```
+
+A static object is initialized once before `main()`. `self` points to that one persistent object. Do not call `.new()` on it; provide explicit startup and shutdown methods for native resources.

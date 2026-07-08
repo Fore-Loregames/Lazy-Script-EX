@@ -10,6 +10,14 @@ const jsPath = path.join(apiRoot, 'api-data.js');
 const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8').replace(/^\uFEFF/, ''));
 
 const MODULE_GUIDES = {
+  'Language/Static objects': {
+    level: 'beginner', title: 'Static managers and shared services',
+    whatItIs: 'One persistent object with shared fields and methods, initialized once before main() and called without .new().',
+    whenToUse: 'Use it for one-per-program systems such as a window manager, renderer, input service, audio service, application state, or asset registry.',
+    beginnerStart: 'Write export static const Name = { ... }, use self inside its methods, then call ModuleAlias.Name.Method(...).',
+    requires: 'LazyScriptEX 0.18.4 or newer.',
+    cleanup: 'Static storage lasts for the process. Add and call an explicit Shutdown method for native resources.'
+  },
   'Language/Modules and files': {
     level: 'beginner', title: 'Imports, modules, and project roots',
     whatItIs: 'How LSX files import one another, expose public declarations, share source folders, and find the installed LazyScript API.',
@@ -1003,7 +1011,7 @@ for (const entry of data.entries) {
 }
 
 data.moduleGuides = MODULE_GUIDES;
-data.generated = { ...(data.generated || {}), beginnerMetadata: '0.18.2' };
+data.generated = { ...(data.generated || {}), beginnerMetadata: '0.18.4' };
 
 fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2) + '\n');
 fs.writeFileSync(jsPath, `window.LSX_API_DATA=${JSON.stringify(data)};\n`);

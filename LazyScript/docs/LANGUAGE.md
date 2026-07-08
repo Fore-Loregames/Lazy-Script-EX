@@ -373,6 +373,51 @@ end
 
 The compiler tracks how the value is later assigned and used.
 
+
+## Static objects
+
+A normal object table is a reusable object definition. Create independent instances with `.new()` when each object needs separate state.
+
+A **static object** is different: the compiler creates exactly one persistent object, initializes its fields once before `main()`, and keeps that shared state for the lifetime of the program. Static objects are intended for systems such as a window manager, renderer service, input service, application state, or global asset registry.
+
+```lsx
+export static const WindowManager = {
+    windowSizeX = 1920
+    windowSizeY = 1080
+    windowHandle = 0
+    title = ""
+
+    CreateWindow = fn(width, height, windowTitle)
+        self.windowSizeX = width
+        self.windowSizeY = height
+        self.title = windowTitle
+        self.windowHandle = GLFW.glfwCreateWindow(width, height, windowTitle, 0, 0)
+        return self.windowHandle
+    end
+}
+```
+
+Import and use the exported static object directly:
+
+```lsx
+use "@Engine/Window/WindowManager.lsx" as WindowManagerMod
+
+fn main()
+    local window = WindowManagerMod.WindowManager.CreateWindow(1920, 1080, "LazyEngine")
+    return 0
+end
+```
+
+Rules:
+
+- Write `static const`, usually with `export` when another module needs it.
+- Use `self.field` and `self.Method()` inside its methods.
+- Call methods directly through the static object.
+- Read or write shared fields directly when appropriate.
+- Do not call `.new()`; a static object already exists.
+- Add an explicit `Shutdown` method for native handles and resources.
+- Static state is shared by every caller. Protect writable state with synchronization when multiple threads can access it.
+
 ## Modules, imports, and source roots
 
 LSX can import files from any folder depth. A relative import starts from the file containing the `use` statement, while a named import starts from a configured module root.

@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const { buildNativeBindings } = require('./native_bindings');
 const { compileInlineUiSource } = require('./inline_ui');
 
-const VERSION = '0.18.2';
+const VERSION = '0.18.4';
 
 
 function directoryExists(value) {
@@ -158,6 +158,7 @@ function diagnosticDetails(message) {
     [/expected expression/i, 'LSX1101', 'Place a value, variable, function call, object literal, or parenthesized expression here.'],
     [/expected assignment, call, or control statement/i, 'LSX1102', 'An LSX statement must assign a value, call a function, or start a control statement such as if, while, or for.'],
     [/left side of assignment/i, 'LSX1103', 'Assign only to a variable, object field, or table index. Function results and constants cannot be assigned to.'],
+    [/static const requires|static must be followed|static object .+ cannot be constructed/i, 'LSX1250', 'Declare one persistent object with export static const Name = { ... }, call its methods directly, and use self inside those methods.'],
     [/cannot mix positional values and named fields|cannot mix named fields and positional values/i, 'LSX1200', 'Use either a list like {1,2,3} or an object like {x=1,y=2}. Do not combine both forms in one literal.'],
     [/unterminated table literal/i, 'LSX1201', 'Add the missing } that closes this table or object literal.'],
     [/expected ',' or '}' after object value/i, 'LSX1202', 'Put a comma between entries, or close the object with }.'],
@@ -370,7 +371,7 @@ function canAssignType(from, to) {
 const KEYWORDS = new Set([
   'use', 'as', 'export', 'local', 'extern', 'fn', 'return', 'if', 'then', 'elseif',
   'else', 'end', 'while', 'do', 'break', 'true', 'false', 'null', 'not', 'and', 'or',
-  'struct', 'class', 'for', 'in', 'const',
+  'struct', 'class', 'for', 'in', 'const', 'static',
 ]);
 
 class Lexer {
@@ -728,6 +729,8 @@ class Parser {
 
       let exported = false;
       if (this.keyword('export')) exported = true;
+      let staticObject = false;
+      if (this.keyword('static')) staticObject = true;
 
       if (this.keyword('const')) {
         const name = this.identifier('constant or table name');
@@ -735,12 +738,16 @@ class Parser {
         this.expect('symbol', '=');
         const expression = this.parseExpression();
         if (expression.kind === 'table_literal') {
-          declarations.push({ kind: 'table', name: name.value, entries: expression.entries, positional: expression.positional, exported, basePath: baseClause?.path || null, baseToken: baseClause?.token || null, token });
+          declarations.push({ kind: 'table', name: name.value, entries: expression.entries, positional: expression.positional, exported, staticObject, basePath: baseClause?.path || null, baseToken: baseClause?.token || null, token });
         } else {
+          if (staticObject) throw new CompileError('static const requires an object table literal', token, null, { code: 'LSX1250', hint: 'Use static const Name = { ... } for one persistent object. Ordinary scalar constants use const without static.' });
           if (baseClause) throw new CompileError('base inheritance requires an object table literal', baseClause.token);
           declarations.push({ kind: 'constant', name: name.value, expression, exported, immutable: true, token });
         }
         continue;
+      }
+      if (staticObject) {
+        throw new CompileError("static must be followed by const and an object table literal", token, null, { code: 'LSX1250', hint: 'Write export static const Name = { ... }.' });
       }
       if (this.keyword('struct')) {
         declarations.push(this.parseStruct(exported, token, 'struct'));
@@ -1072,7 +1079,10 @@ class Program {
   registerMethod(module, packedType, sourceName, functionDecl, exported = false, forceInstance = null) {
     if (packedType.methods.has(sourceName)) throw new CompileError(`table member '${sourceName}' already exists on ${packedType.name}`, functionDecl.token);
     const usesSelf = forceInstance === null ? astUsesSelf(functionDecl.body) : Boolean(forceInstance);
-    const isStatic = packedType.tableModel ? !usesSelf : false;
+    // A static object is one persistent compiler-owned instance. Its methods
+    // receive self even when a specific method does not currently read a field,
+    // which keeps the call contract stable while the object evolves.
+    const isStatic = packedType.tableModel ? (!packedType.staticObject && !usesSelf) : false;
     const params = isStatic
       ? [...functionDecl.params]
       : [{ name: 'self', type: packedType.name, token: functionDecl.token }, ...functionDecl.params];
@@ -1123,6 +1133,7 @@ class Program {
       kind: 'struct',
       module,
       tableModel,
+      staticObject: Boolean(decl.staticObject),
       positional: Boolean(decl.positional),
       runtimeLiteral: Boolean(runtimeLiteral),
       positionalElement: null,
@@ -1147,12 +1158,13 @@ class Program {
       cloneLabel: `struct_${module.id}_${decl.name}_clone`,
       destroyLabel: `struct_${module.id}_${decl.name}_destroy`,
       initLabel: `struct_${module.id}_${decl.name}_init`,
+      singletonLabel: `data_static_object_${module.id}_${stableId(decl.name)}`,
     };
     for (const field of packedType.fieldDeclarations) field.declaringStruct = packedType;
     module.structs.set(decl.name, packedType);
     if (tableModel) module.tables.set(decl.name, packedType);
     for (const entry of methodEntries) {
-      this.registerMethod(module, packedType, entry.name, entry.expression, decl.exported, tableModel ? null : true);
+      this.registerMethod(module, packedType, entry.name, entry.expression, decl.exported, packedType.staticObject ? true : (tableModel ? null : true));
       packedType.ownMethods.add(entry.name);
     }
     return packedType;
@@ -1474,7 +1486,24 @@ class Program {
     if (!pathParts?.length) return null;
     let current = null;
     let index = 0;
-    const variable = scope.variables.get(pathParts[0]);
+
+    // Static objects are compiler-owned singletons and may be referenced
+    // directly as Object.field or Module.Object.field. Treat the singleton as
+    // the receiver type so normal field inference continues through the path.
+    const localStatic = module.tables.get(pathParts[0]);
+    if (localStatic?.staticObject) {
+      current = { type: localStatic.name, module: localStatic.module, staticStruct: localStatic };
+      index = 1;
+    } else if (pathParts.length >= 2) {
+      const use = module.uses.get(pathParts[0]);
+      const importedStatic = use?.target.tables.get(pathParts[1]);
+      if (importedStatic?.exported && importedStatic.staticObject) {
+        current = { type: importedStatic.name, module: importedStatic.module, staticStruct: importedStatic };
+        index = 2;
+      }
+    }
+
+    const variable = current ? null : scope.variables.get(pathParts[0]);
     if (variable) {
       // In object methods, an untyped peer parameter that is used through the
       // same known fields is inferred as the owning table type. This makes
@@ -1495,6 +1524,8 @@ class Program {
       }
       current = { type: variable.type, module, variable };
       index = 1;
+    } else if (current) {
+      // Static receiver already resolved above.
     } else if (pathParts[0] === 'self' && scope.function.methodOf) {
       current = { type: scope.function.methodOf.name, module: scope.function.methodOf.module, self: true };
       index = 1;
@@ -1651,9 +1682,12 @@ class Program {
       }
       const table = module.tables.get(pathParts[0]);
       if (table) {
-        if (pathParts[1] === 'new') return { kind: 'struct_new', target: null, returnType: table.name, module: table.module, struct: table };
+        if (pathParts[1] === 'new') {
+          if (table.staticObject) throw new CompileError(`static object '${table.name}' cannot be constructed with .new()`, call.token, null, { code: 'LSX1251', hint: `Call ${table.name}.Method(...) directly. A static object is initialized once and keeps one shared state.` });
+          return { kind: 'struct_new', target: null, returnType: table.name, module: table.module, struct: table };
+        }
         const method = table.methods.get(pathParts[1]);
-        if (method?.isStatic) return { kind: 'internal', target: method, returnType: method.returnType, module: method.module };
+        if (method?.isStatic || (method && table.staticObject)) return { kind: 'internal', target: method, returnType: method.returnType, module: method.module, staticObject: table };
       }
     }
 
@@ -1661,9 +1695,12 @@ class Program {
       const use = module.uses.get(pathParts[0]);
       const table = use?.target.tables.get(pathParts[1]);
       if (table?.exported) {
-        if (pathParts[2] === 'new') return { kind: 'struct_new', target: null, returnType: this.translateInferredType(table.name, table.module, module), module, struct: table };
+        if (pathParts[2] === 'new') {
+          if (table.staticObject) throw new CompileError(`static object '${table.name}' cannot be constructed with .new()`, call.token, null, { code: 'LSX1251', hint: `Call ${pathParts[0]}.${table.name}.Method(...) directly. A static object is initialized once and keeps one shared state.` });
+          return { kind: 'struct_new', target: null, returnType: this.translateInferredType(table.name, table.module, module), module, struct: table };
+        }
         const method = table.methods.get(pathParts[2]);
-        if (method?.isStatic) return { kind: 'internal', target: method, returnType: method.returnType, module: method.module };
+        if (method?.isStatic || (method && table.staticObject)) return { kind: 'internal', target: method, returnType: method.returnType, module: method.module, staticObject: table };
       }
     }
 
@@ -2720,10 +2757,16 @@ class Program {
       const typeName = pathParts.length === 2 ? staticStruct.name : `${pathParts[0]}.${staticStruct.name}`;
       const staticMethod = staticStruct.methods.get(staticOperation);
       if (staticMethod) {
+        if (staticStruct.staticObject) {
+          const receiver = { kind: 'reference', path: [], staticObjectStruct: staticStruct, token: call.token };
+          call.effectiveArgs = [receiver, ...call.args];
+          return { kind: 'internal', target: staticMethod, returnType: this.externalizeType(staticMethod.returnType, staticMethod.module, module), methodReceiver: receiver, staticObject: staticStruct };
+        }
         if (!staticMethod.isStatic) throw new CompileError(`table function '${staticStruct.name}.${staticOperation}' requires an instance`, call.token);
         return { kind: 'internal', target: staticMethod, returnType: this.externalizeType(staticMethod.returnType, staticMethod.module, module) };
       }
       if (staticOperation === 'new') {
+        if (staticStruct.staticObject) throw new CompileError(`static object '${staticStruct.name}' cannot be constructed with .new()`, call.token, null, { code: 'LSX1251', hint: `Call ${pathParts.slice(0, -1).join('.')}.Method(...) directly. A static object is initialized once and keeps one shared state.` });
         if (call.args.length === 0) return makeSpecial('struct_new', [], typeName, { struct: staticStruct });
         if (call.args.length === 1) return makeSpecial('struct_clone', [typeName], typeName, { struct: staticStruct });
         throw new CompileError(`${pathParts.join('.')} accepts zero arguments for defaults or one existing object to copy`, call.token);
@@ -2760,6 +2803,42 @@ class Program {
   }
 
   resolveReference(module, expr, scope = null) {
+    const staticReference = (struct, startIndex) => {
+      this.resolveStructLayout(struct);
+      if (startIndex >= expr.path.length) {
+        return { kind: 'static_object', struct, type: this.externalizeType(struct.name, struct.module, module), typeInfo: { kind: 'struct', name: struct.name, struct } };
+      }
+      let currentType = { kind: 'struct', name: struct.name, struct };
+      const fields = [];
+      for (let index = startIndex; index < expr.path.length; index += 1) {
+        if (currentType.kind !== 'struct') throw new CompileError(`'${expr.path.slice(0, index).join('.')}' is not a table object`, expr.token);
+        this.resolveStructLayout(currentType.struct);
+        const requestedName = expr.path[index];
+        const field = currentType.struct.fields.get(requestedName);
+        if (!field) throw new CompileError(`${currentType.struct.tableModel ? 'table' : 'struct'} '${currentType.struct.name}' has no field '${requestedName}'`, expr.token);
+        fields.push(field);
+        currentType = field.typeInfo;
+      }
+      const finalField = fields[fields.length - 1];
+      return {
+        kind: 'field',
+        staticStruct: struct,
+        fields,
+        field: finalField,
+        type: this.externalizeType(finalField.type, finalField.struct?.module, module),
+        typeInfo: currentType,
+      };
+    };
+    if (expr.staticObjectStruct) return staticReference(expr.staticObjectStruct, expr.path.length);
+
+    const localStatic = expr.path.length >= 1 ? module.tables.get(expr.path[0]) : null;
+    if (localStatic?.staticObject) return staticReference(localStatic, 1);
+    if (expr.path.length >= 2) {
+      const use = module.uses.get(expr.path[0]);
+      const importedStatic = use?.target.tables.get(expr.path[1]);
+      if (importedStatic?.exported && importedStatic.staticObject) return staticReference(importedStatic, 2);
+    }
+
     if (expr.path.length >= 1 && scope?.variables?.has(expr.path[0])) {
       const variable = scope.variables.get(expr.path[0]);
       if (expr.path.length === 1) return { kind: 'variable', variable, type: variable.type, typeInfo: variable.typeInfo || this.resolveType(module, variable.type, expr.token) };
@@ -2892,7 +2971,7 @@ class Program {
     if (expr.kind === 'reference') {
       const resolved = this.resolveReference(module, expr, scope);
       expr.resolvedReference = resolved;
-      if (resolved.kind === 'variable' || resolved.kind === 'field') expr.inferredType = resolved.type;
+      if (resolved.kind === 'variable' || resolved.kind === 'field' || resolved.kind === 'static_object') expr.inferredType = resolved.type;
       else if (resolved.kind === 'function') expr.inferredType = 'fnptr';
       else expr.inferredType = this.resolveConstant(resolved.constant).type;
       return expr.inferredType;
@@ -4466,7 +4545,7 @@ class Optimizer {
     const inlineNodeLimit = this.level >= 6 ? 72 : (this.level >= 5 ? 40 : 20);
     for (const module of this.program.moduleOrder) {
       for (const fn of module.functions.values()) {
-        if (fn === this.entryFunction || fn.body.length === 0) continue;
+        if (fn === this.entryFunction || fn.body.length === 0 || fn.methodOf?.staticObject) continue;
         if (this.level < 6 && fn.body.length !== 1) continue;
         const final = fn.body[fn.body.length - 1];
         if (final.kind !== 'return' || !final.expression) continue;
@@ -5570,6 +5649,14 @@ class CodeGenerator {
     a.callIat(setUnhandled);
     a.leaRip('rcx', runtimeStart);
     a.callLabel('__lsx_runtime_log_append');
+    // Static objects are real compiler-owned singletons. Initialize each body
+    // exactly once before main so default fields and owned tables are ready.
+    for (const module of this.program.moduleOrder) for (const struct of module.structs.values()) {
+      if (!struct.staticObject) continue;
+      this.program.resolveStructLayout(struct);
+      a.leaRip('rcx', struct.singletonLabel);
+      a.callLabel(struct.initLabel);
+    }
     a.callLabel(this.entryFunction.label);
     a.movMemRspReg(40, 'rax');
     a.leaRip('rcx', runtimeExit);
@@ -5809,7 +5896,8 @@ class CodeGenerator {
   emitFieldBase(resolved, regName = 'r11') {
     const a = this.asm;
     resolved = this.canonicalResolvedReference(resolved);
-    this.loadVariableToReg(resolved.variable, regName);
+    if (resolved.staticStruct) a.leaRip(regName, resolved.staticStruct.singletonLabel);
+    else this.loadVariableToReg(resolved.variable, regName);
     for (let index = 0; index < resolved.fields.length - 1; index += 1) {
       const field = resolved.fields[index];
       a.movRegMemBase(regName, regName, field.offset, 8);
@@ -5984,6 +6072,10 @@ class CodeGenerator {
         return true;
       }
       if (resolved.kind === 'variable') return this.loadVariableToReg(resolved.variable, regName);
+      if (resolved.kind === 'static_object') {
+        a.leaRip(regName, resolved.struct.singletonLabel);
+        return true;
+      }
       if (resolved.kind === 'field') {
         if (isFloatType(resolved.type)) return false;
         const address = this.emitFieldBase(resolved, regName === 'r11' ? 'r10' : 'r11');
@@ -8557,6 +8649,13 @@ function buildSections(program, root, entryFunction, optimizationLevel = 6, opti
   data.mark('data_slab_free_4096'); data.zeros(8);
   data.mark('data_slab_bump_4096'); data.zeros(8);
   data.mark('data_slab_end_4096'); data.zeros(8);
+  for (const module of program.moduleOrder) for (const struct of module.structs.values()) {
+    if (!struct.staticObject) continue;
+    program.resolveStructLayout(struct);
+    data.align(Math.max(8, Number(struct.alignment || 8)));
+    data.mark(struct.singletonLabel);
+    data.zeros(Math.max(1, Number(struct.size || 0)));
+  }
   if (generated.pgoRecords.length > 0) {
     data.align(8);
     data.mark('data_pgo_blob');
