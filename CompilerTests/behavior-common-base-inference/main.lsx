@@ -1,0 +1,11 @@
+use "@Engine/GameObject.lsx" as GO
+use "@Engine/Transform.lsx" as T
+use "@Engine/Spinner.lsx" as S
+fn main()
+    local gameObject = GO.GameObject.new()
+    gameObject.AddLazyBehavior(T.Transform.new())
+    gameObject.AddLazyBehavior(S.Spinner.new())
+    gameObject.Update()
+    gameObject.Draw()
+    return 0
+end

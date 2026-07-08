@@ -660,6 +660,66 @@ const inheritanceBuild = run(['build', inheritanceMain, '-o', inheritanceExe, '-
 assert(/direct calls [1-9]/.test(inheritanceBuild.stdout), inheritanceBuild.stdout);
 assert(fs.existsSync(inheritanceExe));
 
+// An inferred parameter that calls a method shared by a base object and its
+// visible derived objects resolves to that common base. Pushing the parameter
+// into an empty table then carries the same element type into for-in variables.
+const behaviorTableMain = write('inheritance/inferred-behavior-table.lsx', `
+export const LazyBehavior = {
+    Start = fn()
+    end
+
+    Update = fn()
+    end
+
+    Draw = fn()
+    end
+}
+
+export const Transform : base(LazyBehavior) = {
+}
+
+export const Spinner : base(LazyBehavior) = {
+}
+
+export const GameObject = {
+    lazyBehaviors = {}
+
+    AddLazyBehavior = fn(behavior)
+        self.lazyBehaviors.push(behavior)
+        behavior.Start()
+    end
+
+    Update = fn()
+        for behavior in self.lazyBehaviors do
+            behavior.Update()
+        end
+    end
+
+    Draw = fn()
+        for behavior in self.lazyBehaviors do
+            behavior.Draw()
+        end
+    end
+}
+
+fn main()
+    local gameObject = GameObject.new()
+    gameObject.AddLazyBehavior(Transform.new())
+    gameObject.AddLazyBehavior(Spinner.new())
+    gameObject.Update()
+    gameObject.Draw()
+    return 0
+end
+`);
+const behaviorTableCheck = compilerApi.checkFile(behaviorTableMain);
+const behaviorGameObject = behaviorTableCheck.root.structs.get('GameObject');
+const behaviorParameter = behaviorGameObject.methods.get('AddLazyBehavior').params.find((param) => param.name === 'behavior');
+const behaviorCollection = behaviorGameObject.fieldDeclarations.find((field) => field.name === 'lazyBehaviors');
+assert.strictEqual(behaviorParameter.type, 'LazyBehavior', 'behavior parameter did not infer the common base object');
+assert.strictEqual(behaviorCollection.type, 'table<LazyBehavior>', 'behavior table did not retain the inferred common base element');
+run(['check', behaviorTableMain]);
+run(['build', behaviorTableMain, '-o', path.join(temp, 'inferred-behavior-table.exe'), '--opt', '6']);
+
 const duplicateInheritedField = write('inheritance/duplicate-field.lsx', `
 const Base = { value: i64 = 1 }
 const Child : base(Base) = { value: i64 = 2 }
@@ -1720,4 +1780,4 @@ const badResult = run(['check', bad], 1);
 assert(badResult.stderr.includes(`${bad}:3:`));
 assert(badResult.stderr.includes("unknown module alias or closed table 'Missing'"));
 
-console.log('LazyScriptEX 0.18.6 compiler, raw strings, native objects, persistent logs, file I/O, JSON, direct atomics, threading, automatic runtime crash records, sockets, HTTP, and GameKit tests passed.');
+console.log('LazyScriptEX 0.18.8 compiler, raw strings, native objects, persistent logs, file I/O, JSON, direct atomics, threading, automatic runtime crash records, sockets, HTTP, and GameKit tests passed.');

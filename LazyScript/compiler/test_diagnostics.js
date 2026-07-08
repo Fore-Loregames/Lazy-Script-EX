@@ -34,5 +34,43 @@ assert.strictEqual(parsed.kind, 'diagnostic');
 assert.strictEqual(parsed.code, 'LSX1200');
 assert.strictEqual(parsed.file, source);
 
+
+const unanchored = path.join(root, 'unanchored-behavior.lsx');
+fs.writeFileSync(unanchored, `export const GameObject = {
+    lazyBehaviors = {}
+
+    AddLazyBehavior = fn(behavior)
+        self.lazyBehaviors.push(behavior)
+        behavior.Start()
+    end
+
+    Update = fn()
+        for behavior in self.lazyBehaviors do
+            behavior.Update()
+        end
+    end
+}
+`);
+
+// Editor/check mode must recognize parameters and loop variables as locals,
+// even before a project call site anchors their concrete object type.
+const deferredCheck = cp.spawnSync(process.execPath, [path.join(__dirname, 'lazyscriptex.js'), 'check', unanchored, '--diagnostics=json'], { encoding: 'utf8' });
+assert.strictEqual(deferredCheck.status, 0, deferredCheck.stderr || deferredCheck.stdout);
+assert(!`${deferredCheck.stdout}
+${deferredCheck.stderr}`.includes("unknown module or API namespace 'behavior'"));
+
+// Strict compiler validation still reports an unresolved object type clearly;
+// it must never reinterpret a local parameter as an API namespace.
+let strictDiagnostic;
+try {
+  checkFile(unanchored);
+  assert.fail('strict unanchored behavior validation unexpectedly passed');
+} catch (error) {
+  strictDiagnostic = compilerDiagnostic(error);
+}
+assert.strictEqual(strictDiagnostic.code, 'LSX2418');
+assert(strictDiagnostic.message.includes("local 'behavior'"));
+assert(!strictDiagnostic.message.includes('namespace'));
+
 fs.rmSync(root, { recursive: true, force: true });
 console.log('LazyScriptEX structured diagnostic and source-range tests passed.');

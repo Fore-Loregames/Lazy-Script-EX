@@ -26,7 +26,8 @@ Node.js 18 or newer is required to run the compiler. The runtime setup script do
 ## What LSX includes
 
 - Native x64 compilation with optimization levels O0 through O6
-- Inferred variables, parameters, returns, object fields, and tables
+- Inferred variables, returns, object fields, and tables
+- Project-wide parameter and loop-variable inference that widens related derived objects to their nearest common base
 - Closed objects with inferred constructors, cloning, ownership, and compile-time inheritance
 - Growable tables and packed numeric buffers using ordinary `{}` syntax
 - Modules through `use "path" as Name`
@@ -327,7 +328,7 @@ Object fields use fixed native offsets. Method calls use dot syntax.
 
 ### Growable tables
 
-An empty table can become a growable collection:
+An empty table can become a growable collection. Its element representation is inferred from every value pushed into it; related derived objects widen to their nearest common base, and `for` loop variables receive that base type:
 
 ```lsx
 local scores = {}

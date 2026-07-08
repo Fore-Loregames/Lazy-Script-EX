@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const { buildNativeBindings } = require('./native_bindings');
 const { compileInlineUiSource } = require('./inline_ui');
 
-const VERSION = '0.18.6';
+const VERSION = '0.18.8';
 
 
 function directoryExists(value) {
@@ -1069,7 +1069,7 @@ function inferPositionalNativeElementType(entries, inferredTypes) {
 }
 
 class Program {
-  constructor(entryPath = null, moduleRoots = {}) {
+  constructor(entryPath = null, moduleRoots = {}, options = {}) {
     this.entryPath = entryPath ? path.resolve(entryPath) : null;
     const mergedRoots = { ...environmentModuleRoots(), ...(moduleRoots || {}) };
     const bundledRoot = compilerLazyScriptRoot();
@@ -1081,6 +1081,7 @@ class Program {
     this.usesBuiltins = new Set();
     this.anonymousTableCounter = 0;
     this.constructorsPrepared = false;
+    this.allowDeferredLocalMethods = Boolean(options.allowDeferredLocalMethods);
   }
 
   symbolExists(module, name) {
@@ -1368,12 +1369,71 @@ class Program {
     const current = canonicalTypeName(currentType);
     const incoming = canonicalTypeName(incomingType);
     if (isAutoType(incoming)) return current;
+
+    // Compare object identities before translating names into the receiving
+    // module. A module that imports LazyBehavior does not also need to import
+    // every concrete derived behavior merely to accept it through the base.
+    const currentStructBeforeTranslation = this.resolveStructIdentity(currentModule, current);
+    const incomingStructBeforeTranslation = this.resolveStructIdentity(incomingModule, incoming);
+    if (!explicit && (isAutoType(current) || current === 'any') && incomingStructBeforeTranslation) {
+      const nameable = this.nameableInferenceAncestor(incomingStructBeforeTranslation, currentModule);
+      if (nameable) return this.translateInferredType(nameable.name, nameable.module, currentModule);
+      // The receiving module cannot legally name this concrete object yet.
+      // Leave the slot open so its own method/field use can infer an imported
+      // base on a later pass instead of reporting a false cross-module error.
+      return current;
+    }
+    if (!explicit && currentStructBeforeTranslation && incomingStructBeforeTranslation) {
+      const common = this.nearestCommonInferenceBase([currentStructBeforeTranslation, incomingStructBeforeTranslation]);
+      if (common === currentStructBeforeTranslation) return current;
+      if (common) return this.translateInferredType(common.name, common.module, currentModule);
+    }
+
+    if (!explicit && (isAutoType(current) || current === 'any' || isGenericTableType(current)) && isTableTypeName(incoming)) {
+      const incomingElement = this.resolveStructIdentity(incomingModule, tableElementTypeName(incoming));
+      if (incomingElement) {
+        const nameable = this.nameableInferenceAncestor(incomingElement, currentModule);
+        if (nameable) {
+          const commonName = this.translateInferredType(nameable.name, nameable.module, currentModule);
+          return `table<${commonName}>`;
+        }
+        return current;
+      }
+    }
+
+    if (!explicit && isTableTypeName(current) && isTableTypeName(incoming)) {
+      const currentElement = this.resolveStructIdentity(currentModule, tableElementTypeName(current));
+      const incomingElement = this.resolveStructIdentity(incomingModule, tableElementTypeName(incoming));
+      const commonElement = currentElement && incomingElement
+        ? this.nearestCommonInferenceBase([currentElement, incomingElement])
+        : null;
+      if (commonElement && commonElement === currentElement) return current;
+      if (commonElement) {
+        const commonName = this.translateInferredType(commonElement.name, commonElement.module, currentModule);
+        return `table<${commonName}>`;
+      }
+    }
+
     const translated = this.translateInferredType(incoming, incomingModule, currentModule);
     if (isAutoType(current) || current === 'any') return translated;
     if (translated === 'any') return current;
     if (isGenericTableType(current) && isTableTypeName(translated) && !isGenericTableType(translated)) return translated;
     if (isGenericTableType(translated) && isTableTypeName(current)) return current;
     if (this.inferenceTypesSame(current, currentModule, translated, currentModule)) return current;
+
+    if (!explicit && isTableTypeName(current) && isTableTypeName(translated)) {
+      const currentElementName = tableElementTypeName(current);
+      const incomingElementName = tableElementTypeName(translated);
+      const currentElement = this.resolveStructIdentity(currentModule, currentElementName);
+      const incomingElement = this.resolveStructIdentity(currentModule, incomingElementName);
+      const commonElement = currentElement && incomingElement
+        ? this.nearestCommonInferenceBase([currentElement, incomingElement])
+        : null;
+      if (commonElement) {
+        const commonName = this.translateInferredType(commonElement.name, commonElement.module, currentModule);
+        return `table<${commonName}>`;
+      }
+    }
 
     if (isNumericType(current) && isNumericType(translated)) {
       if (explicit) return current;
@@ -1391,6 +1451,10 @@ class Program {
 
     const currentStruct = this.resolveStructIdentity(currentModule, current);
     const incomingStruct = this.resolveStructIdentity(currentModule, translated);
+    if (!explicit && currentStruct && incomingStruct) {
+      const common = this.nearestCommonInferenceBase([currentStruct, incomingStruct]);
+      if (common) return this.translateInferredType(common.name, common.module, currentModule);
+    }
     if (!explicit && current === 'ptr' && (incomingStruct || isTableTypeName(translated))) return translated;
     if ((currentStruct || isTableTypeName(current)) && translated === 'ptr') return current;
     if ((current === 'ptr' || current === 'handle') && (translated === 'ptr' || translated === 'handle')) return current;
@@ -1471,6 +1535,65 @@ class Program {
     return result;
   }
 
+  inferenceStructDepth(struct) {
+    let depth = 0;
+    let current = struct;
+    const seen = new Set();
+    while (current && !seen.has(current)) {
+      seen.add(current);
+      depth += 1;
+      current = current.baseType || null;
+    }
+    return depth;
+  }
+
+  commonInferenceAncestors(matches) {
+    if (!matches.length) return [];
+    const firstChain = [];
+    let current = matches[0];
+    const firstSeen = new Set();
+    while (current && !firstSeen.has(current)) {
+      firstSeen.add(current);
+      firstChain.push(current);
+      current = current.baseType || null;
+    }
+    return firstChain.filter((candidate) => matches.every((match) => {
+      let cursor = match;
+      const seen = new Set();
+      while (cursor && !seen.has(cursor)) {
+        if (cursor === candidate) return true;
+        seen.add(cursor);
+        cursor = cursor.baseType || null;
+      }
+      return false;
+    })).sort((left, right) => this.inferenceStructDepth(right) - this.inferenceStructDepth(left));
+  }
+
+  nearestCommonInferenceBase(matches) {
+    return this.commonInferenceAncestors(matches)[0] || null;
+  }
+
+  nameableInferenceAncestor(struct, targetModule) {
+    let current = struct;
+    const seen = new Set();
+    while (current && !seen.has(current)) {
+      seen.add(current);
+      if (current.module === targetModule) return current;
+      if (current.exported) {
+        for (const use of targetModule.uses.values()) if (use.target === current.module) return current;
+      }
+      current = current.baseType || null;
+    }
+    return null;
+  }
+
+  commonInferenceBase(matches, memberName, methodOnly = false) {
+    const usable = this.commonInferenceAncestors(matches).filter((candidate) => methodOnly
+      ? Boolean(this.methodDeclaration(candidate, memberName))
+      : Boolean(this.fieldDeclaration(candidate, memberName) || this.methodDeclaration(candidate, memberName)));
+    return usable[0] || null;
+  }
+
   inferUniqueStructForMember(module, memberName, methodOnly = false) {
     const matches = [];
     for (const struct of this.visibleInferenceStructs(module)) {
@@ -1479,7 +1602,12 @@ class Program {
         : (this.fieldDeclaration(struct, memberName) || this.methodDeclaration(struct, memberName));
       if (found) matches.push(struct);
     }
-    return matches.length === 1 ? matches[0] : null;
+    if (matches.length === 1) return matches[0];
+    // A base object and any number of visible derived objects all expose the
+    // same inherited member. Treat that as one inference target rather than an
+    // ambiguity. This is what lets declaration-free behavior parameters and
+    // table-loop items resolve to their shared LazyBehavior-style base.
+    return this.commonInferenceBase(matches, memberName, methodOnly);
   }
 
   applyUniqueMemberInference(owner, memberName, module, scope, token = null, methodOnly = false) {
@@ -1866,6 +1994,10 @@ class Program {
     if (expression.kind === 'literal') return { type: canonicalTypeName(expression.valueType), module };
     if (expression.kind === 'reference') {
       const resolved = this.inferenceReference(module, expression.path, scope);
+      // A parameter that only received the final integer fallback is still
+      // semantically unanchored. Do not let that fallback leak into growable
+      // tables or loop items during the last inference wave.
+      if (resolved?.variable?.param?.inferenceDefaulted) return { type: 'auto', module: resolved.module || module };
       return resolved ? { type: canonicalTypeName(resolved.type), module: resolved.module } : { type: 'auto', module };
     }
     if (expression.kind === 'table_literal') {
@@ -2151,9 +2283,13 @@ class Program {
           const actualIsSpecificTable = isTableTypeName(actual.type) && !isGenericTableType(actual.type);
           const actualIsGenericTable = isGenericTableType(actual.type);
           const paramIsSpecificTable = isTableTypeName(param.type) && !isGenericTableType(param.type);
-          if ((isAutoType(param.type) || paramIsGenericTable) && !isAutoType(actual.type) && (!paramIsGenericTable || actualIsSpecificTable)
-              && (callable.kind === 'internal' || callable.kind === 'struct_construct')) {
-            this.setInferredSlot(param, 'type', actual.type, actual.module, callable.target.module, Boolean(param.explicitType), args[index].token || expression.token, `parameter '${param.name}'`);
+          const inferredInternalParameter = (callable.kind === 'internal' || callable.kind === 'struct_construct')
+            && !param.explicitType
+            && !isAutoType(actual.type)
+            && !(actualIsGenericTable && paramIsSpecificTable)
+            && (!paramIsGenericTable || actualIsSpecificTable);
+          if (inferredInternalParameter) {
+            this.setInferredSlot(param, 'type', actual.type, actual.module, callable.target.module, false, args[index].token || expression.token, `parameter '${param.name}'`);
           } else if (!opaqueObjectAddress && !isAutoType(param.type) && (isAutoType(actual.type) || (actualIsGenericTable && paramIsSpecificTable))) {
             this.applyInferenceExpected(args[index], param.type, callable.target.module || module, module, scope);
           }
@@ -2305,7 +2441,14 @@ class Program {
     // more inference wave lets returned/forwarded parameters determine results.
     for (const module of this.moduleOrder) {
       for (const fn of module.functions.values()) {
-        for (const param of fn.params) if (isAutoType(param.type)) param.type = 'i64';
+        for (const param of fn.params) {
+          if (isAutoType(param.type)) {
+            param.inferenceDefaulted = true;
+            param.type = 'i64';
+          } else if (param.inferenceDefaulted === undefined) {
+            param.inferenceDefaulted = false;
+          }
+        }
       }
     }
     for (let pass = 0; pass < 8; pass += 1) {
@@ -3045,6 +3188,32 @@ class Program {
       }
     }
 
+    // A local receiver must never fall through into module/API namespace
+    // resolution. During editor/check passes, unanchored inferred parameters
+    // and generic table-loop items may wait for project call-site inference.
+    if (firstVariable && pathParts.length === 2) {
+      if (this.allowDeferredLocalMethods && firstVariable.deferredMethodReceiver) {
+        const receiver = { kind: 'reference', path: [pathParts[0]], token: call.token, inferredType: firstVariable.type };
+        call.effectiveArgs = [...call.args];
+        return {
+          kind: 'deferred_method',
+          target: {
+            name: pathParts.join('.'),
+            params: call.args.map((_, index) => ({ name: `arg${index}`, type: 'auto' })),
+            returnType: 'i64',
+            module,
+          },
+          returnType: 'i64',
+          methodReceiver: receiver,
+          deferred: true,
+        };
+      }
+      throw new CompileError(`cannot infer the object type of local '${pathParts[0]}' before calling '${pathParts[1]}'`, call.token, null, {
+        code: 'LSX2418',
+        hint: `Call this function from a project with a concrete object value, or make '${pathParts[0]}' originate from a known object table. Local values are never treated as module namespaces.`,
+      });
+    }
+
 
     // Local or imported packed-struct static operations.
     let staticStruct = null;
@@ -3358,7 +3527,10 @@ class Program {
       param.type = canonicalTypeName(param.type || 'i64');
       const typeInfo = this.resolveType(fn.module, param.type, param.token);
       if (variables.has(param.name)) throw new CompileError(`duplicate parameter '${param.name}'`, param.token);
-      variables.set(param.name, { name: param.name, type: param.type, typeInfo, kind: 'param', index, token: param.token });
+      variables.set(param.name, {
+        name: param.name, type: param.type, typeInfo, kind: 'param', index, token: param.token,
+        param, deferredMethodReceiver: Boolean(param.inferenceDefaulted),
+      });
     });
     const scope = { variables, loopDepth: 0, function: fn };
 
@@ -3375,10 +3547,14 @@ class Program {
             statement.expression.expectedType = declaredHint;
           }
           const inferred = this.validateExpression(statement.expression, fn.module, localScope);
-          const declared = canonicalTypeName(declaredHint || inferred || 'i64');
-          if (!this.compatibleTypes(inferred, fn.module, declared, fn.module, statement.token)) throw new CompileError(`cannot initialize ${statement.name}: ${declared} with ${inferred}`, statement.token);
+          const deferredGenericValue = !statement.declaredType && canonicalTypeName(inferred) === 'any';
+          const declared = canonicalTypeName(deferredGenericValue ? 'i64' : (declaredHint || inferred || 'i64'));
+          if (!deferredGenericValue && !this.compatibleTypes(inferred, fn.module, declared, fn.module, statement.token)) throw new CompileError(`cannot initialize ${statement.name}: ${declared} with ${inferred}`, statement.token);
           const typeInfo = this.resolveType(fn.module, declared, statement.token);
-          const variable = { name: statement.name, type: declared, typeInfo, kind: 'local', immutable: Boolean(statement.immutable), token: statement.token };
+          const variable = {
+            name: statement.name, type: declared, typeInfo, kind: 'local', immutable: Boolean(statement.immutable), token: statement.token,
+            sourceExpression: statement.expression, deferredMethodReceiver: deferredGenericValue,
+          };
           localScope.variables.set(statement.name, variable);
           statement.variable = variable;
         } else if (statement.kind === 'assign') {
@@ -9249,8 +9425,8 @@ function loadProjectConfig(input) {
   };
 }
 
-function checkFile(inputPath, moduleRoots = {}) {
-  const program = new Program(inputPath, moduleRoots);
+function checkFile(inputPath, moduleRoots = {}, options = {}) {
+  const program = new Program(inputPath, moduleRoots, options);
   const root = program.load(inputPath);
   program.validate();
   const entry = program.getEntryFunction(root);
@@ -9403,7 +9579,7 @@ function main(argv) {
   if (command === 'check') {
     const nearestConfig = findNearestProjectConfig(input);
     const projectRoots = nearestConfig ? loadProjectConfig(nearestConfig).moduleRoots : {};
-    const result = checkFile(input, { ...projectRoots, ...commandLineRoots });
+    const result = checkFile(input, { ...projectRoots, ...commandLineRoots }, { allowDeferredLocalMethods: true });
     const kind = result.entry ? 'entry-capable script' : 'module';
     console.log(`OK ${kind}: ${path.resolve(input)} (${result.program.moduleOrder.length} module${result.program.moduleOrder.length === 1 ? '' : 's'})`);
     return;
@@ -9411,7 +9587,7 @@ function main(argv) {
   if (command === 'check-project') {
     const project = loadProjectConfig(input);
     project.moduleRoots = { ...environmentModuleRoots(), ...project.moduleRoots, ...commandLineRoots };
-    const result = checkFile(project.entry, project.moduleRoots);
+    const result = checkFile(project.entry, project.moduleRoots, { allowDeferredLocalMethods: true });
     if (!result.entry) throw new CompileError('project entry does not define fn main()', null, project.entry);
     console.log(`OK project: ${project.configPath || project.entry}\nEntry: ${project.entry}\nModules: ${result.program.moduleOrder.length}`);
     return;

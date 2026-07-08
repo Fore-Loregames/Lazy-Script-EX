@@ -2337,16 +2337,27 @@ function applyCompilerDiagnostics(items, fallbackDocument = null, projectRoot = 
   return count;
 }
 
+function compilerCheckContext(startFile) {
+  const associated = associatedProjectConfigs(startFile);
+  const project = associated[0] || null;
+  return {
+    command: project ? 'check-project' : 'check',
+    target: project?.configPath || startFile,
+    cwd: project?.root || path.dirname(startFile),
+    projectRoot: project?.root || null,
+  };
+}
+
 async function checkDocument(document, showOutput = false) {
   if (!document || document.languageId !== LANGUAGE || document.isUntitled) return;
   const generation = ++lastCheckGeneration;
   const compiler = compilerPath(document.uri.fsPath);
-  const project = findProject(document.uri.fsPath);
-  const args = [compiler, 'check', document.uri.fsPath, ...compilerModuleRootArgs(document.uri.fsPath), '--diagnostics=json'];
-  const result = await runProcess(args, project || path.dirname(document.uri.fsPath), 'LSX check', showOutput);
+  const context = compilerCheckContext(document.uri.fsPath);
+  const args = [compiler, context.command, context.target, ...compilerModuleRootArgs(document.uri.fsPath), '--diagnostics=json'];
+  const result = await runProcess(args, context.cwd, 'LSX check', showOutput);
   if (generation !== lastCheckGeneration && !showOutput) return;
   const found = parseCompilerDiagnostics(result.text);
-  const count = applyCompilerDiagnostics(found, document, project);
+  const count = applyCompilerDiagnostics(found, document, context.projectRoot);
   if (showOutput) {
     if (result.code === 0) vscode.window.showInformationMessage('LazyScriptEX check passed.');
     else vscode.window.showErrorMessage(`LazyScriptEX found ${count || 1} compiler problem${count === 1 ? '' : 's'}. See Problems or Output for details.`);
@@ -2581,5 +2592,5 @@ function deactivate() {
 }
 module.exports = {
   activate, deactivate, parseText, resolveImport, chainContext, inferTypeFromInitializer,
-  _test: { index, loadRecordSync, importedSymbol, importedCompletionTarget, importEntryForAlias, completionImportEntryForAlias, levenshteinDistance, symbolByName, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, TABLE_BUILTIN_METHODS, isGrowableTableInitializer, isTableLikeSymbol, tableBuiltinCompletionItems, resolveTableBuiltinChain, HoverProvider, DocumentFormattingProvider, DocumentRangeFormattingProvider, OnTypeFormattingProvider, formatLsxText, collectVisibleScopeSymbols, completionForScopeSymbol, completionForSelfMember, currentIdentifierRange, shouldAutoTriggerSuggestions, desiredIndentAtLine, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs }
+  _test: { index, loadRecordSync, importedSymbol, importedCompletionTarget, importEntryForAlias, completionImportEntryForAlias, levenshteinDistance, symbolByName, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, TABLE_BUILTIN_METHODS, isGrowableTableInitializer, isTableLikeSymbol, tableBuiltinCompletionItems, resolveTableBuiltinChain, HoverProvider, DocumentFormattingProvider, DocumentRangeFormattingProvider, OnTypeFormattingProvider, formatLsxText, collectVisibleScopeSymbols, completionForScopeSymbol, completionForSelfMember, currentIdentifierRange, shouldAutoTriggerSuggestions, desiredIndentAtLine, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs, compilerCheckContext }
 };

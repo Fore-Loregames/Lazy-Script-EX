@@ -71,7 +71,25 @@ fn add(left, right)
 end
 ```
 
-Parameter and return storage is inferred from call sites, operators, fields, forwarded values, and return expressions.
+Parameter and return storage is inferred from call sites, operators, fields, forwarded values, and return expressions. When every call passes related derived objects, LSX widens the parameter to their nearest common base so members declared on that base remain available without explicit annotations.
+
+```lsx
+const LazyBehavior = {
+    Start = fn()
+    end
+}
+
+const Transform : base(LazyBehavior) = {}
+const Spinner : base(LazyBehavior) = {}
+
+const GameObject = {
+    AddLazyBehavior = fn(behavior)
+        behavior.Start()
+    end
+}
+```
+
+Calls that pass both `Transform` and `Spinner` infer `behavior` as `LazyBehavior`. This is compile-time common-base inference; inheritance method dispatch remains direct rather than virtual.
 
 ```lsx
 fn main()
@@ -175,6 +193,25 @@ for name in names do
 end
 
 names.destroy()
+```
+
+An initially empty growable table also learns a common inherited element type from `push(...)` calls. The variable introduced by `for value in table do` receives that inferred element type, so base members are available inside the loop:
+
+```lsx
+const GameObject = {
+    lazyBehaviors = {}
+
+    AddLazyBehavior = fn(behavior)
+        self.lazyBehaviors.push(behavior)
+        behavior.Start()
+    end
+
+    Update = fn()
+        for behavior in self.lazyBehaviors do
+            behavior.Update()
+        end
+    end
+}
 ```
 
 ## Object tables

@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const Module = require('module');
+const cp = require('child_process');
 
 class Position { constructor(line, character) { this.line = line; this.character = character; } translate(dl = 0, dc = 0) { return new Position(this.line + dl, this.character + dc); } }
 class Range { constructor(start, end, endLine, endChar) { if (typeof start === 'number') { this.start = new Position(start, end); this.end = new Position(endLine, endChar); } else { this.start = start; this.end = end; } } }
@@ -60,6 +61,34 @@ fn main()
     return value
 end
 `);
+
+
+const sourceCompilerPath = path.join(toolkit, 'LazyScript', 'compiler', 'lazyscriptex.js');
+const bundledCompilerPath = path.join(__dirname, 'compiler', 'lazyscriptex.js');
+assert.strictEqual(
+  fs.readFileSync(bundledCompilerPath, 'utf8'),
+  fs.readFileSync(sourceCompilerPath, 'utf8'),
+  'VS Code extension compiler is not synchronized with the source compiler',
+);
+
+const unanchoredBehaviorSource = path.join(sourceDir, 'UnanchoredBehavior.lsx');
+fs.writeFileSync(unanchoredBehaviorSource, `export const GameObject = {
+    lazyBehaviors = {}
+    AddLazyBehavior = fn(behavior)
+        self.lazyBehaviors.push(behavior)
+        behavior.Start()
+    end
+    Update = fn()
+        for behavior in self.lazyBehaviors do
+            behavior.Update()
+        end
+    end
+}
+`);
+const bundledBehaviorCheck = cp.spawnSync(process.execPath, [bundledCompilerPath, 'check', unanchoredBehaviorSource, '--diagnostics=json'], { encoding: 'utf8' });
+assert.strictEqual(bundledBehaviorCheck.status, 0, bundledBehaviorCheck.stderr || bundledBehaviorCheck.stdout);
+assert(!`${bundledBehaviorCheck.stdout}
+${bundledBehaviorCheck.stderr}`.includes("unknown module or API namespace 'behavior'"), 'bundled extension compiler still treats local behavior values as namespaces');
 
 const record = extension._test.loadRecordSync(source);
 assert(record, 'main source was not indexed');
@@ -153,6 +182,18 @@ assert.strictEqual(path.resolve(customResolved), path.resolve(sharedWindow, 'Win
 const customRootArgs = extension._test.compilerModuleRootArgs(source);
 assert(customRootArgs.includes('--module-root') && customRootArgs.includes(`Engine=${sharedEngine}`), 'custom named module root is not passed to compiler diagnostics');
 configurationValues.moduleRoots = {};
+
+const projectCheckDir = path.join(sourceDir, 'ProjectCheck');
+const projectCheckSourceDir = path.join(projectCheckDir, 'src');
+fs.mkdirSync(projectCheckSourceDir, { recursive: true });
+const projectCheckConfig = path.join(projectCheckDir, 'lazyscriptex.json');
+const projectCheckSource = path.join(projectCheckSourceDir, 'GameObject.lsx');
+fs.writeFileSync(projectCheckConfig, JSON.stringify({ entry: 'src/GameObject.lsx', output: 'build/check.exe' }, null, 2));
+fs.writeFileSync(projectCheckSource, 'export const GameObject = {}\n');
+const projectCheckContext = extension._test.compilerCheckContext(projectCheckSource);
+assert.strictEqual(projectCheckContext.target, projectCheckConfig, 'compiler checks inside a project should use lazyscriptex.json so call-site inference is available');
+assert.strictEqual(projectCheckContext.command, 'check-project', 'project-aware diagnostics should call the compiler project checker');
+assert.strictEqual(projectCheckContext.cwd, projectCheckDir, 'project-aware compiler checks should run from the project root');
 
 const tagCompletionText = 'lshtml view(props) = {(\n    <ui>\n        <';
 const tagCompletionDoc = mockDocument(tagCompletionText);

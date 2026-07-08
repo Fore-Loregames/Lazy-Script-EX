@@ -1,0 +1,8 @@
+export const LazyBehavior = {
+    Start = fn()
+    end
+    Update = fn()
+    end
+    Draw = fn()
+    end
+}

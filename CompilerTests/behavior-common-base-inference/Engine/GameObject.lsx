@@ -1,0 +1,21 @@
+use "@Engine/LazyBehavior.lsx" as Behavior
+export const GameObject = {
+    lazyBehaviors = {}
+
+    AddLazyBehavior = fn(behavior)
+        self.lazyBehaviors.push(behavior)
+        behavior.Start()
+    end
+
+    Update = fn()
+        for behavior in self.lazyBehaviors do
+            behavior.Update()
+        end
+    end
+
+    Draw = fn()
+        for behavior in self.lazyBehaviors do
+            behavior.Draw()
+        end
+    end
+}

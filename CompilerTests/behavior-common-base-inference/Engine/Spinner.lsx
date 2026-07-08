@@ -1,0 +1,3 @@
+use "@Engine/LazyBehavior.lsx" as Behavior
+export const Spinner : base(Behavior.LazyBehavior) = {
+}
