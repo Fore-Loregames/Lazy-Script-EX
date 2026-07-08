@@ -1,8 +1,8 @@
 {
   "name": "lazyscriptex-native-gamekit",
   "displayName": "LazyScriptEX Native GameKit",
-  "description": "Native LazyScriptEX tooling with beginner-friendly API hovers, exact compiler ranges, project diagnostics, LSHTML/LSCSS support, inferred LSX syntax, and O6 native compilation.",
-  "version": "0.18.2",
+  "description": "Native LazyScriptEX tooling with local-scope IntelliSense, path completion, document formatting, beginner-friendly API hovers, exact compiler ranges, LSHTML/LSCSS support, and O6 native compilation.",
+  "version": "0.18.3",
   "publisher": "nissyokugames",
   "license": "MIT",
   "engines": {
@@ -48,7 +48,8 @@
     "workspaceContains:**/*.lsx",
     "onCommand:lazyscriptex.refreshIndex",
     "onCommand:lazyscriptex.selectLazyScriptRoot",
-    "onCommand:lazyscriptex.selectApiPath"
+    "onCommand:lazyscriptex.selectApiPath",
+    "onCommand:lazyscriptex.formatDocument"
   ],
   "main": "./extension.js",
   "contributes": {
@@ -128,6 +129,11 @@
         "command": "lazyscriptex.selectApiPath",
         "title": "LazyScriptEX: Select Offline API Page",
         "icon": "$(file-code)"
+      },
+      {
+        "command": "lazyscriptex.formatDocument",
+        "title": "LazyScriptEX: Format Document",
+        "icon": "$(indent)"
       }
     ],
     "menus": {
@@ -168,6 +174,11 @@
           "command": "lazyscriptex.explainSymbol",
           "when": "editorLangId == lazyscriptex",
           "group": "navigation@4"
+        },
+        {
+          "command": "lazyscriptex.formatDocument",
+          "when": "editorLangId == lazyscriptex",
+          "group": "navigation@5"
         }
       ],
       "commandPalette": [
@@ -197,6 +208,9 @@
         },
         {
           "command": "lazyscriptex.selectApiPath"
+        },
+        {
+          "command": "lazyscriptex.formatDocument"
         }
       ]
     },
@@ -274,6 +288,11 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "lazyscriptex.format.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the built-in LSX document formatter. Use Format Document or VS Code editor.formatOnSave."
         }
       }
     }

@@ -18,6 +18,7 @@ const vscodeMock = {
   Uri: { file: fsPath => ({ fsPath: path.resolve(fsPath) }) },
   SymbolKind: { Function:1, Method:2, Constant:3, Struct:4, Field:5, Module:6, Variable:7 },
   CompletionItemKind: { Function:1, Method:2, Constant:3, Class:4, Struct:5, Field:6, Module:7, Variable:8, Keyword:9, Property:10, Folder:11, File:12 },
+  window: { activeTextEditor: null },
   workspace: {
     workspaceFolders: [{ uri: { fsPath: toolkit } }],
     getConfiguration: () => ({ get: (name, fallback) => Object.prototype.hasOwnProperty.call(configurationValues, name) ? configurationValues[name] : fallback })
@@ -196,10 +197,65 @@ assert(diagnostics.length === 1, 'JSON compiler diagnostic was not parsed');
 assert(diagnostics[0].code === 'LSX2200', 'compiler diagnostic code was not preserved');
 assert(diagnostics[0].hint.includes('spelling'), 'compiler diagnostic hint was not preserved');
 
+
+const localCompletionSource = `const WindowManager = {
+    windowHandle = 0
+
+    CreateWindow = fn(width,height,title)
+        local requestedWidth = width
+        if width > 0 then
+            local requestedHeight = height
+            self.windowHandle = 0
+            wid
+        end
+    end
+}
+`;
+const localCompletionDoc = {
+  ...mockDocument(localCompletionSource),
+  uri: { fsPath: path.join(sourceDir, 'WindowManager.lsx') }
+};
+const localPosition = new Position(8, 15);
+const visibleLocals = extension._test.collectVisibleScopeSymbols(localCompletionDoc, localPosition);
+for (const expected of ['self', 'width', 'height', 'title', 'requestedWidth', 'requestedHeight']) {
+  assert(visibleLocals.some(symbol => symbol.name === expected), `current-scope completion is missing ${expected}`);
+}
+const localProviderItems = new extension._test.CompletionProvider().provideCompletionItems(localCompletionDoc, localPosition);
+assert(localProviderItems.some(item => (item.label.label || item.label) === 'width'), 'function parameter completion is missing width');
+assert(localProviderItems.some(item => (item.label.label || item.label) === 'requestedWidth'), 'local variable completion is missing requestedWidth');
+const selfCompletionDoc = {
+  ...mockDocument(localCompletionSource.replace('            wid', '            self.')),
+  uri: { fsPath: path.join(sourceDir, 'WindowManagerSelf.lsx') }
+};
+const selfItems = new extension._test.CompletionProvider().provideCompletionItems(selfCompletionDoc, new Position(8, 17));
+assert(selfItems.some(item => (item.label.label || item.label) === 'windowHandle'), 'self member completion is missing windowHandle');
+
+const unformatted = `const WindowManager = {
+windowHandle = 0
+CreateWindow = fn(width,height,title)
+if width > 0 then
+self.windowHandle = GLFW.glfwCreateWindow(
+width,
+height,
+title,
+0,
+0
+)
+end
+end
+}
+`;
+const formatted = extension._test.formatLsxText(unformatted, { insertSpaces: true, tabSize: 4 });
+assert(formatted.includes('    CreateWindow = fn(width, height, title)'), 'formatter did not indent an object method');
+assert(formatted.includes('        if width > 0 then'), 'formatter did not indent an if block');
+assert(formatted.includes('            self.windowHandle = GLFW.glfwCreateWindow('), 'formatter did not indent code inside the if block');
+assert(formatted.includes('                width,'), 'formatter did not indent multiline arguments');
+assert(formatted.includes('            )\n        end\n    end\n}'), 'formatter did not align closing delimiters and end statements');
+
 const snippetsText = fs.readFileSync(path.join(__dirname, 'snippets', 'lazyscriptex.json'), 'utf8');
 const snippets = JSON.parse(snippetsText);
 const canvasSnippet = snippets['Declarative LazyUI canvas'];
 assert(canvasSnippet && canvasSnippet.body.some(line => line.includes('<rect class="${2:preview-shape}"')), 'declarative canvas snippet is missing');
 assert(!snippetsText.includes('context.fill_rounded_rect'), 'extension still advertises imperative canvas drawing');
 assert(canvasSnippet.body.some(line => line.includes('background = {${3:props.accent}}')), 'LSCSS {var} snippet is missing');
-console.log('LazyScriptEX extension navigation, LSHTML/LSCSS symbols, and inferred member tests passed.');
+console.log('LazyScriptEX extension navigation, local-scope completion, formatting, LSHTML/LSCSS, and inferred member tests passed.');

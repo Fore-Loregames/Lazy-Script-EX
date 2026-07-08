@@ -710,6 +710,181 @@ function activeRecord(document) {
   return record;
 }
 
+
+function stripCodeForScope(raw, state = { blockComment: false }) {
+  let out = '';
+  let quote = '';
+  let escaped = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    const next = raw[i + 1] || '';
+    if (state.blockComment) {
+      if (ch === ']' && next === ']') {
+        state.blockComment = false;
+        out += '  ';
+        i++;
+      } else out += ' ';
+      continue;
+    }
+    if (quote) {
+      if (escaped) { escaped = false; out += ' '; continue; }
+      if (ch === '\\') { escaped = true; out += ' '; continue; }
+      if (ch === quote) quote = '';
+      out += ' ';
+      continue;
+    }
+    if (ch === '-' && next === '-' && raw[i + 2] === '[' && raw[i + 3] === '[') {
+      state.blockComment = true;
+      out += '    ';
+      i += 3;
+      continue;
+    }
+    if (ch === '-' && next === '-') {
+      out += ' '.repeat(raw.length - i);
+      break;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += ' ';
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+function makeScopeSymbol(name, kind, line, column, extra = {}) {
+  const label = kind === 'parameter' ? 'parameter' : kind === 'loop' ? 'loop variable' : 'local variable';
+  return {
+    name,
+    kind: 'variable',
+    scopeKind: kind,
+    line,
+    column,
+    signature: extra.signature || `${label} ${name}`,
+    documentation: extra.documentation || `${label[0].toUpperCase()}${label.slice(1)} \`${name}\` visible in the current scope.`,
+    type: extra.type || '',
+    typeRef: extra.typeRef || null,
+    initializer: extra.initializer || '',
+    depth: extra.depth || 0
+  };
+}
+
+function collectVisibleScopeSymbols(document, position) {
+  const text = document.getText();
+  const lines = text.split(/\r?\n/);
+  const lastLine = Math.min(Math.max(0, position.line), Math.max(0, lines.length - 1));
+  const scopes = [{ type: 'root', symbols: [] }];
+  const commentState = { blockComment: false };
+
+  function pushScope(type, symbols = []) {
+    scopes.push({ type, symbols });
+  }
+  function popScope() {
+    if (scopes.length > 1) scopes.pop();
+  }
+  function addSymbol(symbol) {
+    symbol.depth = scopes.length - 1;
+    scopes[scopes.length - 1].symbols.push(symbol);
+  }
+  function parameterSymbols(raw, line, baseColumn = 0) {
+    return parameterInfo(raw).filter(p => /^[A-Za-z_]\w*$/.test(p.name)).map(p => {
+      const column = Math.max(baseColumn, (lines[line] || '').indexOf(p.name, baseColumn));
+      return makeScopeSymbol(p.name, 'parameter', line, Math.max(0, column), {
+        type: p.type === 'inferred' ? '' : p.type,
+        typeRef: p.type === 'inferred' ? null : parseTypeReference(p.type),
+        signature: `parameter ${p.name}${p.type !== 'inferred' ? `: ${p.type}` : ''}`,
+        documentation: `Function parameter \`${p.name}\`. LSX infers its value type from how the function is called and used.`
+      });
+    });
+  }
+
+  for (let lineIndex = 0; lineIndex <= lastLine; lineIndex++) {
+    const rawLine = lineIndex === lastLine ? (lines[lineIndex] || '').slice(0, position.character) : (lines[lineIndex] || '');
+    const code = stripCodeForScope(rawLine, commentState).trim();
+    if (!code) continue;
+
+    // A branch starts a fresh child scope while preserving its parent function/loop scope.
+    if (/^(?:elseif\b|else\b)/.test(code)) {
+      if (scopes.at(-1)?.type === 'branch') popScope();
+      pushScope('branch');
+    }
+
+    // Close completed blocks before reading declarations that follow them on the same line.
+    if (/^end\b/.test(code)) popScope();
+
+    let match;
+    const method = code.match(/^([A-Za-z_]\w*)\s*=\s*fn\s*\(([^)]*)\)/);
+    const fn = code.match(/^(?:export\s+)?fn\s+([A-Za-z_]\w*)\s*\(([^)]*)\)/);
+    if (method || fn) {
+      const paramsText = (method || fn)[2] || '';
+      const openParen = rawLine.indexOf('(') + 1;
+      const params = parameterSymbols(paramsText, lineIndex, Math.max(0, openParen));
+      if (method) params.unshift(makeScopeSymbol('self', 'parameter', lineIndex, Math.max(0, rawLine.indexOf(method[1])), {
+        signature: 'current object instance self',
+        documentation: '`self` is the current object instance. Use dot access such as `self.windowHandle`.'
+      }));
+      pushScope('function', params);
+    } else {
+      const lshtml = code.match(/^(?:export\s+)?lshtml\s+([A-Za-z_]\w*)\s*(?:\(([^)]*)\))?/);
+      if (lshtml && lshtml[2]) pushScope('lshtml', parameterSymbols(lshtml[2], lineIndex, rawLine.indexOf('(') + 1));
+    }
+
+    const forMatch = code.match(/^for\s+([A-Za-z_]\w*)(?:\s*,\s*([A-Za-z_]\w*))?\s+in\b.*\bdo\b/);
+    if (forMatch) {
+      const vars = [forMatch[1], forMatch[2]].filter(Boolean).map(name => makeScopeSymbol(name, 'loop', lineIndex, Math.max(0, rawLine.indexOf(name)), {
+        signature: `loop variable ${name}`,
+        documentation: `Loop variable \`${name}\`, available until this loop's \`end\`.`
+      }));
+      pushScope('loop', vars);
+    } else if (/^(?:if\b.*\bthen\b|while\b.*\bdo\b|do\s*$)/.test(code) && !/\bend\b/.test(code)) {
+      pushScope(/^if\b/.test(code) ? 'branch' : 'block');
+    }
+
+    const local = code.match(/^local\s+([A-Za-z_]\w*)\s*(?::\s*([^=]+?))?\s*(?:=\s*(.+))?$/);
+    if (local) {
+      const typeText = local[2]?.trim() || '';
+      const initializer = local[3]?.trim() || '';
+      addSymbol(makeScopeSymbol(local[1], 'local', lineIndex, Math.max(0, rawLine.indexOf(local[1])), {
+        type: typeText,
+        typeRef: parseTypeReference(typeText),
+        initializer,
+        signature: `local ${local[1]}${typeText ? `: ${typeText}` : ''}${initializer ? ` = ${initializer}` : ''}`,
+        documentation: `Local variable \`${local[1]}\` visible in the current block${initializer ? `. It is initialized with \`${initializer}\`.` : '.'}`
+      }));
+    }
+
+    // Handle compact lines such as: if ready then return 1 end
+    const endCount = (code.match(/\bend\b/g) || []).length - (/^end\b/.test(code) ? 1 : 0);
+    for (let n = 0; n < endCount; n++) popScope();
+  }
+
+  const visible = new Map();
+  for (let depth = 0; depth < scopes.length; depth++) {
+    for (const symbol of scopes[depth].symbols) visible.set(symbol.name, { ...symbol, depth });
+  }
+  return [...visible.values()];
+}
+
+function enclosingObjectAt(record, line) {
+  return record.symbols
+    .filter(symbol => symbol.members && Number.isInteger(symbol.endLine) && symbol.line <= line && line <= symbol.endLine)
+    .sort((a, b) => (a.endLine - a.line) - (b.endLine - b.line))[0] || null;
+}
+
+function completionForScopeSymbol(symbol) {
+  const item = new vscode.CompletionItem(symbol.name, vscode.CompletionItemKind.Variable);
+  const label = symbol.scopeKind === 'parameter' ? 'Function parameter' : symbol.scopeKind === 'loop' ? 'Loop variable' : 'Local variable';
+  item.detail = `${label}: ${symbol.name}${symbol.type ? ` (${symbol.type})` : ' (inferred)'}`;
+  const md = new vscode.MarkdownString();
+  md.appendCodeblock(symbol.signature || symbol.name, 'lazyscriptex');
+  md.appendMarkdown(`\n${symbol.documentation || label}.`);
+  item.documentation = md;
+  item.insertText = symbol.name;
+  item.sortText = `00_${String(999 - (symbol.depth || 0)).padStart(3, '0')}_${symbol.name}`;
+  return item;
+}
+
 function symbolLocation(record, sym) {
   const start = positionAtLine(sym.line, sym.column);
   return new vscode.Location(record.uri, new vscode.Range(start, start.translate(0, sym.name.length)));
@@ -1173,6 +1348,196 @@ function lscssCompletionItems(document, position) {
   });
 }
 
+
+function countMatches(text, regex) {
+  return (text.match(regex) || []).length;
+}
+
+
+function normalizeLsxLineSpacing(raw, state) {
+  let out = '';
+  let quote = '';
+  let escaped = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    const next = raw[i + 1] || '';
+    if (state.blockComment) {
+      out += ch;
+      if (ch === ']' && next === ']') {
+        out += next;
+        i++;
+        state.blockComment = false;
+      }
+      continue;
+    }
+    if (quote) {
+      out += ch;
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\') { escaped = true; continue; }
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '-' && next === '-' && raw[i + 2] === '[' && raw[i + 3] === '[') {
+      out += '--[[';
+      i += 3;
+      state.blockComment = true;
+      continue;
+    }
+    if (ch === '-' && next === '-') {
+      out += raw.slice(i);
+      break;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (ch === ',') {
+      out = out.replace(/[ \t]+$/g, '') + ',';
+      let j = i + 1;
+      while (j < raw.length && /[ \t]/.test(raw[j])) j++;
+      if (j < raw.length && !/[\)\]\}]/.test(raw[j])) out += ' ';
+      i = j - 1;
+      continue;
+    }
+    out += ch;
+  }
+  return out.replace(/\bfn\s+\(/g, 'fn(').replace(/[ \t]+$/g, '');
+}
+
+function formatCodeView(raw, state) {
+  let out = '';
+  let quote = '';
+  let escaped = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    const next = raw[i + 1] || '';
+    if (state.blockComment) {
+      if (ch === ']' && next === ']') {
+        state.blockComment = false;
+        out += '  ';
+        i++;
+      } else out += ' ';
+      continue;
+    }
+    if (quote) {
+      if (escaped) { escaped = false; out += ' '; continue; }
+      if (ch === '\\') { escaped = true; out += ' '; continue; }
+      if (ch === quote) quote = '';
+      out += ' ';
+      continue;
+    }
+    if (ch === '-' && next === '-' && raw[i + 2] === '[' && raw[i + 3] === '[') {
+      state.blockComment = true;
+      out += '    ';
+      i += 3;
+      continue;
+    }
+    if (ch === '-' && next === '-') {
+      out += ' '.repeat(raw.length - i);
+      break;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += ' ';
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+function htmlIndentDelta(code, active) {
+  if (!active && !/<\/?[A-Za-z][\w-]*(?:\s|>|\/)/.test(code)) return { delta: 0, leadingClosers: 0 };
+  let delta = 0;
+  let leadingClosers = 0;
+  const trimmed = code.trimStart();
+  const regex = /<(\/)?([A-Za-z][\w-]*)(?:\s[^<>]*?)?(\/?)>/g;
+  let match;
+  while ((match = regex.exec(code))) {
+    const closing = Boolean(match[1]);
+    const tag = match[2].toLowerCase();
+    const selfClosing = Boolean(match[3]) || LSHTML_VOID_TAGS.has(tag);
+    if (closing) {
+      delta--;
+      if (match.index === code.indexOf(trimmed) || trimmed.startsWith(match[0])) leadingClosers++;
+    } else if (!selfClosing) delta++;
+  }
+  return { delta, leadingClosers };
+}
+
+function formatLsxText(text, options = {}) {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const hadFinalNewline = /\r?\n$/.test(text);
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  if (hadFinalNewline && lines.at(-1) === '') lines.pop();
+  const insertSpaces = options.insertSpaces !== false;
+  const tabSize = Number.isFinite(options.tabSize) && options.tabSize > 0 ? options.tabSize : 4;
+  const indentUnit = insertSpaces ? ' '.repeat(tabSize) : '\t';
+  const state = { blockComment: false };
+  const spacingState = { blockComment: false };
+  let indent = 0;
+  let lshtmlDepth = 0;
+  const outputLines = [];
+
+  for (const original of lines) {
+    const trimmed = original.trim();
+    if (!trimmed) {
+      outputLines.push('');
+      continue;
+    }
+
+    const formattedContent = normalizeLsxLineSpacing(trimmed, spacingState);
+    const codeRaw = formatCodeView(formattedContent, state);
+    const code = codeRaw.trim();
+    const lshtmlStart = /^(?:export\s+)?lshtml\b.*=\s*\{\(\s*$/.test(code);
+    const lshtmlEnd = /^\)\}\s*$/.test(code);
+    const normalized = code.replace(/\{\(/g, '{').replace(/\)\}/g, '}');
+
+    const startsEnd = /^end\b/.test(code);
+    const startsBranch = /^(?:else\b|elseif\b)/.test(code);
+    let leadingDelimiterClosers = 0;
+    const leading = normalized.match(/^[\s]*[\}\]\)]+/);
+    if (leading) leadingDelimiterClosers = countMatches(leading[0], /[\}\]\)]/g);
+    const html = htmlIndentDelta(code, lshtmlDepth > 0 || lshtmlStart);
+    const preDedent = (startsEnd || startsBranch ? 1 : 0) + leadingDelimiterClosers + html.leadingClosers;
+    const lineIndent = Math.max(0, indent - preDedent);
+    outputLines.push(indentUnit.repeat(lineIndent) + formattedContent);
+
+    const openDelimiters = countMatches(normalized, /[\{\[\(]/g);
+    const closeDelimiters = countMatches(normalized, /[\}\]\)]/g);
+    const endCount = countMatches(code, /\bend\b/g);
+    let keywordOpens = 0;
+    const compact = endCount > 0;
+    if (!compact && (/^(?:export\s+)?fn\s+[A-Za-z_]\w*\s*\(/.test(code) || /^[A-Za-z_]\w*\s*=\s*fn\s*\(/.test(code) || /^local\s+[A-Za-z_]\w*\s*=\s*fn\s*\(/.test(code))) keywordOpens++;
+    if (!compact && /^if\b.*\bthen\b/.test(code)) keywordOpens++;
+    if (!compact && /^while\b.*\bdo\b/.test(code)) keywordOpens++;
+    if (!compact && /^for\b.*\bdo\b/.test(code)) keywordOpens++;
+    if (!compact && /^do\s*$/.test(code)) keywordOpens++;
+    // elseif/else close the previous branch for display but keep the same block depth.
+    if (startsBranch) keywordOpens = 0;
+
+    indent = Math.max(0, indent + keywordOpens - endCount + openDelimiters - closeDelimiters + html.delta);
+    if (lshtmlStart) lshtmlDepth++;
+    if (lshtmlEnd) lshtmlDepth = Math.max(0, lshtmlDepth - 1);
+  }
+
+  return outputLines.join(eol) + (hadFinalNewline ? eol : '');
+}
+
+class DocumentFormattingProvider {
+  provideDocumentFormattingEdits(document, options) {
+    if (!vscode.workspace.getConfiguration('lazyscriptex').get('format.enable', true)) return [];
+    const original = document.getText();
+    const formatted = formatLsxText(original, options);
+    if (formatted === original) return [];
+    const start = new vscode.Position(0, 0);
+    const lastLine = Math.max(0, document.lineCount - 1);
+    const end = document.lineAt(lastLine).range?.end || new vscode.Position(lastLine, document.lineAt(lastLine).text.length);
+    return [vscode.TextEdit.replace(new vscode.Range(start, end), formatted)];
+  }
+}
+
 class CompletionProvider {
   provideCompletionItems(document, position) {
     const importItems = importCompletionItems(document, position);
@@ -1182,6 +1547,8 @@ class CompletionProvider {
     const styleItems = lscssCompletionItems(document, position);
     if (styleItems) return styleItems;
     const record = activeRecord(document);
+    const scopeSymbols = collectVisibleScopeSymbols(document, position);
+    const scopeRecord = { ...record, symbols: [...scopeSymbols, ...record.symbols.filter(symbol => symbol.kind !== 'variable')] };
     const prefix = document.lineAt(position.line).text.slice(0, position.character);
     const chainMatch = prefix.match(/([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\.([A-Za-z_]\w*)?$/);
     if (chainMatch) {
@@ -1196,6 +1563,10 @@ class CompletionProvider {
         return target ? target.exports.map(sym => completionFor(target, sym, `${base[0]}.`)) : [];
       }
       if (base.length === 1) {
+        if (base[0] === 'self') {
+          const object = enclosingObjectAt(record, position.line);
+          if (object) return object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(record, sym, 'self.', object));
+        }
         const builtinItems = Object.entries(BUILTIN_DOCS).filter(([name]) => name.startsWith(`${base[0]}.`)).map(([name, info]) => {
           const method = name.slice(base[0].length + 1);
           const item = new vscode.CompletionItem(method, vscode.CompletionItemKind.Function);
@@ -1209,10 +1580,10 @@ class CompletionProvider {
           return item;
         });
         if (builtinItems.length) return builtinItems;
-        const variable = record.symbols.find(s => s.kind === 'variable' && s.name === base[0]);
+        const variable = scopeSymbols.find(s => s.name === base[0]) || record.symbols.find(s => s.kind === 'variable' && s.name === base[0]);
         if (variable) {
-          const typeRef = variable.typeRef || inferTypeFromInitializer(record, variable.initializer);
-          const resolved = resolveTypeObject(record, typeRef);
+          const typeRef = variable.typeRef || inferTypeFromInitializer(scopeRecord, variable.initializer);
+          const resolved = resolveTypeObject(scopeRecord, typeRef);
           if (resolved) return resolved.object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(resolved.record, sym, `${base[0]}.`, resolved.object));
         }
         const object = record.symbols.find(s => s.name === base[0] && s.members);
@@ -1220,7 +1591,17 @@ class CompletionProvider {
       }
     }
     const items = KEYWORDS.map(keyword => new vscode.CompletionItem(keyword, vscode.CompletionItemKind.Keyword));
-    for (const sym of record.symbols) items.push(completionFor(record, sym));
+    const addedNames = new Set();
+    for (const sym of scopeSymbols.sort((a, b) => (b.depth || 0) - (a.depth || 0))) {
+      if (addedNames.has(sym.name)) continue;
+      items.push(completionForScopeSymbol(sym));
+      addedNames.add(sym.name);
+    }
+    for (const sym of record.symbols) {
+      if (sym.kind === 'variable' || addedNames.has(sym.name)) continue;
+      items.push(completionFor(record, sym));
+      addedNames.add(sym.name);
+    }
     for (const [alias, imp] of record.imports) {
       const item = new vscode.CompletionItem(alias, vscode.CompletionItemKind.Module);
       item.detail = `LSX module: ${imp.spec}`;
@@ -1719,6 +2100,7 @@ async function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand('lazyscriptex.explainSymbol', () => vscode.commands.executeCommand('editor.action.showHover')));
   context.subscriptions.push(vscode.commands.registerCommand('lazyscriptex.selectLazyScriptRoot', selectLazyScriptRoot));
   context.subscriptions.push(vscode.commands.registerCommand('lazyscriptex.selectApiPath', selectApiPath));
+  context.subscriptions.push(vscode.commands.registerCommand('lazyscriptex.formatDocument', () => vscode.commands.executeCommand('editor.action.formatDocument')));
 
   const selector = { language: LANGUAGE, scheme: 'file' };
   const completionTriggers = ['.', '<', '/', ' ', '=', '"', '{', '-', ...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'];
@@ -1730,6 +2112,7 @@ async function activate(context) {
   context.subscriptions.push(vscode.languages.registerSignatureHelpProvider(selector, new SignatureProvider(), '(', ','));
   context.subscriptions.push(vscode.languages.registerDocumentSymbolProvider(selector, new DocumentSymbolProvider()));
   context.subscriptions.push(vscode.languages.registerWorkspaceSymbolProvider(new WorkspaceSymbolProvider()));
+  context.subscriptions.push(vscode.languages.registerDocumentFormattingEditProvider(selector, new DocumentFormattingProvider()));
   context.subscriptions.push(vscode.languages.registerCodeActionsProvider(selector, new ImportCodeActionProvider(), { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }));
 
   watcher = vscode.workspace.createFileSystemWatcher('**/*.lsx');
@@ -1766,5 +2149,5 @@ function deactivate() {
 }
 module.exports = {
   activate, deactivate, parseText, resolveImport, chainContext, inferTypeFromInitializer,
-  _test: { index, loadRecordSync, importedSymbol, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, HoverProvider, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs }
+  _test: { index, loadRecordSync, importedSymbol, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, HoverProvider, DocumentFormattingProvider, formatLsxText, collectVisibleScopeSymbols, completionForScopeSymbol, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs }
 };

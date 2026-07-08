@@ -26,7 +26,8 @@ Do not open the `.vsix` with Microsoft Visual Studio's VSIX installer. This exte
 - Compiler diagnostics while typing and on save
 - Exact error ranges in the Problems panel
 - Beginner-oriented hints for common compiler errors
-- Completion for local symbols, imports, real folders and `.lsx` filenames inside `use` paths, modules, objects, fields, methods, constants, LSHTML tags, attributes, and LSCSS properties
+- Scope-aware completion for function parameters, local variables, loop variables, `self`, object fields, imports, real folders and `.lsx` filenames inside `use` paths, modules, methods, constants, LSHTML tags, attributes, and LSCSS properties
+- Built-in document formatting for LSX, object methods, control flow, multiline calls, LSHTML, and LSCSS
 - Rich hover explanations with practical LSX examples
 - Go to Definition
 - Find References
@@ -52,6 +53,7 @@ Open the Command Palette and search for `LazyScriptEX`:
 - `LazyScriptEX: Explain Symbol Under Cursor`
 - `LazyScriptEX: Select LazyScript/API Folder`
 - `LazyScriptEX: Select Offline API Page`
+- `LazyScriptEX: Format Document`
 
 Default shortcuts:
 
@@ -61,6 +63,30 @@ Default shortcuts:
 | `Ctrl+F6` | Build and run |
 | `Ctrl+Shift+F6` | Check the current file or project |
 | `Ctrl+Alt+R` | Refresh the recursive symbol index |
+
+## Local completion and formatting
+
+Completion follows the active LSX scope. Inside a function or object method, IntelliSense includes:
+
+- inferred function parameters such as `width`, `height`, and `title`;
+- `local` variables declared before the cursor;
+- `for ... in` loop variables;
+- `self` inside object methods;
+- object fields and methods after typing `self.`;
+- members inferred from locally created objects.
+
+Use **Format Document** from the Command Palette or press VS Code's normal format shortcut, `Shift+Alt+F`. The formatter corrects indentation for functions, objects, `if`/`elseif`/`else`, loops, multiline calls, LSHTML tags, and LSCSS blocks. It also adds readable spaces after commas without changing strings or comments.
+
+To format whenever you save, enable VS Code's standard setting:
+
+```json
+{
+  "[lazyscriptex]": {
+    "editor.defaultFormatter": "nissyokugames.lazyscriptex-native-gamekit",
+    "editor.formatOnSave": true
+  }
+}
+```
 
 ## Diagnostics
 
@@ -163,6 +189,7 @@ Then imports can use `@Engine/...` or `@Shared/...` from any source depth. Share
 | `lazyscriptex.moduleRoots` | Extra `@Name` roots available to IntelliSense and compiler checks |
 | `lazyscriptex.recursiveIndex` | Recursively index workspace, LazyScript, and configured roots |
 | `lazyscriptex.exclude` | Glob excluded from indexing |
+| `lazyscriptex.format.enable` | Enables the built-in LSX document formatter |
 
 ## Testing the extension
 
