@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/object-runtime-types.exe",
+  "optimization": 6,
+  "moduleRoots": { "Engine": "Engine" }
+}

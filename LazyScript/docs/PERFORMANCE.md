@@ -59,6 +59,20 @@ The compiler chooses table storage from the actual record shape:
 
 This keeps compact value data contiguous while preserving identity for retained reference-bearing objects.
 
+## Runtime object type checks
+
+`GetTypeName()` and `IsType(...)` use compact compiler-generated metadata rather than a general reflection system:
+
+- plain objects outside inheritance hierarchies receive no extra instance storage;
+- each object in an inheritance hierarchy stores one hidden eight-byte type ID before its visible body;
+- all user field offsets remain unchanged;
+- `GetTypeName()` is a header load followed by one indexed load from a static name table and performs no allocation;
+- `IsType("KnownName")` lowers to integer type-ID comparison while walking only the static base-ID chain;
+- a dynamic name first uses pointer identity for interned strings, then falls back to string comparison only when needed;
+- there is no RTTI DLL, garbage collector, hash table, prototype lookup, or per-object name allocation.
+
+The cost of `IsType(...)` is proportional to inheritance depth, not object size. Shallow behavior/component hierarchies therefore remain close to an equivalent hand-written C type-tag check.
+
 ## CPU targets
 
 Select a CPU target in `lazyscriptex.json`:

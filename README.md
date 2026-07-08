@@ -28,7 +28,7 @@ Node.js 18 or newer is required to run the compiler. The runtime setup script do
 - Native x64 compilation with optimization levels O0 through O6
 - Inferred variables, returns, object fields, and tables
 - Project-wide parameter and loop-variable inference that widens related derived objects to their nearest common base
-- Closed objects with inferred constructors, cloning, ownership, and compile-time inheritance
+- Closed objects with inferred constructors, cloning, ownership, compile-time inheritance, and compact `GetTypeName()` / `IsType(...)` runtime checks
 - Growable tables and packed numeric buffers using ordinary `{}` syntax
 - Modules through `use "path" as Name`
 - Direct Windows x64 foreign-function bindings

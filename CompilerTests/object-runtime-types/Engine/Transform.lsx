@@ -1,0 +1,5 @@
+use "@Engine/LazyBehavior.lsx" as Behavior
+
+export const Transform : base(Behavior.LazyBehavior) = {
+    x = 0
+}

@@ -1770,6 +1770,112 @@ fs.writeFileSync(pgoPath, pgoBuffer);
 const pgoUseResult = run(['build', avxVector, '-o', path.join(temp, 'pgo-used.exe'), '--opt', '6', '--pgo-use', pgoPath]);
 assert(/PGO profile: .*\(1\/1 functions matched\)/.test(pgoUseResult.stdout), pgoUseResult.stdout);
 
+// Runtime object type metadata stays compact and preserves user-visible
+// layouts. Only inheritance hierarchies receive the hidden eight-byte header;
+// plain objects remain unchanged. Literal IsType calls lower to integer ancestry
+// checks, while dynamic names use an interned-pointer fast path before falling
+// back to string comparison.
+write('runtime-types/LazyBehavior.lsx', `
+export const LazyBehavior = {
+    rootValue = 0
+    Start = fn()
+    end
+}
+`);
+write('runtime-types/Transform.lsx', `
+use "LazyBehavior.lsx" as B
+export const Transform : base(B.LazyBehavior) = {
+    x = 0
+}
+`);
+write('runtime-types/SpecialTransform.lsx', `
+use "Transform.lsx" as T
+export const SpecialTransform : base(T.Transform) = {
+    enabled = true
+}
+`);
+write('runtime-types/Plain.lsx', `
+export const Plain = {
+    value = 0
+}
+`);
+const runtimeTypeMain = write('runtime-types/main.lsx', `
+use "LazyBehavior.lsx" as B
+use "Transform.lsx" as T
+use "SpecialTransform.lsx" as S
+use "Plain.lsx" as P
+
+fn find(items, typeName)
+    for item in items do
+        if item.IsType(typeName) then
+            return item
+        end
+    end
+    return null
+end
+
+fn main()
+    local items = {}
+    local transform = T.Transform.new()
+    local special = S.SpecialTransform.new()
+    local plain = P.Plain.new()
+    items.push(transform)
+    items.push(special)
+    local found = find(items, "LazyBehavior")
+    local exact = transform.IsType("Transform")
+    local inherited = special.IsType("LazyBehavior")
+    local name = special.GetTypeName()
+    local plainName = plain.GetTypeName()
+    local plainExact = plain.IsType("Plain")
+    if found == null or exact == false or inherited == false or name == null or plainName == null or plainExact == false then
+        return 1
+    end
+    special.destroy()
+    transform.destroy()
+    plain.destroy()
+    return 0
+end
+`);
+const runtimeTypeCheck = compilerApi.checkFile(runtimeTypeMain);
+const runtimeTypeStructs = new Map();
+for (const module of runtimeTypeCheck.program.moduleOrder) {
+  for (const struct of module.structs.values()) {
+    runtimeTypeCheck.program.resolveStructLayout(struct);
+    runtimeTypeStructs.set(struct.name, struct);
+  }
+}
+const runtimeBase = runtimeTypeStructs.get('LazyBehavior');
+const runtimeTransform = runtimeTypeStructs.get('Transform');
+const runtimeSpecial = runtimeTypeStructs.get('SpecialTransform');
+const runtimePlain = runtimeTypeStructs.get('Plain');
+assert(runtimeBase && runtimeTransform && runtimeSpecial && runtimePlain, 'runtime type test structs were not all resolved');
+assert.strictEqual(runtimeBase.runtimePolymorphic, true);
+assert.strictEqual(runtimeTransform.runtimePolymorphic, true);
+assert.strictEqual(runtimeSpecial.runtimePolymorphic, true);
+assert.strictEqual(runtimePlain.runtimePolymorphic, false);
+assert.strictEqual(runtimeBase.runtimeHeaderSize, 8);
+assert.strictEqual(runtimeTransform.runtimeHeaderSize, 8);
+assert.strictEqual(runtimeSpecial.runtimeHeaderSize, 8);
+assert.strictEqual(runtimePlain.runtimeHeaderSize, 0);
+assert(runtimeBase.runtimeTypeId > 0);
+assert.strictEqual(runtimeTransform.runtimeBaseTypeId, runtimeBase.runtimeTypeId);
+assert.strictEqual(runtimeSpecial.runtimeBaseTypeId, runtimeTransform.runtimeTypeId);
+assert.strictEqual(new Set([runtimeBase.runtimeTypeId, runtimeTransform.runtimeTypeId, runtimeSpecial.runtimeTypeId]).size, 3);
+assert.strictEqual(runtimeBase.fieldOrder.find((field) => field.name === 'rootValue')?.offset, 0, 'hidden type header shifted the base object field layout');
+assert.strictEqual(runtimeTransform.fieldOrder.find((field) => field.name === 'rootValue')?.offset, 0, 'hidden type header shifted inherited field offsets');
+assert.strictEqual(runtimePlain.fieldOrder.find((field) => field.name === 'value')?.offset, 0, 'plain object layout changed');
+const runtimeTypeExe = path.join(temp, 'runtime-types.exe');
+run(['build', runtimeTypeMain, '-o', runtimeTypeExe, '--opt', '6']);
+const runtimeTypeBytes = fs.readFileSync(runtimeTypeExe);
+for (const typeName of ['LazyBehavior\0', 'Transform\0', 'SpecialTransform\0']) {
+  assert(runtimeTypeBytes.includes(Buffer.from(typeName, 'ascii')), `runtime type name table is missing ${typeName}`);
+}
+assert(runtimeTypeBytes.includes(Buffer.from([0x48, 0x8B, 0x41, 0xF8])), 'runtime type lookup is not a direct hidden-header load');
+assert(runtimeTypeBytes.includes(Buffer.from([0x49, 0x8B, 0x04, 0xC2])), 'runtime type name/base lookup is not an indexed native table load');
+assert(runtimeTypeBytes.includes(Buffer.from([0x48, 0x39, 0xD1])), 'dynamic IsType is missing the interned-string pointer comparison fast path');
+const runtimeTypePe = parsePe(runtimeTypeBytes);
+assert(!runtimeTypePe.imports.some((entry) => /reflect|rtti|typeinfo/i.test(entry.dll)), 'runtime object types added an external reflection/RTTI dependency');
+
 // Actual syntax and symbol errors still point to the correct source line.
 const bad = write('bad.lsx', `
 fn main()
@@ -1780,4 +1886,4 @@ const badResult = run(['check', bad], 1);
 assert(badResult.stderr.includes(`${bad}:3:`));
 assert(badResult.stderr.includes("unknown module alias or closed table 'Missing'"));
 
-console.log('LazyScriptEX 0.18.8 compiler, raw strings, native objects, persistent logs, file I/O, JSON, direct atomics, threading, automatic runtime crash records, sockets, HTTP, and GameKit tests passed.');
+console.log('LazyScriptEX 0.18.9 compiler, compact runtime object types, raw strings, native objects, persistent logs, file I/O, JSON, direct atomics, threading, automatic runtime crash records, sockets, HTTP, and GameKit tests passed.');

@@ -1,0 +1,5 @@
+use "@Engine/Transform.lsx" as T
+
+export const SpecialTransform : base(T.Transform) = {
+    enabled = true
+}

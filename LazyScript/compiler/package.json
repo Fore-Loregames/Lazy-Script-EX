@@ -1,8 +1,8 @@
 {
   "name": "lazyscriptex-compiler",
-  "version": "0.18.8",
+  "version": "0.18.9",
   "private": true,
-  "description": "Direct native x64 LazyScriptEX compiler with inferred object constructors, common-base parameter and growable-table inference, compile-time inheritance, static objects, beginner-readable diagnostics, structured VS Code errors, LSHTML/LSCSS, native bindings, and O0-O6 optimization.",
+  "description": "Direct native x64 LazyScriptEX compiler with inferred object constructors, compact runtime object type metadata, common-base parameter and growable-table inference, compile-time inheritance, static objects, beginner-readable diagnostics, structured VS Code errors, LSHTML/LSCSS, native bindings, and O0-O6 optimization.",
   "bin": {
     "lsx": "lazyscriptex.js"
   },

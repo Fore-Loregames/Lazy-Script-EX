@@ -853,6 +853,66 @@
       "howToGet": "Built into the language."
     },
     {
+      "module": "Language/Objects",
+      "kind": "compiler feature",
+      "name": "GetTypeName",
+      "signature": "object.GetTypeName() -> string",
+      "description": "Returns the exact concrete runtime object definition name as a shared static string without allocating.",
+      "source": "docs/LANGUAGE.md",
+      "line": 1,
+      "example": "local typeName = behavior.GetTypeName()\nif string.equals(typeName, \"Transform\") then\n    console.write_line(\"Found Transform\")\nend",
+      "exampleNote": "The result is the concrete derived name even when the variable was inferred as a base object.",
+      "friendlyDescription": "Returns the concrete name of an LSX object without allocating a new string.",
+      "level": "beginner",
+      "whatItIs": "A compact compiler-provided runtime object-name lookup.",
+      "whenToUse": "Use for debugging, editor displays, serialization labels, registries, and behavior/component lookup.",
+      "beginnerNote": "For normal type checks, prefer IsType(...) because it also understands inherited base objects.",
+      "memberSummary": "Returns the concrete object definition name stored in compiler-generated runtime type metadata.",
+      "requires": "No import or external library is required.",
+      "cleanup": "The returned string is shared static data and must not be destroyed.",
+      "related": [
+        "IsType",
+        "compile-time object inheritance",
+        "dot method call"
+      ],
+      "parameterDocs": {},
+      "returnsDescription": "The concrete object name, or null when the object is null.",
+      "workflow": "Call object.GetTypeName(), store or display the returned shared name, and do not destroy it.",
+      "commonMistake": "Do not compare the object itself to a string. Compare GetTypeName() or use IsType(...).",
+      "howToGet": "Built into every LSX object."
+    },
+    {
+      "module": "Language/Objects",
+      "kind": "compiler feature",
+      "name": "IsType",
+      "signature": "object.IsType(typeName) -> bool",
+      "description": "Returns true when the object has the requested concrete type or inherits from the requested base type.",
+      "source": "docs/LANGUAGE.md",
+      "line": 1,
+      "example": "GetLazyBehavior = fn(typeName)\n    for behavior in self.lazyBehaviors do\n        if behavior.IsType(typeName) then\n            return behavior\n        end\n    end\n    return null\nend",
+      "exampleNote": "A Transform can match both \"Transform\" and its inherited \"LazyBehavior\" base.",
+      "friendlyDescription": "Checks an object type or inherited base using compact compiler-generated type IDs.",
+      "level": "beginner",
+      "whatItIs": "A fast runtime inheritance-aware object type check.",
+      "whenToUse": "Use for behavior/component lookup, editor inspection, object filtering, and runtime branching by object family.",
+      "beginnerNote": "Pass the object definition name as a string. You do not need to import the object merely to check its name.",
+      "memberSummary": "Checks the concrete type and then walks only the compact base-type chain.",
+      "requires": "No import or external library is required.",
+      "cleanup": "No cleanup is required; the check allocates nothing.",
+      "related": [
+        "GetTypeName",
+        "compile-time object inheritance",
+        "for loop"
+      ],
+      "parameterDocs": {
+        "typeName": "Concrete or inherited base object definition name to match."
+      },
+      "returnsDescription": "True for an exact or inherited match; false for no match or a null object/name.",
+      "workflow": "Pass the desired object name to IsType(...), return or branch when true, and otherwise continue searching.",
+      "commonMistake": "Do not use object == \"TypeName\". That compares different value kinds and does not inspect runtime type metadata.",
+      "howToGet": "Built into every LSX object."
+    },
+    {
       "module": "Language/Strings and null",
       "kind": "compiler feature",
       "name": "normal string",

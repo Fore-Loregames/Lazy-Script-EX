@@ -485,5 +485,37 @@
       "$0"
     ],
     "description": "Define a derived constructor and initialize the base object first"
+  },
+  "Object type name": {
+    "prefix": "lsx-get-type-name",
+    "body": [
+      "local ${1:typeName} = ${2:object}.GetTypeName()",
+      "$0"
+    ],
+    "description": "Read the concrete LSX object definition name without allocating"
+  },
+  "Inherited object type check": {
+    "prefix": "lsx-is-type",
+    "body": [
+      "if ${1:object}.IsType(\"${2:LazyBehavior}\") then",
+      "    $0",
+      "end"
+    ],
+    "description": "Check an exact object type or inherited base type"
+  },
+  "Find LazyBehavior by type": {
+    "prefix": "lsx-find-behavior",
+    "body": [
+      "GetLazyBehavior = fn(typeName)",
+      "    for behavior in self.lazyBehaviors do",
+      "        if behavior.IsType(typeName) then",
+      "            return behavior",
+      "        end",
+      "    end",
+      "    return null",
+      "end",
+      "$0"
+    ],
+    "description": "Find the first stored behavior matching an exact or inherited object type"
   }
 }

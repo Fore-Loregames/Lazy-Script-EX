@@ -89,6 +89,37 @@ const bundledBehaviorCheck = cp.spawnSync(process.execPath, [bundledCompilerPath
 assert.strictEqual(bundledBehaviorCheck.status, 0, bundledBehaviorCheck.stderr || bundledBehaviorCheck.stdout);
 assert(!`${bundledBehaviorCheck.stdout}
 ${bundledBehaviorCheck.stderr}`.includes("unknown module or API namespace 'behavior'"), 'bundled extension compiler still treats local behavior values as namespaces');
+const bundledVersion = cp.spawnSync(process.execPath, [bundledCompilerPath, '--version'], { encoding: 'utf8' });
+assert.strictEqual(bundledVersion.status, 0, bundledVersion.stderr);
+assert.strictEqual(bundledVersion.stdout.trim(), '0.18.9', 'extension did not bundle compiler 0.18.9');
+
+const runtimeTypeDir = path.join(sourceDir, 'RuntimeTypes');
+fs.mkdirSync(runtimeTypeDir, { recursive: true });
+fs.writeFileSync(path.join(runtimeTypeDir, 'LazyBehavior.lsx'), `export const LazyBehavior = {
+    Start = fn()
+    end
+}
+`);
+fs.writeFileSync(path.join(runtimeTypeDir, 'Transform.lsx'), `use "LazyBehavior.lsx" as B
+export const Transform : base(B.LazyBehavior) = {
+    x = 0
+}
+`);
+const runtimeTypeEntry = path.join(runtimeTypeDir, 'main.lsx');
+fs.writeFileSync(runtimeTypeEntry, `use "LazyBehavior.lsx" as B
+use "Transform.lsx" as T
+fn main()
+    local behavior = T.Transform.new()
+    local name = behavior.GetTypeName()
+    local exact = behavior.IsType("Transform")
+    local inherited = behavior.IsType("LazyBehavior")
+    behavior.destroy()
+    if name == null or exact == false or inherited == false then return 1 end
+    return 0
+end
+`);
+const bundledRuntimeTypeCheck = cp.spawnSync(process.execPath, [bundledCompilerPath, 'check', runtimeTypeEntry, '--diagnostics=json'], { encoding: 'utf8' });
+assert.strictEqual(bundledRuntimeTypeCheck.status, 0, bundledRuntimeTypeCheck.stderr || bundledRuntimeTypeCheck.stdout);
 
 const record = extension._test.loadRecordSync(source);
 assert(record, 'main source was not indexed');
@@ -231,6 +262,10 @@ const overflowHover = extension._test.markdownForLscssProperty('overflow_y');
 assert(overflowHover && overflowHover.value.includes('working scrollbar'), 'LSCSS overflow_y tooltip does not explain how to create a scrollbar');
 
 extension._test.loadApiMetadata();
+const getTypeApi = extension._test.apiByKey.get('language/objects||gettypename');
+const isTypeApi = extension._test.apiByKey.get('language/objects||istype');
+assert(getTypeApi?.module === 'Language/Objects', 'GetTypeName is missing from extension API metadata');
+assert(isTypeApi?.module === 'Language/Objects', 'IsType is missing from extension API metadata');
 const lazyUiBinding = extension._test.loadRecordSync(path.join(toolkit, 'LazyScript', 'bindings', 'UI', 'LazyUI.lsx'));
 const canvasCommand = lazyUiBinding.exports.find(symbol => symbol.name === 'CanvasCommand');
 assert(canvasCommand, 'CanvasCommand was not indexed');
@@ -298,6 +333,23 @@ const selfCompletionDoc = {
 const selfItems = new extension._test.CompletionProvider().provideCompletionItems(selfCompletionDoc, new Position(8, 17));
 assert(selfItems.some(item => (item.label.label || item.label) === 'windowHandle'), 'self member completion is missing windowHandle');
 
+const objectTypeCompletionSource = `const GameObject = {
+    AddLazyBehavior = fn(behavior)
+        behavior.
+    end
+}
+`;
+const objectTypeCompletionDoc = {
+  ...mockDocument(objectTypeCompletionSource),
+  uri: { fsPath: path.join(sourceDir, 'ObjectTypeCompletion.lsx') }
+};
+const objectTypeItems = new extension._test.CompletionProvider().provideCompletionItems(objectTypeCompletionDoc, new Position(2, '        behavior.'.length));
+for (const expected of ['GetTypeName', 'IsType']) {
+  assert(objectTypeItems.some(item => (item.label.label || item.label) === expected), `compiler-provided object completion is missing ${expected}`);
+}
+const objectTypeHit = extension._test.resolveObjectBuiltinChain(extension._test.loadRecordSync(unanchoredBehaviorSource), ['behavior', 'IsType']);
+assert(objectTypeHit?.symbol?.signature === 'IsType(typeName) -> bool', 'IsType hover/signature metadata did not resolve');
+
 const unformatted = `const WindowManager = {
 windowHandle = 0
 CreateWindow = fn(width,height,title)
@@ -356,6 +408,9 @@ const canvasSnippet = snippets['Declarative LazyUI canvas'];
 assert(canvasSnippet && canvasSnippet.body.some(line => line.includes('<rect class="${2:preview-shape}"')), 'declarative canvas snippet is missing');
 assert(!snippetsText.includes('context.fill_rounded_rect'), 'extension still advertises imperative canvas drawing');
 assert(canvasSnippet.body.some(line => line.includes('background = {${3:props.accent}}')), 'LSCSS {var} snippet is missing');
+assert(snippets['Object type name']?.body.some(line => line.includes('.GetTypeName()')), 'GetTypeName snippet is missing');
+assert(snippets['Inherited object type check']?.body.some(line => line.includes('.IsType(')), 'IsType snippet is missing');
+assert(snippets['Find LazyBehavior by type']?.body.some(line => line.includes('behavior.IsType(typeName)')), 'behavior lookup snippet is missing');
 
 // Static objects are indexed as one shared service and their methods resolve
 // directly through an imported module without suggesting .new().
@@ -445,4 +500,4 @@ assert(importedSetValue.additionalTextEdits?.[0]?.newText === 'ServiceMod.Static
 assert(!importedMemberItems.some(item => (item.label.label || item.label) === 'localOnly'), 'imported object completion leaked current-file fields');
 assert(!importedMemberItems.some(item => (item.label.label || item.label) === 'Run'), 'imported object completion leaked the current object method');
 
-console.log('LazyScriptEX extension navigation, local and imported-module completion, formatting, static objects, LSHTML/LSCSS, and inferred member tests passed.');
+console.log('LazyScriptEX extension runtime object types, navigation, local and imported-module completion, formatting, static objects, LSHTML/LSCSS, and inferred member tests passed.');

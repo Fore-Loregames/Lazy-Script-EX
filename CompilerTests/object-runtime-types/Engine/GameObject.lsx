@@ -1,0 +1,25 @@
+use "@Engine/LazyBehavior.lsx" as Behavior
+
+export const GameObject = {
+    lazyBehaviors = {}
+
+    AddLazyBehavior = fn(behavior)
+        self.lazyBehaviors.push(behavior)
+    end
+
+    GetLazyBehavior = fn(typeName)
+        for behavior in self.lazyBehaviors do
+            if behavior.IsType(typeName) then
+                return behavior
+            end
+        end
+        return null
+    end
+
+    FirstTypeName = fn()
+        for behavior in self.lazyBehaviors do
+            return behavior.GetTypeName()
+        end
+        return ""
+    end
+}

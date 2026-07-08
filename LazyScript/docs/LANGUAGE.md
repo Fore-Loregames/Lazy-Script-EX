@@ -244,7 +244,7 @@ copy.destroy()
 transform.destroy()
 ```
 
-Objects use fixed field offsets and direct method calls. LSX does not require a garbage collector, runtime reflection table, or prototype chain.
+Objects use fixed field offsets and direct method calls. LSX does not require a garbage collector, prototype chain, or general reflection system. Objects that participate in inheritance receive one compiler-owned eight-byte runtime type ID immediately before the visible object body. This hidden header does not move or enlarge any user field offset. Plain objects that do not participate in inheritance keep their previous layout with no runtime type header.
 
 ## Constructors
 
@@ -342,6 +342,45 @@ Inheritance is resolved at compile time:
 - a same-named method overrides the base method;
 - `base.method(...)` calls the immediate base implementation;
 - circular inheritance is rejected;
+
+### Runtime object type names and inheritance checks
+
+Every object can report its concrete definition name:
+
+```lsx
+local name = behavior.GetTypeName()
+```
+
+`GetTypeName()` returns the exact concrete object name, such as `"Transform"`, even when the value was inferred as its `LazyBehavior` base. The returned string is shared static compiler data; the call performs no allocation.
+
+Use `IsType(...)` to test either the concrete object or any inherited base:
+
+```lsx
+if behavior.IsType("Transform") then
+    console.write_line("Found a transform")
+end
+
+if behavior.IsType("LazyBehavior") then
+    console.write_line("This is a behavior")
+end
+```
+
+A practical behavior lookup can therefore stay simple:
+
+```lsx
+GetLazyBehavior = fn(typeName)
+    for behavior in self.lazyBehaviors do
+        if behavior.IsType(typeName) then
+            return behavior
+        end
+    end
+    return null
+end
+```
+
+String literals known at compile time become compact integer type-ID ancestry checks. Dynamic names first compare the shared interned string pointer and only fall back to a content comparison for a string created at runtime. The ancestry walk is proportional only to the inheritance depth; no object fields are scanned and no temporary objects or strings are created.
+
+`GetTypeName()` returns `null` for a null object. `IsType(...)` returns `false` when either the object or requested name is null.
 - no runtime vtable or prototype walk is added.
 
 ## Tables and native storage

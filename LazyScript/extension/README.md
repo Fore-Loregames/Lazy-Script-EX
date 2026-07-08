@@ -27,7 +27,7 @@ Do not open the `.vsix` with Microsoft Visual Studio's VSIX installer. This exte
 - Compiler diagnostics while typing and on save
 - Exact error ranges in the Problems panel
 - Beginner-oriented hints for common compiler errors
-- Scope-aware completion for function parameters, local variables, loop variables, `self`, object fields, inferred growable-table methods, imports, real folders and `.lsx` filenames inside `use` paths, modules, methods, constants, LSHTML tags, attributes, and LSCSS properties
+- Scope-aware completion for function parameters, local variables, loop variables, `self`, object fields, `GetTypeName()`, `IsType(...)`, inferred growable-table methods, imports, real folders and `.lsx` filenames inside `use` paths, modules, methods, constants, LSHTML tags, attributes, and LSCSS properties
 - Built-in document formatting for LSX constructors, object methods, control flow, multiline calls, LSHTML, and LSCSS
 - Rich hover explanations with practical LSX examples
 - Go to Definition
@@ -70,6 +70,8 @@ Default shortcuts:
 The extension provides scope-aware completion for function parameters, `local` variables, loop variables, `self`, and the fields and methods on the current object. It automatically opens the suggestion list while you type inside a function, so values such as `width`, `height`, `window`, and `framebuffer` appear without switching files or manually pressing `Ctrl+Space`. Values from unrelated functions do not leak into the current list.
 
 Compiler diagnostics now use the containing `lazyscriptex.json` whenever the edited file belongs to a project. This lets call-site inference see all mapped modules instead of incorrectly checking a shared Engine file in isolation. Untyped parameters and growable-table loop variables can therefore resolve members from their inferred common base, such as `behavior.Start()`, `behavior.Update()`, and `behavior.Draw()`.
+
+Inherited object values also expose `GetTypeName()` and `IsType(...)`. The compiler keeps these checks compact: names are shared static strings, literal type checks become integer type-ID comparisons, and no reflection object is allocated.
 
 The extension is registered as the default formatter for `.lsx` files. **Format Document** (`Shift+Alt+F`), **Format Selection**, format-on-type indentation, and format-on-save are supported. The formatter corrects indentation for functions, static objects, `if`/`elseif`/`else`, loops, multiline calls, LSHTML tags, and LSCSS blocks. It also normalizes assignment/comparison spacing and spaces after commas without changing strings, comments, or HTML attributes.
 

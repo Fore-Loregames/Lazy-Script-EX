@@ -7,7 +7,8 @@ const crypto = require('crypto');
 const { buildNativeBindings } = require('./native_bindings');
 const { compileInlineUiSource } = require('./inline_ui');
 
-const VERSION = '0.18.8';
+const VERSION = '0.18.9';
+const PE_IMAGE_BASE = 0x140000000n;
 
 
 function directoryExists(value) {
@@ -319,6 +320,7 @@ const GENERIC_TABLE_ELEMENT = { kind: 'any', name: 'any', size: 0, alignment: 1 
 // graph, ECS-owner, or resource objects when a table grows.
 function tableStructUsesReferenceStorage(struct) {
   if (!struct) return true;
+  if (struct.runtimePolymorphic) return true;
   if (struct.methods?.has('destroy')) return true;
   for (const field of struct.fieldOrder || []) {
     const info = field.typeInfo;
@@ -1081,6 +1083,11 @@ class Program {
     this.usesBuiltins = new Set();
     this.anonymousTableCounter = 0;
     this.constructorsPrepared = false;
+    this.runtimeTypesAssigned = false;
+    this.runtimeTypes = [];
+    this.runtimeTypeCount = 0;
+    this.usesObjectTypeInfo = false;
+    this.usesObjectTypeNameChecks = false;
     this.allowDeferredLocalMethods = Boolean(options.allowDeferredLocalMethods);
   }
 
@@ -1183,6 +1190,10 @@ class Program {
       destroyLabel: `struct_${module.id}_${decl.name}_destroy`,
       initLabel: `struct_${module.id}_${decl.name}_init`,
       singletonLabel: `data_static_object_${module.id}_${stableId(decl.name)}`,
+      runtimePolymorphic: false,
+      runtimeTypeId: 0,
+      runtimeBaseTypeId: 0,
+      runtimeHeaderSize: 0,
     };
     for (const field of packedType.fieldDeclarations) field.declaringStruct = packedType;
     module.structs.set(decl.name, packedType);
@@ -2581,6 +2592,46 @@ class Program {
     return struct;
   }
 
+  assignRuntimeTypeMetadata() {
+    if (this.runtimeTypesAssigned) return;
+    this.runtimeTypesAssigned = true;
+
+    const structs = [];
+    for (const module of this.moduleOrder) {
+      for (const struct of module.structs.values()) {
+        struct.runtimePolymorphic = false;
+        struct.runtimeTypeId = 0;
+        struct.runtimeBaseTypeId = 0;
+        struct.runtimeHeaderSize = 0;
+        structs.push(struct);
+      }
+    }
+
+    // Only inheritance hierarchies need per-instance runtime metadata. Plain
+    // value records and non-polymorphic objects retain their exact existing
+    // layout and pay no memory or dispatch cost.
+    for (const struct of structs) {
+      if (!struct.baseType) continue;
+      let current = struct;
+      while (current) {
+        current.runtimePolymorphic = true;
+        current = current.baseType || null;
+      }
+    }
+
+    let nextId = 1;
+    for (const struct of structs) {
+      if (!struct.runtimePolymorphic) continue;
+      struct.runtimeTypeId = nextId++;
+      struct.runtimeHeaderSize = 8;
+      this.runtimeTypes.push(struct);
+    }
+    for (const struct of this.runtimeTypes) {
+      struct.runtimeBaseTypeId = struct.baseType?.runtimeTypeId || 0;
+    }
+    this.runtimeTypeCount = this.runtimeTypes.length;
+  }
+
   constructorMethod(struct) {
     return struct?.methods.get('constructor') || null;
   }
@@ -2669,6 +2720,86 @@ class Program {
     }
   }
 
+  structsNamed(name) {
+    const matches = [];
+    for (const module of this.moduleOrder) {
+      for (const struct of module.structs.values()) {
+        if (struct.name === name) matches.push(struct);
+      }
+    }
+    return matches;
+  }
+
+  buildObjectTypeCallable(struct, receiverTypeName, operation, call, receiver, module) {
+    if (operation !== 'GetTypeName' && operation !== 'IsType') return null;
+    this.usesObjectTypeInfo = true;
+
+    if (operation === 'GetTypeName') {
+      call.effectiveArgs = [receiver, ...call.args];
+      return {
+        kind: 'object_type_name',
+        target: {
+          name: `${struct.name}.GetTypeName`,
+          params: [{ name: 'self', type: receiverTypeName }],
+          returnType: 'string',
+          module,
+        },
+        returnType: 'string',
+        struct,
+        implicitArgumentCount: 1,
+      };
+    }
+
+    call.effectiveArgs = [receiver, ...call.args];
+    const target = {
+      name: `${struct.name}.IsType`,
+      params: [
+        { name: 'self', type: receiverTypeName },
+        { name: 'typeName', type: 'string' },
+      ],
+      returnType: 'bool',
+      module,
+    };
+
+    const argument = call.args[0] || null;
+    const literalName = argument?.kind === 'literal' && argument.valueType === 'string'
+      ? String(argument.value)
+      : null;
+
+    if (literalName !== null) {
+      const matches = this.structsNamed(literalName);
+      if (matches.length <= 1) {
+        const expected = matches[0] || null;
+        if (!struct.runtimePolymorphic) {
+          const result = Boolean(expected && (struct === expected || this.isDerivedFrom(struct, expected)));
+          return { kind: 'object_is_type_static', target, returnType: 'bool', struct, staticResult: result, implicitArgumentCount: 1 };
+        }
+        if (expected?.runtimeTypeId) {
+          return {
+            kind: 'object_is_type_id',
+            target,
+            returnType: 'bool',
+            struct,
+            targetStruct: expected,
+            targetTypeId: expected.runtimeTypeId,
+            implicitArgumentCount: 1,
+          };
+        }
+        return { kind: 'object_is_type_static', target, returnType: 'bool', struct, staticResult: false, implicitArgumentCount: 1 };
+      }
+    }
+
+    this.usesObjectTypeNameChecks = true;
+    this.usesBuiltins.add('string.equals');
+    return {
+      kind: struct.runtimePolymorphic ? 'object_is_type_name' : 'object_is_type_static_name',
+      target,
+      returnType: 'bool',
+      struct,
+      implicitArgumentCount: 1,
+    };
+  }
+
   buildObjectConstructionCallable(struct, typeName, call, module) {
     const constructor = this.constructorMethod(struct);
     if (constructor) {
@@ -2714,6 +2845,7 @@ class Program {
     for (const module of this.moduleOrder) {
       for (const struct of module.structs.values()) this.resolvePackedInheritance(struct);
     }
+    this.assignRuntimeTypeMetadata();
     this.prepareConstructors();
   }
 
@@ -2997,6 +3129,8 @@ class Program {
       const receiverType = resolvedReceiver.typeInfo || this.resolveType(module, resolvedReceiver.type, call.token);
       const receiverTypeName = resolvedReceiver.type;
       if (receiverType.kind === 'struct') {
+        const objectTypeCallable = this.buildObjectTypeCallable(receiverType.struct, receiverTypeName, operation, call, receiver, module);
+        if (objectTypeCallable) return objectTypeCallable;
         if (receiverType.struct.positional && operation === 'length') {
           const callable = makeSpecial('packed_length', [receiverTypeName], 'i64', { struct: receiverType.struct });
           call.effectiveArgs = [receiver];
@@ -3102,6 +3236,8 @@ class Program {
       const receiverType = this.resolveType(module, firstVariable.type, call.token);
       const receiver = { kind: 'reference', path: [pathParts[0]], token: call.token, inferredType: firstVariable.type };
       if (receiverType.kind === 'struct') {
+        const objectTypeCallable = this.buildObjectTypeCallable(receiverType.struct, firstVariable.type, pathParts[1], call, receiver, module);
+        if (objectTypeCallable) return objectTypeCallable;
         if (receiverType.struct.positional && pathParts[1] === 'length') {
           const callable = makeSpecial('packed_length', [firstVariable.type], 'i64', { struct: receiverType.struct });
           call.effectiveArgs = [receiver];
@@ -3480,15 +3616,19 @@ class Program {
       expr.resolvedCallable = callable;
       const signature = callable.target;
       const args = callArguments(expr);
-      if (args.length !== signature.params.length) {
-        throw new CompileError(`${expr.path.join('.')} expects ${signature.params.length} argument${signature.params.length === 1 ? '' : 's'}, received ${args.length}`, expr.token);
+      const implicitArgumentCount = Number(callable.implicitArgumentCount || 0);
+      const expectedUserArguments = Math.max(0, signature.params.length - implicitArgumentCount);
+      const receivedUserArguments = Math.max(0, args.length - implicitArgumentCount);
+      if (receivedUserArguments !== expectedUserArguments) {
+        throw new CompileError(`${expr.path.join('.')} expects ${expectedUserArguments} argument${expectedUserArguments === 1 ? '' : 's'}, received ${receivedUserArguments}`, expr.token);
       }
       args.forEach((arg, index) => {
         const actual = this.validateExpression(arg, module, scope);
         const expected = canonicalTypeName(signature.params[index].type);
         const expectedModule = signature.module || module;
         if (!this.compatibleTypes(actual, module, expected, expectedModule, arg.token || expr.token)) {
-          throw new CompileError(`argument ${index + 1} to ${expr.path.join('.')} expects ${expected}, received ${actual}`, arg.token || expr.token);
+          const shownIndex = Math.max(1, index + 1 - implicitArgumentCount);
+          throw new CompileError(`argument ${shownIndex} to ${expr.path.join('.')} expects ${expected}, received ${actual}`, arg.token || expr.token);
         }
       });
       if (callable.kind === 'builtin' && (callable.target.name === 'thread.start' || callable.target.name === 'thread.start_with_stack')) {
@@ -4980,7 +5120,7 @@ class Optimizer {
     for (const candidate of candidates) {
       if (!candidate.variable || statementsEscape(fn.body, candidate.statement, candidate.variable.name)) continue;
       candidate.statement.stackAllocateStruct = candidate.struct;
-      candidate.variable.stackObjectSize = candidate.struct.size;
+      candidate.variable.stackObjectSize = candidate.struct.size + (candidate.struct.runtimeHeaderSize || 0);
       if (!candidate.statement.stackAllocationCounted) {
         candidate.statement.stackAllocationCounted = true;
         this.stats.stackObjects += 1;
@@ -5202,6 +5342,7 @@ class Optimizer {
         else if (callable?.kind === 'struct_destroy') this.program.usesBuiltins.add('memory.free');
         else if (callable?.kind === 'struct_table') this.program.usesBuiltins.add('table.create');
         else if (callable?.kind === 'table_get' || callable?.kind === 'table_push') this.program.usesBuiltins.add('table.create');
+        else if (callable?.kind === 'object_is_type_name' || callable?.kind === 'object_is_type_static_name') this.program.usesBuiltins.add('string.equals');
         callArguments(expr).forEach(scanExpression);
       } else if (expr.kind === 'binary') { scanExpression(expr.left); scanExpression(expr.right); }
       else if (expr.kind === 'unary') scanExpression(expr.expression);
@@ -5365,7 +5506,7 @@ class BinaryBuilder {
     const target = align(this.length, alignment);
     if (target > this.length) this.bytes(Buffer.alloc(target - this.length, fill));
   }
-  addFixup(offset, size, symbol, addend = 0) { this.fixups.push({ offset, size, symbol, addend }); }
+  addFixup(offset, size, symbol, addend = 0, absolute = false) { this.fixups.push({ offset, size, symbol, addend, absolute }); }
   build() { return Buffer.concat(this.parts); }
 }
 
@@ -5562,6 +5703,24 @@ class Assembler {
   addressMode(displacement) {
     return displacement >= -128 && displacement <= 127 ? 1 : 2;
   }
+  movRegMemBaseIndex(destName, baseName, indexName, scale = 0, displacement = 0, size = 8) {
+    const d = REG[destName], b = REG[baseName], i = REG[indexName];
+    if (size === 1 || size === 2) {
+      if (size === 2) this.emit(0x66);
+      this.rex(false, d, i, b);
+      this.emit(0x0F, size === 1 ? 0xB6 : 0xB7);
+    } else {
+      this.rex(size === 8, d, i, b);
+      this.emit(0x8B);
+    }
+    let mod = 0;
+    if (displacement !== 0 || b === REG.rbp || b === REG.r13) mod = this.addressMode(displacement);
+    this.modrm(mod, d, 4);
+    this.sib(scale, i, b);
+    if (mod === 1) this.emit(Number(BigInt.asUintN(8, BigInt(displacement))));
+    else if (mod === 2) this.emitU32(displacement);
+  }
+
   movRegMemBase(destName, baseName, displacement = 0, size = 8) {
     const d = REG[destName], b = REG[baseName];
     if (size === 1 || size === 2) {
@@ -6843,6 +7002,65 @@ class CodeGenerator {
       a.label(copyDone);
       return 'ptr';
     }
+    if (callable.kind === 'object_type_name') {
+      const receiver = callArguments(expr)[0];
+      this.compileAsInteger(receiver, module, info, tempBaseIndex);
+      if (callable.struct.runtimePolymorphic) {
+        a.movRegReg('rcx', 'rax');
+        a.callLabel('__lsx_object_type_name');
+      } else {
+        const done = a.unique('object_type_name_done');
+        a.testRegReg('rax');
+        a.jz(done);
+        a.leaRip('rax', this.internString(callable.struct.name));
+        a.label(done);
+      }
+      return 'string';
+    }
+    if (callable.kind === 'object_is_type_static') {
+      const receiver = callArguments(expr)[0];
+      this.compileAsInteger(receiver, module, info, tempBaseIndex);
+      const done = a.unique('object_is_type_static_done');
+      a.testRegReg('rax');
+      a.jz(done);
+      a.movRegImmSmart('rax', callable.staticResult ? 1n : 0n);
+      a.label(done);
+      return 'bool';
+    }
+    if (callable.kind === 'object_is_type_id') {
+      const receiver = callArguments(expr)[0];
+      this.compileAsInteger(receiver, module, info, tempBaseIndex);
+      a.movRegReg('rcx', 'rax');
+      a.movRegImmSmart('rdx', BigInt(callable.targetTypeId));
+      a.callLabel('__lsx_object_is_type_id');
+      return 'bool';
+    }
+    if (callable.kind === 'object_is_type_name' || callable.kind === 'object_is_type_static_name') {
+      const args = callArguments(expr);
+      const objectSlot = this.tempOffset(info, tempBaseIndex);
+      this.compileAsInteger(args[0], module, info, tempBaseIndex + 2);
+      a.movMemRspReg(objectSlot, 'rax');
+      this.compileAsInteger(args[1], module, info, tempBaseIndex + 2);
+      a.movRegReg('rdx', 'rax');
+      a.movRegMemRsp('rcx', objectSlot);
+      if (callable.kind === 'object_is_type_name') {
+        a.callLabel('__lsx_object_is_type_name');
+      } else {
+        const done = a.unique('object_static_type_name_done');
+        const compare = a.unique('object_static_type_name_compare');
+        a.testRegReg('rcx');
+        a.jnz(compare);
+        a.xorRegReg('rax');
+        a.jmp(done);
+        a.label(compare);
+        a.movRegReg('r8', 'rdx');
+        a.leaRip('rcx', this.internString(callable.struct.name));
+        a.movRegReg('rdx', 'r8');
+        a.callLabel('__lsx_string_equals');
+        a.label(done);
+      }
+      return 'bool';
+    }
     if (callable.kind === 'struct_size') { a.movRegImmSmart('rax', BigInt(callable.struct.size)); return 'i64'; }
     if (callable.kind === 'packed_length') { a.movRegImmSmart('rax', BigInt(callable.struct.positionalCount || 0)); return 'i64'; }
     if (callable.kind === 'packed_byte_length') { a.movRegImmSmart('rax', BigInt(callable.struct.size || 0)); return 'i64'; }
@@ -7618,14 +7836,17 @@ class CodeGenerator {
     if (statement.kind === 'local' || statement.kind === 'assign') {
       const variable = statement.variable;
       if (statement.stackAllocateStruct && variable.stackObjectOffset !== null && variable.stackObjectOffset !== undefined) {
+        const headerSize = statement.stackAllocateStruct.runtimeHeaderSize || 0;
+        const allocationSize = statement.stackAllocateStruct.size + headerSize;
         a.leaRegMemBase('r11', 'rsp', variable.stackObjectOffset);
         a.xorRegReg('r10');
-        for (let offset = 0; offset < statement.stackAllocateStruct.size;) {
-          const remaining = statement.stackAllocateStruct.size - offset;
+        for (let offset = 0; offset < allocationSize;) {
+          const remaining = allocationSize - offset;
           const size = remaining >= 8 ? 8 : (remaining >= 4 ? 4 : (remaining >= 2 ? 2 : 1));
           a.movMemBaseReg('r11', offset, 'r10', size);
           offset += size;
         }
+        if (headerSize) a.addRegImm32('r11', headerSize);
         a.movRegReg('rcx', 'r11');
         a.callLabel(statement.stackAllocateStruct.initLabel);
         if (variable.register) { if (variable.register !== 'rax') a.movRegReg(variable.register, 'rax'); }
@@ -7865,6 +8086,10 @@ class CodeGenerator {
         a.testRegReg('rcx'); a.jz(initDone);
         a.movRegReg('r11', 'rcx');
       }
+      if (struct.runtimeHeaderSize) {
+        a.movRegImmSmart('r10', BigInt(struct.runtimeTypeId));
+        a.movMemBaseReg('rcx', -struct.runtimeHeaderSize, 'r10', 8);
+      }
       for (const field of struct.fieldOrder) {
         if (field.defaultConstructTable) {
           const element = field.typeInfo.element;
@@ -7901,10 +8126,11 @@ class CodeGenerator {
 
       a.label(struct.newLabel);
       a.subRsp(0x28);
-      a.movRegImmSmart('rcx', BigInt(struct.size));
+      a.movRegImmSmart('rcx', BigInt(struct.size + (struct.runtimeHeaderSize || 0)));
       a.callLabel('__lsx_object_alloc');
       const newDone = a.unique(`${struct.name}_new_done`);
       a.testRegReg('rax'); a.jz(newDone);
+      if (struct.runtimeHeaderSize) a.addRegImm32('rax', struct.runtimeHeaderSize);
       a.movRegReg('rcx', 'rax');
       a.callLabel(struct.initLabel);
       a.label(newDone);
@@ -7921,9 +8147,14 @@ class CodeGenerator {
       const cloneFail = a.unique(`${struct.name}_clone_fail`);
       const cloneDone = a.unique(`${struct.name}_clone_done`);
       a.testRegReg('rcx'); a.jz(cloneFail);
-      a.movRegImmSmart('rcx', BigInt(struct.size));
+      a.movRegImmSmart('rcx', BigInt(struct.size + (struct.runtimeHeaderSize || 0)));
       a.callLabel('__lsx_object_alloc');
       a.testRegReg('rax'); a.jz(cloneFail);
+      if (struct.runtimeHeaderSize) {
+        a.addRegImm32('rax', struct.runtimeHeaderSize);
+        a.movRegImmSmart('r10', BigInt(struct.runtimeTypeId));
+        a.movMemBaseReg('rax', -struct.runtimeHeaderSize, 'r10', 8);
+      }
       a.movMemRspReg(48, 'rax');
       for (const field of struct.fieldOrder) {
         if (field.typeInfo.kind === 'struct') {
@@ -7980,11 +8211,92 @@ class CodeGenerator {
         }
       }
       a.movRegMemRsp('rcx', 40);
+      if (struct.runtimeHeaderSize) a.subRegImm32('rcx', struct.runtimeHeaderSize);
       a.callLabel('__lsx_object_free');
       a.label(destroyDone);
       a.addRsp(0x38);
       a.ret();
     }
+  }
+
+  emitObjectTypeRuntime() {
+    const a = this.asm;
+    const count = this.program.runtimeTypeCount || 0;
+    if (count <= 0) return;
+
+    for (const struct of this.program.runtimeTypes) this.internString(struct.name);
+
+    a.label('__lsx_object_type_name');
+    const typeNameFail = a.unique('object_type_name_fail');
+    a.testRegReg('rcx'); a.jz(typeNameFail);
+    a.movRegMemBase('rax', 'rcx', -8, 8);
+    a.testRegReg('rax'); a.jz(typeNameFail);
+    a.cmpRegImm32('rax', count); a.ja(typeNameFail);
+    a.leaRip('r10', 'data_object_type_names');
+    a.movRegMemBaseIndex('rax', 'r10', 'rax', 3, 0, 8);
+    a.ret();
+    a.label(typeNameFail);
+    a.xorRegReg('rax');
+    a.ret();
+
+    a.label('__lsx_object_is_type_id');
+    const typeIdLoop = a.unique('object_is_type_id_loop');
+    const typeIdTrue = a.unique('object_is_type_id_true');
+    const typeIdFalse = a.unique('object_is_type_id_false');
+    a.testRegReg('rcx'); a.jz(typeIdFalse);
+    a.testRegReg('rdx'); a.jz(typeIdFalse);
+    a.movRegMemBase('rax', 'rcx', -8, 8);
+    a.label(typeIdLoop);
+    a.testRegReg('rax'); a.jz(typeIdFalse);
+    a.cmpRegReg('rax', 'rdx'); a.jz(typeIdTrue);
+    a.cmpRegImm32('rax', count); a.ja(typeIdFalse);
+    a.leaRip('r10', 'data_object_type_bases');
+    a.movRegMemBaseIndex('rax', 'r10', 'rax', 3, 0, 8);
+    a.jmp(typeIdLoop);
+    a.label(typeIdTrue);
+    a.movRegImmSmart('rax', 1n);
+    a.ret();
+    a.label(typeIdFalse);
+    a.xorRegReg('rax');
+    a.ret();
+
+    a.label('__lsx_object_is_type_name');
+    const typeNameLoop = a.unique('object_is_type_name_loop');
+    const typeNameTrue = a.unique('object_is_type_name_true');
+    const typeNameFalse = a.unique('object_is_type_name_false');
+    const typeNameDone = a.unique('object_is_type_name_done');
+    a.subRsp(0x38);
+    a.movMemRspReg(40, 'rdx');
+    a.testRegReg('rcx'); a.jz(typeNameFalse);
+    a.testRegReg('rdx'); a.jz(typeNameFalse);
+    a.movRegMemBase('rax', 'rcx', -8, 8);
+    a.movMemRspReg(48, 'rax');
+    a.label(typeNameLoop);
+    a.movRegMemRsp('rax', 48);
+    a.testRegReg('rax'); a.jz(typeNameFalse);
+    a.cmpRegImm32('rax', count); a.ja(typeNameFalse);
+    a.leaRip('r10', 'data_object_type_names');
+    a.movRegMemBaseIndex('rcx', 'r10', 'rax', 3, 0, 8);
+    a.movRegMemRsp('rdx', 40);
+    // Interned LSX literals use stable pointer identity, so the common
+    // FindBehavior("Transform") path is a direct pointer comparison. Runtime-
+    // generated strings fall back to a content comparison only when needed.
+    a.cmpRegReg('rcx', 'rdx'); a.jz(typeNameTrue);
+    a.callLabel('__lsx_string_equals');
+    a.testRegReg('rax'); a.jnz(typeNameTrue);
+    a.movRegMemRsp('rax', 48);
+    a.leaRip('r10', 'data_object_type_bases');
+    a.movRegMemBaseIndex('rax', 'r10', 'rax', 3, 0, 8);
+    a.movMemRspReg(48, 'rax');
+    a.jmp(typeNameLoop);
+    a.label(typeNameTrue);
+    a.movRegImmSmart('rax', 1n);
+    a.jmp(typeNameDone);
+    a.label(typeNameFalse);
+    a.xorRegReg('rax');
+    a.label(typeNameDone);
+    a.addRsp(0x38);
+    a.ret();
   }
 
   emitRuntime() {
@@ -8003,6 +8315,7 @@ class CodeGenerator {
     if (hasFamily('console')) this.emitConsoleRuntime();
     if (hasFamily('system')) this.emitSystemRuntime();
     if (hasFamily('string')) this.emitStringRuntime();
+    if (this.program.usesObjectTypeInfo && this.program.runtimeTypeCount > 0) this.emitObjectTypeRuntime();
     if (hasFamily('thread')) this.emitThreadRuntime();
     if (hasFamily('atomic')) this.emitAtomicRuntime();
     if (hasFamily('ffi')) this.emitFfiRuntime();
@@ -9202,8 +9515,24 @@ function buildSections(program, root, entryFunction, optimizationLevel = 6, opti
     if (!struct.staticObject) continue;
     program.resolveStructLayout(struct);
     data.align(Math.max(8, Number(struct.alignment || 8)));
+    if (struct.runtimeHeaderSize) data.zeros(struct.runtimeHeaderSize);
     data.mark(struct.singletonLabel);
     data.zeros(Math.max(1, Number(struct.size || 0)));
+  }
+  if (program.usesObjectTypeInfo && program.runtimeTypeCount > 0) {
+    data.align(8);
+    data.mark('data_object_type_names');
+    data.u64(0);
+    for (const struct of program.runtimeTypes) {
+      const symbol = codegen.stringValues.get(struct.name);
+      if (!symbol) throw new Error(`missing runtime type-name string for ${struct.name}`);
+      const offset = data.u64(0);
+      data.addFixup(offset, 8, symbol, 0, true);
+    }
+    data.align(8);
+    data.mark('data_object_type_bases');
+    data.u64(0);
+    for (const struct of program.runtimeTypes) data.u64(BigInt(struct.runtimeBaseTypeId || 0));
   }
   if (generated.pgoRecords.length > 0) {
     data.align(8);
@@ -9263,8 +9592,10 @@ function buildSections(program, root, entryFunction, optimizationLevel = 6, opti
   for (const fixup of data.fixups) {
     const target = symbols.get(fixup.symbol);
     if (target === undefined) throw new Error(`unresolved data symbol ${fixup.symbol}`);
-    if (fixup.size === 4) dataBuffer.writeUInt32LE((target + fixup.addend) >>> 0, fixup.offset);
-    else dataBuffer.writeBigUInt64LE(BigInt(target + fixup.addend), fixup.offset);
+    const relativeValue = BigInt(target + fixup.addend);
+    const value = fixup.absolute ? PE_IMAGE_BASE + relativeValue : relativeValue;
+    if (fixup.size === 4) dataBuffer.writeUInt32LE(Number(BigInt.asUintN(32, value)), fixup.offset);
+    else dataBuffer.writeBigUInt64LE(BigInt.asUintN(64, value), fixup.offset);
   }
   const textBuffer = generated.asm.build(textRva, symbols);
 
@@ -9290,7 +9621,7 @@ function buildSections(program, root, entryFunction, optimizationLevel = 6, opti
 function makePe(sectionInfo, options = {}) {
   const fileAlignment = 0x200;
   const sectionAlignment = 0x1000;
-  const imageBase = 0x140000000n;
+  const imageBase = PE_IMAGE_BASE;
   const sections = sectionInfo.sections;
   const peOffset = 0x80;
   const optionalHeaderSize = 0xF0;

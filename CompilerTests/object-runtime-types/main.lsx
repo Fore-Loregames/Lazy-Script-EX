@@ -1,0 +1,28 @@
+use "@Engine/LazyBehavior.lsx" as Behavior
+use "@Engine/GameObject.lsx" as GO
+use "@Engine/Transform.lsx" as T
+use "@Engine/SpecialTransform.lsx" as ST
+
+fn main()
+    local gameObject = GO.GameObject.new()
+    local transform = T.Transform.new()
+    local special = ST.SpecialTransform.new()
+
+    gameObject.AddLazyBehavior(transform)
+    gameObject.AddLazyBehavior(special)
+
+    local firstName = gameObject.FirstTypeName()
+    local foundTransform = gameObject.GetLazyBehavior("Transform")
+    local foundBase = gameObject.GetLazyBehavior("LazyBehavior")
+    local exact = transform.IsType("Transform")
+    local inherited = special.IsType("LazyBehavior")
+
+    if firstName == null or foundTransform == null or foundBase == null or exact == false or inherited == false then
+        return 1
+    end
+
+    special.destroy()
+    transform.destroy()
+    gameObject.destroy()
+    return 0
+end

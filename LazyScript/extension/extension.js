@@ -49,6 +49,25 @@ const BUILTIN_DOCS = {
 // `local values = {}` and object fields such as `items = {}`. These are not
 // ordinary source members, so IntelliSense adds them from the inferred table
 // shape instead of waiting for a declaration in the current source file.
+const OBJECT_BUILTIN_METHODS = [
+  {
+    name: 'GetTypeName',
+    signature: 'GetTypeName() -> string',
+    parameters: [],
+    description: 'Returns the exact concrete LSX object definition name as shared static compiler data without allocating.',
+    example: 'local typeName = behavior.GetTypeName()'
+  },
+  {
+    name: 'IsType',
+    signature: 'IsType(typeName) -> bool',
+    parameters: [{ name: 'typeName', type: 'string' }],
+    description: 'Returns true when this object has the requested concrete type or inherits from the requested base type.',
+    example: `if behavior.IsType("LazyBehavior") then
+    return behavior
+end`
+  }
+];
+
 const TABLE_BUILTIN_METHODS = [
   {
     name: 'push',
@@ -107,6 +126,54 @@ const TABLE_BUILTIN_METHODS = [
     example: 'self.lazyBehaviors.destroy()'
   }
 ];
+
+function objectBuiltinMethod(name) {
+  return OBJECT_BUILTIN_METHODS.find(method => method.name === name) || null;
+}
+
+function objectBuiltinSymbol(method) {
+  const parts = signatureParts(method.signature);
+  return {
+    name: method.name,
+    kind: 'method',
+    signature: method.signature,
+    parameters: method.parameters,
+    returnType: parts.returnType,
+    documentation: method.description,
+    virtualBuiltin: true,
+    apiMetadata: {
+      friendlyDescription: method.description,
+      example: method.example,
+      exampleNote: 'Compiler-provided object runtime type metadata'
+    }
+  };
+}
+
+function completionForObjectBuiltin(method, receiver = 'object') {
+  const item = new vscode.CompletionItem(method.name, vscode.CompletionItemKind.Method);
+  item.detail = `${receiver}.${method.signature}`;
+  item.sortText = `0_${method.name}`;
+  const md = new vscode.MarkdownString();
+  md.appendCodeblock(method.signature, 'lazyscriptex');
+  md.appendMarkdown(`\n${method.description}`);
+  md.appendMarkdown('\n\n**Example**\n');
+  md.appendCodeblock(method.example, 'lazyscriptex');
+  item.documentation = md;
+  item.insertText = snippetForCallable(method);
+  return item;
+}
+
+function objectBuiltinCompletionItems(receiver = 'object') {
+  return OBJECT_BUILTIN_METHODS.map(method => completionForObjectBuiltin(method, receiver));
+}
+
+function appendObjectBuiltinCompletions(items, receiver = 'object') {
+  const names = new Set(items.map(item => String(item.label)));
+  for (const item of objectBuiltinCompletionItems(receiver)) {
+    if (!names.has(String(item.label))) items.push(item);
+  }
+  return items;
+}
 
 function cleanInitializerText(value) {
   return String(value || '').replace(/--.*$/, '').trim().replace(/,$/, '').trim();
@@ -1297,6 +1364,13 @@ function chainContext(document, position) {
   return { chain, word: wordRange ? document.getText(wordRange) : chain.at(-1) || '', range: wordRange, line, text };
 }
 
+function resolveObjectBuiltinChain(record, chain) {
+  if (!Array.isArray(chain) || chain.length < 2) return null;
+  const method = objectBuiltinMethod(chain.at(-1));
+  if (!method) return null;
+  return { record, symbol: objectBuiltinSymbol(method), parent: { name: chain.slice(0, -1).join('.') } };
+}
+
 function resolveChain(record, chain) {
   if (!chain.length) return null;
   const tableBuiltin = resolveTableBuiltinChain(record, chain);
@@ -1310,6 +1384,8 @@ function resolveChain(record, chain) {
     const member = object?.members?.find(m => m.name === chain[1]);
     if (member) return { record, symbol: member, parent: object };
   }
+  const objectBuiltin = resolveObjectBuiltinChain(record, chain);
+  if (objectBuiltin) return objectBuiltin;
   const local = record.symbols.find(s => s.name === chain.at(-1));
   if (local) return { record, symbol: local };
   return null;
@@ -1958,9 +2034,10 @@ class CompletionProvider {
       if (base[0] === 'self') {
         const object = enclosingObjectAt(record, position.line);
         if (object && base.length === 1) {
-          return object.members
+          const objectItems = object.members
             .filter(sym => !sym.name.startsWith('_'))
             .map(sym => completionFor(record, sym, 'self.', object));
+          return appendObjectBuiltinCompletions(objectItems, 'self');
         }
         if (object && base.length === 2) {
           const member = symbolByName(object.members, base[1], true);
@@ -1968,9 +2045,10 @@ class CompletionProvider {
           const typeRef = member?.typeRef || inferTypeFromInitializer(scopeRecord, member?.initializer);
           const resolved = resolveTypeObject(scopeRecord, typeRef);
           if (resolved) {
-            return resolved.object.members
+            const objectItems = resolved.object.members
               .filter(sym => !sym.name.startsWith('_'))
               .map(sym => completionFor(resolved.record, sym, `self.${member.name}.`, resolved.object));
+            return appendObjectBuiltinCompletions(objectItems, `self.${member.name}`);
           }
         }
       }
@@ -1993,7 +2071,11 @@ class CompletionProvider {
           if (isTableLikeSymbol(variable)) return tableBuiltinCompletionItems(base[0]);
           const typeRef = variable.typeRef || inferTypeFromInitializer(scopeRecord, variable.initializer);
           const resolved = resolveTypeObject(scopeRecord, typeRef);
-          if (resolved) return resolved.object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(resolved.record, sym, `${base[0]}.`, resolved.object));
+          if (resolved) {
+            const objectItems = resolved.object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(resolved.record, sym, `${base[0]}.`, resolved.object));
+            return appendObjectBuiltinCompletions(objectItems, base[0]);
+          }
+          if (!isTableLikeSymbol(variable)) return objectBuiltinCompletionItems(base[0]);
         }
         const object = record.symbols.find(s => s.name === base[0] && s.members);
         if (object) return object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(record, sym, `${base[0]}.`, object));
@@ -2592,5 +2674,5 @@ function deactivate() {
 }
 module.exports = {
   activate, deactivate, parseText, resolveImport, chainContext, inferTypeFromInitializer,
-  _test: { index, loadRecordSync, importedSymbol, importedCompletionTarget, importEntryForAlias, completionImportEntryForAlias, levenshteinDistance, symbolByName, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, TABLE_BUILTIN_METHODS, isGrowableTableInitializer, isTableLikeSymbol, tableBuiltinCompletionItems, resolveTableBuiltinChain, HoverProvider, DocumentFormattingProvider, DocumentRangeFormattingProvider, OnTypeFormattingProvider, formatLsxText, collectVisibleScopeSymbols, completionForScopeSymbol, completionForSelfMember, currentIdentifierRange, shouldAutoTriggerSuggestions, desiredIndentAtLine, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs, compilerCheckContext }
+  _test: { index, loadRecordSync, importedSymbol, importedCompletionTarget, importEntryForAlias, completionImportEntryForAlias, levenshteinDistance, symbolByName, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, OBJECT_BUILTIN_METHODS, objectBuiltinCompletionItems, resolveObjectBuiltinChain, TABLE_BUILTIN_METHODS, isGrowableTableInitializer, isTableLikeSymbol, tableBuiltinCompletionItems, resolveTableBuiltinChain, HoverProvider, DocumentFormattingProvider, DocumentRangeFormattingProvider, OnTypeFormattingProvider, formatLsxText, collectVisibleScopeSymbols, completionForScopeSymbol, completionForSelfMember, currentIdentifierRange, shouldAutoTriggerSuggestions, desiredIndentAtLine, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs, compilerCheckContext }
 };
