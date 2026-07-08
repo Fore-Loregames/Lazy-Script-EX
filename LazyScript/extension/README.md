@@ -312,3 +312,7 @@ local window = WindowManagerMod.WindowManager.windowHandle
 ```
 
 A static object is initialized once before `main()`. A zero-argument `constructor = fn()` may prepare its shared state automatically. `self` points to that one persistent object. Do not call `.new()` or `constructor()` on it; provide an explicit shutdown method for native resources.
+
+## 0.18.16 autocomplete replacement fix
+
+LSX completion items now use the same explicit replacement range for both VS Code insert and replace modes. Partial names and highlighted text are replaced instead of appended, reverse-direction selections are supported, and completing a method before an existing `(` no longer inserts duplicate call parentheses.

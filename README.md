@@ -859,3 +859,7 @@ Contributions are welcome. Keep public LSX examples inference-first:
 LazyScriptEX is released under the [MIT License](LICENSE).
 
 Bundled third-party components are covered by their own licenses and notices under [`LazyScript/licenses`](LazyScript/licenses) and [`LazyScript/runtime`](LazyScript/runtime).
+
+## 0.18.16 autocomplete replacement fix
+
+LSX completion items now use the same explicit replacement range for both VS Code insert and replace modes. Partial names and highlighted text are replaced instead of appended, reverse-direction selections are supported, and completing a method before an existing `(` no longer inserts duplicate call parentheses.

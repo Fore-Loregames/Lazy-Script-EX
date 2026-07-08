@@ -1001,22 +1001,56 @@ function sameDocument(left, right) {
   return !!leftPath && !!rightPath && path.normalize(leftPath) === path.normalize(rightPath);
 }
 
+function comparePosition(left, right) {
+  if (left.line !== right.line) return left.line - right.line;
+  return left.character - right.character;
+}
+
+function positionInsideRange(position, range) {
+  return comparePosition(position, range.start) >= 0 && comparePosition(position, range.end) <= 0;
+}
+
 function completionReplacementRange(document, position) {
   const editor = vscode.window.activeTextEditor;
   const selection = editor?.selection;
   if (editor && sameDocument(editor.document, document) && selection?.start && selection?.end) {
     const nonEmpty = !samePosition(selection.start, selection.end);
-    const active = selection.active || selection.end;
-    if (nonEmpty && samePosition(active, position)) {
-      return new vscode.Range(selection.start, selection.end);
+    if (nonEmpty) {
+      const selectedRange = new vscode.Range(selection.start, selection.end);
+      const active = selection.active || selection.end;
+      // VS Code may ask for completions at either edge of a selection depending on
+      // selection direction and how IntelliSense was opened. Treat either edge, the
+      // active cursor, or any position inside the highlighted text as replacement.
+      if (samePosition(active, position)
+          || samePosition(selection.start, position)
+          || samePosition(selection.end, position)
+          || positionInsideRange(position, selectedRange)) {
+        return selectedRange;
+      }
     }
   }
   return currentIdentifierRange(document, position);
 }
 
-function applyCompletionRange(items, range) {
+function callableNameOnlyWhenCallExists(item, document, range) {
+  if (!document || !range || !(item?.insertText instanceof vscode.SnippetString)) return;
+  const line = document.lineAt(range.end.line).text || '';
+  let cursor = Math.min(range.end.character, line.length);
+  while (cursor < line.length && /\s/.test(line[cursor])) cursor++;
+  if (line[cursor] !== '(') return;
+  const label = typeof item.label === 'string' ? item.label : item.label?.label;
+  if (label) item.insertText = label;
+}
+
+function applyCompletionRange(items, range, document = null) {
   if (!range) return items;
-  for (const item of items || []) item.range = range;
+  for (const item of items || []) {
+    // Give insert and replace modes the same non-empty edit range. This prevents
+    // VS Code's editor.suggest.insertMode setting from appending a completion after
+    // a partially typed or highlighted identifier instead of replacing it.
+    item.range = { inserting: range, replacing: range };
+    callableNameOnlyWhenCallExists(item, document, range);
+  }
   return items;
 }
 
@@ -2060,7 +2094,7 @@ class CompletionProvider {
           );
           for (const item of items) item.additionalTextEdits = [vscode.TextEdit.replace(qualifierRange, canonicalQualifier)];
         }
-        return applyCompletionRange(items, replacementRange);
+        return applyCompletionRange(items, replacementRange, document);
       }
       if (base[0] === 'self') {
         const object = enclosingObjectAt(record, position.line);
@@ -2068,18 +2102,18 @@ class CompletionProvider {
           const objectItems = object.members
             .filter(sym => !sym.name.startsWith('_'))
             .map(sym => completionFor(record, sym, 'self.', object));
-          return applyCompletionRange(appendObjectBuiltinCompletions(objectItems, 'self'), replacementRange);
+          return applyCompletionRange(appendObjectBuiltinCompletions(objectItems, 'self'), replacementRange, document);
         }
         if (object && base.length === 2) {
           const member = symbolByName(object.members, base[1], true);
-          if (isTableLikeSymbol(member)) return applyCompletionRange(tableBuiltinCompletionItems(`self.${member.name}`), replacementRange);
+          if (isTableLikeSymbol(member)) return applyCompletionRange(tableBuiltinCompletionItems(`self.${member.name}`), replacementRange, document);
           const typeRef = member?.typeRef || inferTypeFromInitializer(scopeRecord, member?.initializer);
           const resolved = resolveTypeObject(scopeRecord, typeRef);
           if (resolved) {
             const objectItems = resolved.object.members
               .filter(sym => !sym.name.startsWith('_'))
               .map(sym => completionFor(resolved.record, sym, `self.${member.name}.`, resolved.object));
-            return applyCompletionRange(appendObjectBuiltinCompletions(objectItems, `self.${member.name}`), replacementRange);
+            return applyCompletionRange(appendObjectBuiltinCompletions(objectItems, `self.${member.name}`), replacementRange, document);
           }
         }
       }
@@ -2096,25 +2130,25 @@ class CompletionProvider {
           item.insertText = snippetForCallable(pseudo);
           return item;
         });
-        if (builtinItems.length) return applyCompletionRange(builtinItems, replacementRange);
+        if (builtinItems.length) return applyCompletionRange(builtinItems, replacementRange, document);
         const variable = scopeSymbols.find(s => s.name === base[0]) || record.symbols.find(s => s.kind === 'variable' && s.name === base[0]);
         if (variable) {
-          if (isTableLikeSymbol(variable)) return applyCompletionRange(tableBuiltinCompletionItems(base[0]), replacementRange);
+          if (isTableLikeSymbol(variable)) return applyCompletionRange(tableBuiltinCompletionItems(base[0]), replacementRange, document);
           const typeRef = variable.typeRef || inferTypeFromInitializer(scopeRecord, variable.initializer);
           const resolved = resolveTypeObject(scopeRecord, typeRef);
           if (resolved) {
             const objectItems = resolved.object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(resolved.record, sym, `${base[0]}.`, resolved.object));
-            return applyCompletionRange(appendObjectBuiltinCompletions(objectItems, base[0]), replacementRange);
+            return applyCompletionRange(appendObjectBuiltinCompletions(objectItems, base[0]), replacementRange, document);
           }
-          if (!isTableLikeSymbol(variable)) return applyCompletionRange(objectBuiltinCompletionItems(base[0]), replacementRange);
+          if (!isTableLikeSymbol(variable)) return applyCompletionRange(objectBuiltinCompletionItems(base[0]), replacementRange, document);
         }
         const object = record.symbols.find(s => s.name === base[0] && s.members);
-        if (object) return applyCompletionRange(object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(record, sym, `${base[0]}.`, object)), replacementRange);
+        if (object) return applyCompletionRange(object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(record, sym, `${base[0]}.`, object)), replacementRange, document);
       }
       if (base.length === 2) {
         const object = record.symbols.find(s => s.name === base[0] && s.members);
         const member = object && symbolByName(object.members, base[1], true);
-        if (isTableLikeSymbol(member)) return applyCompletionRange(tableBuiltinCompletionItems(`${object.name}.${member.name}`), replacementRange);
+        if (isTableLikeSymbol(member)) return applyCompletionRange(tableBuiltinCompletionItems(`${object.name}.${member.name}`), replacementRange, document);
       }
     }
     const items = KEYWORDS.map(keyword => new vscode.CompletionItem(keyword, vscode.CompletionItemKind.Keyword));
@@ -2144,7 +2178,7 @@ class CompletionProvider {
       item.documentation = new vscode.MarkdownString(`Imported from \`${imp.spec}\`. Type \`${alias}.\` to browse its exported API.`);
       items.push(item);
     }
-    return applyCompletionRange(items, replacementRange);
+    return applyCompletionRange(items, replacementRange, document);
   }
 }
 

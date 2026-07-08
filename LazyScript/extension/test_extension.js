@@ -166,6 +166,21 @@ assert(uiRecord.symbols.some(symbol => symbol.name === '.orb' && symbol.kind ===
 assert(uiRecord.symbols.some(symbol => symbol.name === 'inspector' && symbol.kind === 'function'), 'LSHTML declaration was not indexed');
 
 
+
+function completionReplaceRange(item) {
+  return item?.range?.replacing || item?.range || null;
+}
+
+function applyCompletionToText(sourceText, document, item) {
+  const range = completionReplaceRange(item);
+  assert(range, 'completion item is missing a replacement range');
+  const start = document.offsetAt(range.start);
+  const end = document.offsetAt(range.end);
+  const insertText = item.insertText instanceof SnippetString ? item.insertText.value : String(item.insertText ?? (item.label?.label || item.label || ''));
+  const plainText = insertText.replace(/\$\{\d+:([^}]+)\}/g, '$1').replace(/\$\d+/g, '');
+  return sourceText.slice(0, start) + plainText + sourceText.slice(end);
+}
+
 function mockDocument(text) {
   const lines = text.split('\n');
   return {
@@ -324,7 +339,8 @@ for (const expected of ['width', 'height', 'title']) {
   assert(exactItems.some(item => (item.label.label || item.label) === expected), `exact function-call completion is missing ${expected}`);
 }
 const exactWidth = exactItems.find(item => (item.label.label || item.label) === 'width');
-assert(exactWidth.range && exactWidth.range.start.character === exactCharacter - 4, 'parameter completion does not replace the currently typed identifier');
+const exactWidthRange = completionReplaceRange(exactWidth);
+assert(exactWidthRange && exactWidthRange.start.character === exactCharacter - 4, 'parameter completion does not replace the currently typed identifier');
 assert(exactItems.some(item => (item.label.label || item.label) === 'self.windowHandle'), 'current object fields are not offered as self.field suggestions');
 const selfCompletionDoc = {
   ...mockDocument(localCompletionSource.replace('            wid', '            self.')),
@@ -360,8 +376,12 @@ const partialObjectTypePosition = new Position(partialObjectTypeLine, '        b
 const partialObjectTypeItems = new extension._test.CompletionProvider().provideCompletionItems(partialObjectTypeDoc, partialObjectTypePosition);
 const partialIsType = partialObjectTypeItems.find(item => (item.label.label || item.label) === 'IsType');
 assert(partialIsType, 'partial object-method completion is missing IsType');
-assert(partialIsType.range, 'partial object-method completion has no replacement range');
-assert.strictEqual(partialObjectTypeDoc.getText(partialIsType.range), 'us', 'partial object-method completion inserts after the typed fragment instead of replacing it');
+const partialIsTypeRange = completionReplaceRange(partialIsType);
+assert(partialIsTypeRange, 'partial object-method completion has no replacement range');
+assert.strictEqual(partialObjectTypeDoc.getText(partialIsTypeRange), 'us', 'partial object-method completion inserts after the typed fragment instead of replacing it');
+const partialApplied = applyCompletionToText(partialObjectTypeSource, partialObjectTypeDoc, partialIsType);
+assert(partialApplied.includes('behavior.IsType(typeName)'), `partial object-method completion produced ${partialApplied}`);
+assert(!partialApplied.includes('behavior.usIsType'), 'partial object-method completion still appends after the typed fragment');
 
 const selectedRange = new Range(new Position(partialObjectTypeLine, '        behavior.'.length), partialObjectTypePosition);
 vscodeMock.window.activeTextEditor = {
@@ -370,9 +390,38 @@ vscodeMock.window.activeTextEditor = {
 };
 const selectedObjectTypeItems = new extension._test.CompletionProvider().provideCompletionItems(partialObjectTypeDoc, partialObjectTypePosition);
 const selectedIsType = selectedObjectTypeItems.find(item => (item.label.label || item.label) === 'IsType');
-assert(selectedIsType?.range, 'selected object-method completion has no replacement range');
-assert.strictEqual(selectedIsType.range.start.character, selectedRange.start.character, 'completion did not replace the full highlighted selection');
-assert.strictEqual(selectedIsType.range.end.character, selectedRange.end.character, 'completion selection replacement ended at the wrong position');
+const selectedIsTypeRange = completionReplaceRange(selectedIsType);
+assert(selectedIsTypeRange, 'selected object-method completion has no replacement range');
+assert.strictEqual(selectedIsTypeRange.start.character, selectedRange.start.character, 'completion did not replace the full highlighted selection');
+assert.strictEqual(selectedIsTypeRange.end.character, selectedRange.end.character, 'completion selection replacement ended at the wrong position');
+
+// Reverse-direction selections must replace too. VS Code may report the completion
+// position at either edge depending on how the user highlighted the partial word.
+vscodeMock.window.activeTextEditor = {
+  document: partialObjectTypeDoc,
+  selection: { start: selectedRange.start, end: selectedRange.end, active: selectedRange.start }
+};
+const reverseSelectedItems = new extension._test.CompletionProvider().provideCompletionItems(partialObjectTypeDoc, selectedRange.start);
+const reverseSelectedIsType = reverseSelectedItems.find(item => (item.label.label || item.label) === 'IsType');
+const reverseRange = completionReplaceRange(reverseSelectedIsType);
+assert(reverseRange, 'reverse-selected completion has no replacement range');
+assert.strictEqual(reverseRange.start.character, selectedRange.start.character, 'reverse-selected completion did not start at the highlighted text');
+assert.strictEqual(reverseRange.end.character, selectedRange.end.character, 'reverse-selected completion did not end at the highlighted text');
+
+// If arguments already follow the partial method, replace only the method name and
+// do not inject a second pair of call parentheses/snippet placeholders.
+const existingCallSource = objectTypeCompletionSource.replace('behavior.', 'behavior.us(behavior)');
+const existingCallDoc = { ...mockDocument(existingCallSource), uri: { fsPath: path.join(sourceDir, 'ObjectTypeExistingCall.lsx') } };
+const existingCallPosition = new Position(2, '        behavior.us'.length);
+vscodeMock.window.activeTextEditor = null;
+const existingCallItems = new extension._test.CompletionProvider().provideCompletionItems(existingCallDoc, existingCallPosition);
+const existingCallIsType = existingCallItems.find(item => (item.label.label || item.label) === 'IsType');
+assert(existingCallIsType, 'existing-call completion is missing IsType');
+assert.strictEqual(existingCallIsType.insertText, 'IsType', 'completion duplicated call parentheses when arguments already existed');
+const existingCallApplied = applyCompletionToText(existingCallSource, existingCallDoc, existingCallIsType);
+assert(existingCallApplied.includes('behavior.IsType(behavior)'), `existing-call completion produced ${existingCallApplied}`);
+assert(!existingCallApplied.includes('usIsType'), 'existing-call completion appended after the partial method name');
+
 vscodeMock.window.activeTextEditor = null;
 
 const unformatted = `const WindowManager = {
