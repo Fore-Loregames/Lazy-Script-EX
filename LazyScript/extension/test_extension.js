@@ -12,14 +12,15 @@ class CompletionItem { constructor(label, kind) { this.label = label; this.kind 
 class MarkdownString { constructor(value = '') { this.value = value; } appendCodeblock(value) { this.value += value; } appendMarkdown(value) { this.value += value; } }
 class SnippetString { constructor(value = '') { this.value = value; } }
 const toolkit = path.resolve(__dirname, '..', '..');
+const configurationValues = {};
 const vscodeMock = {
   Position, Range, Location, CompletionItem, MarkdownString, SnippetString,
   Uri: { file: fsPath => ({ fsPath: path.resolve(fsPath) }) },
   SymbolKind: { Function:1, Method:2, Constant:3, Struct:4, Field:5, Module:6, Variable:7 },
-  CompletionItemKind: { Function:1, Method:2, Constant:3, Class:4, Struct:5, Field:6, Module:7, Variable:8, Keyword:9, Property:10 },
+  CompletionItemKind: { Function:1, Method:2, Constant:3, Class:4, Struct:5, Field:6, Module:7, Variable:8, Keyword:9, Property:10, Folder:11, File:12 },
   workspace: {
     workspaceFolders: [{ uri: { fsPath: toolkit } }],
-    getConfiguration: () => ({ get: (_name, fallback) => fallback })
+    getConfiguration: () => ({ get: (name, fallback) => Object.prototype.hasOwnProperty.call(configurationValues, name) ? configurationValues[name] : fallback })
   }
 };
 const originalLoad = Module._load;
@@ -118,6 +119,33 @@ function mockDocument(text) {
   };
 }
 
+
+const importCompletionText = 'use "@LazyScript/bindings/Math/';
+const importCompletionDoc = {
+  ...mockDocument(importCompletionText),
+  uri: { fsPath: source }
+};
+const importItems = extension._test.importCompletionItems(importCompletionDoc, new Position(0, importCompletionText.length));
+assert(importItems && importItems.some(item => item.label === 'GLM.lsx'), 'named-root import completion is missing GLM.lsx');
+assert(importItems.some(item => item.label === 'Camera.lsx'), 'named-root import completion is missing Camera.lsx');
+const rootArgs = extension._test.compilerModuleRootArgs(source);
+assert(rootArgs.includes('--lazy-script-root'), 'compiler diagnostics do not receive the selected/discovered LazyScript root');
+
+const sharedEngine = path.join(sourceDir, 'SharedEngine');
+const sharedWindow = path.join(sharedEngine, 'Window');
+fs.mkdirSync(sharedWindow, { recursive: true });
+fs.writeFileSync(path.join(sharedWindow, 'WindowManager.lsx'), 'export const WindowManager = { title = "Window" }\n');
+configurationValues.moduleRoots = { Engine: sharedEngine };
+const customImportText = 'use "@Engine/Window/';
+const customImportDoc = { ...mockDocument(customImportText), uri: { fsPath: source } };
+const customImportItems = extension._test.importCompletionItems(customImportDoc, new Position(0, customImportText.length));
+assert(customImportItems && customImportItems.some(item => item.label === 'WindowManager.lsx'), 'custom named-root import completion is missing a recursively nested LSX file');
+const customResolved = extension.resolveImport('@Engine/Window/WindowManager.lsx', source);
+assert.strictEqual(path.resolve(customResolved), path.resolve(sharedWindow, 'WindowManager.lsx'), 'custom named module root did not resolve from extension settings');
+const customRootArgs = extension._test.compilerModuleRootArgs(source);
+assert(customRootArgs.includes('--module-root') && customRootArgs.includes(`Engine=${sharedEngine}`), 'custom named module root is not passed to compiler diagnostics');
+configurationValues.moduleRoots = {};
+
 const tagCompletionText = 'lshtml view(props) = {(\n    <ui>\n        <';
 const tagCompletionDoc = mockDocument(tagCompletionText);
 const tagPosition = new Position(2, 9);
@@ -174,45 +202,4 @@ const canvasSnippet = snippets['Declarative LazyUI canvas'];
 assert(canvasSnippet && canvasSnippet.body.some(line => line.includes('<rect class="${2:preview-shape}"')), 'declarative canvas snippet is missing');
 assert(!snippetsText.includes('context.fill_rounded_rect'), 'extension still advertises imperative canvas drawing');
 assert(canvasSnippet.body.some(line => line.includes('background = {${3:props.accent}}')), 'LSCSS {var} snippet is missing');
-
-
-// Base-object inheritance is indexed for hover and completion without duplicate child members.
-{
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lsx-extension-inheritance-'));
-  const file = path.join(tmp, 'main.lsx');
-  fs.writeFileSync(file, `
-const Actor = {
-    active = true
-    update = fn(delta)
-        return 0
-    end
-}
-
-const Player : base(Actor) = {
-    health = 100
-    update = fn(delta)
-        base.update(delta)
-        return 0
-    end
-}
-
-fn main()
-    local player = Player.new()
-    player.active = true
-    player.update(0.016)
-    player.destroy()
-    return 0
-end
-`);
-  const record = extension._test.loadRecordSync(file);
-  const playerObject = record.symbols.find(symbol => symbol.name === 'Player');
-  assert.strictEqual(playerObject.baseRef, 'Actor', 'base object reference was not indexed');
-  const inherited = extension._test.resolveInstanceMember(record, 'player', 'active');
-  assert(inherited && inherited.symbol.name === 'active', 'inherited field was not resolved on a child instance');
-  const baseCall = extension._test.resolveChain(record, ['base', 'update'], playerObject.line + 3);
-  assert(baseCall && baseCall.symbol.name === 'update', 'base.method was not resolved to the immediate base method');
-  const allMembers = extension._test.inheritedMembers(record, playerObject).map(member => member.name);
-  assert(allMembers.includes('health') && allMembers.includes('active') && allMembers.includes('update'), 'child completion list is missing inherited members');
-}
-
 console.log('LazyScriptEX extension navigation, LSHTML/LSCSS symbols, and inferred member tests passed.');

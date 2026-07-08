@@ -7,7 +7,125 @@ const crypto = require('crypto');
 const { buildNativeBindings } = require('./native_bindings');
 const { compileInlineUiSource } = require('./inline_ui');
 
-const VERSION = '0.18.0';
+const VERSION = '0.18.2';
+
+
+function directoryExists(value) {
+  try { return Boolean(value) && fs.statSync(value).isDirectory(); }
+  catch { return false; }
+}
+
+function fileExists(value) {
+  try { return Boolean(value) && fs.statSync(value).isFile(); }
+  catch { return false; }
+}
+
+function normalizeLazyScriptRoot(value) {
+  if (!value) return null;
+  let candidate = path.resolve(String(value));
+  if (fileExists(candidate)) candidate = path.dirname(candidate);
+
+  const base = path.basename(candidate).toLowerCase();
+  if (base === 'api' && directoryExists(path.join(path.dirname(candidate), 'bindings'))) candidate = path.dirname(candidate);
+  if (base === 'compiler' && directoryExists(path.join(path.dirname(candidate), 'bindings'))) candidate = path.dirname(candidate);
+
+  if (directoryExists(path.join(candidate, 'bindings')) && directoryExists(path.join(candidate, 'compiler'))) return candidate;
+  const nested = path.join(candidate, 'LazyScript');
+  if (directoryExists(path.join(nested, 'bindings')) && directoryExists(path.join(nested, 'compiler'))) return nested;
+  return null;
+}
+
+function environmentModuleRoots() {
+  const roots = {};
+  const json = process.env.LAZYSCRIPTEX_MODULE_ROOTS;
+  if (json) {
+    try {
+      const parsed = JSON.parse(json);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        for (const [name, value] of Object.entries(parsed)) if (typeof value === 'string' && value.trim()) roots[name] = path.resolve(value);
+      }
+    } catch {
+      // Ignore malformed environment configuration. Command-line and project roots still work.
+    }
+  }
+  const lazyValue = process.env.LAZYSCRIPTEX_LAZYSCRIPT_ROOT || process.env.LAZYSCRIPTEX_ROOT;
+  const lazyRoot = normalizeLazyScriptRoot(lazyValue);
+  if (lazyRoot) roots.LazyScript = lazyRoot;
+  return roots;
+}
+
+function compilerLazyScriptRoot() {
+  return normalizeLazyScriptRoot(path.resolve(__dirname, '..'));
+}
+
+function findNearestProjectConfig(startPath) {
+  let current;
+  try { current = fs.statSync(startPath).isDirectory() ? path.resolve(startPath) : path.dirname(path.resolve(startPath)); }
+  catch { current = path.dirname(path.resolve(startPath)); }
+  for (;;) {
+    const config = path.join(current, 'lazyscriptex.json');
+    if (fileExists(config)) return config;
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return null;
+}
+
+function findNamedDirectoryRecursive(startPath, name, maxDepth = 8, maxVisited = 6000) {
+  if (!directoryExists(startPath)) return null;
+  const wanted = String(name).toLowerCase();
+  const ignored = new Set(['.git', '.cache', 'node_modules', 'build', 'dist', 'out', '.vs', '.vscode']);
+  const queue = [{ dir: path.resolve(startPath), depth: 0 }];
+  let visited = 0;
+  while (queue.length && visited < maxVisited) {
+    const current = queue.shift();
+    visited += 1;
+    if (path.basename(current.dir).toLowerCase() === wanted) return current.dir;
+    if (current.depth >= maxDepth) continue;
+    let entries;
+    try { entries = fs.readdirSync(current.dir, { withFileTypes: true }); }
+    catch { continue; }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || ignored.has(entry.name.toLowerCase())) continue;
+      if (entry.name.toLowerCase() === wanted) return path.join(current.dir, entry.name);
+      queue.push({ dir: path.join(current.dir, entry.name), depth: current.depth + 1 });
+    }
+  }
+  return null;
+}
+
+function parseModuleRootFlags(args) {
+  const roots = {};
+  const assign = (raw, friendlyName = null) => {
+    if (!raw) throw new CompileError(`${friendlyName || '--module-root'} requires a path`);
+    if (friendlyName === '--lazy-script-root') {
+      const normalized = normalizeLazyScriptRoot(raw);
+      if (!normalized) throw new CompileError(`--lazy-script-root does not point to a LazyScript folder or toolkit root: ${raw}`);
+      roots.LazyScript = normalized;
+      return;
+    }
+    const split = String(raw).indexOf('=');
+    if (split <= 0 || split === String(raw).length - 1) throw new CompileError(`--module-root requires Name=Path, for example --module-root LazyScript=C:\\LazyScriptEX\\LazyScript`);
+    const name = String(raw).slice(0, split).trim();
+    const value = String(raw).slice(split + 1).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || !value) throw new CompileError(`invalid --module-root value '${raw}'`);
+    if (name === 'LazyScript') {
+      const normalized = normalizeLazyScriptRoot(value);
+      if (!normalized) throw new CompileError(`module root LazyScript does not point to a LazyScript folder or toolkit root: ${value}`);
+      roots[name] = normalized;
+    } else roots[name] = path.resolve(value);
+  };
+
+  for (let i = 0; i < args.length; i++) {
+    const value = args[i];
+    if (value === '--module-root') { assign(args[++i]); continue; }
+    if (value.startsWith('--module-root=')) { assign(value.slice('--module-root='.length)); continue; }
+    if (value === '--lazy-script-root') { assign(args[++i], '--lazy-script-root'); continue; }
+    if (value.startsWith('--lazy-script-root=')) { assign(value.slice('--lazy-script-root='.length), '--lazy-script-root'); continue; }
+  }
+  return roots;
+}
 
 class CompileError extends Error {
   constructor(message, token = null, filePath = null, details = null) {
@@ -45,7 +163,7 @@ function diagnosticDetails(message) {
     [/expected ',' or '}' after object value/i, 'LSX1202', 'Put a comma between entries, or close the object with }.'],
     [/symbol '.+' already exists|duplicate field|table member '.+' already exists|module alias '.+' already exists/i, 'LSX2000', 'Rename one declaration or remove the duplicate. LSX names must be unique in the same scope.'],
     [/unknown module alias/i, 'LSX2100', 'Import the module first with use "..." as Alias, then use the same alias spelling.'],
-    [/named module root .+ was not found/i, 'LSX2101', 'Keep LazyScript beside Projects, or add the module root in lazyscriptex.json.'],
+    [/named module root .+ was not found/i, 'LSX2101', 'Run LazyScriptEX: Select LazyScript/API Folder in VS Code, use --lazy-script-root, or add moduleRoots.LazyScript to lazyscriptex.json.'],
     [/script not found|required runtime file not found/i, 'LSX2102', 'Check the path and filename. @LazyScript imports are resolved from the toolkit LazyScript folder.'],
     [/does not export|module cannot name inferred type/i, 'LSX2103', 'The symbol is private or the module is not imported. Export it, or use a public symbol from that module.'],
     [/unknown (constant|type|closed table|function|variable|symbol)|has no (function|constant|field)|table has no function/i, 'LSX2200', 'Check spelling and capitalization. Hover the object or type in VS Code to see the members it actually provides.'],
@@ -936,7 +1054,10 @@ function inferPositionalNativeElementType(entries, inferredTypes) {
 class Program {
   constructor(entryPath = null, moduleRoots = {}) {
     this.entryPath = entryPath ? path.resolve(entryPath) : null;
-    this.moduleRoots = new Map(Object.entries(moduleRoots || {}).map(([name, value]) => [name, path.resolve(value)]));
+    const mergedRoots = { ...environmentModuleRoots(), ...(moduleRoots || {}) };
+    const bundledRoot = compilerLazyScriptRoot();
+    if (!mergedRoots.LazyScript && bundledRoot) mergedRoots.LazyScript = bundledRoot;
+    this.moduleRoots = new Map(Object.entries(mergedRoots).map(([name, value]) => [name, path.resolve(value)]));
     this.modules = new Map();
     this.moduleOrder = [];
     this.imports = new Map();
@@ -1140,17 +1261,27 @@ class Program {
     const rootName = source.slice(1, slash);
     const remainder = source.slice(slash + 1);
     let root = this.moduleRoots.get(rootName) || null;
+    if (!root) root = [...this.moduleRoots.entries()].find(([name]) => name.toLowerCase() === rootName.toLowerCase())?.[1] || null;
+    if (rootName.toLowerCase() === 'lazyscript') root = normalizeLazyScriptRoot(root) || root;
+    if (root && !directoryExists(root)) root = null;
     if (!root) {
       let current = path.dirname(importerPath);
       for (;;) {
+        if (path.basename(current).toLowerCase() === rootName.toLowerCase()) { root = current; break; }
         const candidate = path.join(current, rootName);
-        if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) { root = candidate; break; }
+        if (directoryExists(candidate)) { root = candidate; break; }
         const parent = path.dirname(current);
         if (parent === current) break;
         current = parent;
       }
     }
-    if (!root) throw new CompileError(`named module root '@${rootName}' was not found; add a '${rootName}' folder above the project or configure moduleRoots`, token, importerPath);
+    if (!root) {
+      const configPath = findNearestProjectConfig(importerPath);
+      const searchRoot = configPath ? path.dirname(configPath) : process.cwd();
+      root = findNamedDirectoryRecursive(searchRoot, rootName);
+    }
+    if (!root && rootName.toLowerCase() === 'lazyscript') root = compilerLazyScriptRoot();
+    if (!root) throw new CompileError(`named module root '@${rootName}' was not found. Select the LazyScript/API folder in VS Code, pass --lazy-script-root, or configure moduleRoots.${rootName} in lazyscriptex.json`, token, importerPath);
     return path.resolve(root, remainder);
   }
 
@@ -8757,6 +8888,7 @@ function copyRuntimeAssets(project, output, importGroups = []) {
 
 function build(inputPath, outputOverride = null, options = {}) {
   const project = loadProjectConfig(inputPath);
+  project.moduleRoots = { ...environmentModuleRoots(), ...project.moduleRoots, ...(options.moduleRoots || {}) };
   const optimization = options.optimization === undefined ? project.optimization : Number(options.optimization);
   if (!Number.isInteger(optimization) || optimization < 0 || optimization > 6) throw new CompileError('optimization level must be 0, 1, 2, 3, 4, 5, or 6');
   const program = new Program(project.entry, project.moduleRoots);
@@ -8785,7 +8917,7 @@ function build(inputPath, outputOverride = null, options = {}) {
 }
 
 function printUsage() {
-  console.log(`LazyScriptEX compiler ${VERSION}\n\nUsage:\n  node lazyscriptex.js check <file.lsx> [--diagnostics=json]\n  node lazyscriptex.js check-project <project-folder|lazyscriptex.json> [--diagnostics=json]\n  node lazyscriptex.js build <entry.lsx|project-folder|lazyscriptex.json> [-o output.exe] [--opt 0-6] [--pgo-generate profile.pgo] [--pgo-use profile.pgo] [--cpu baseline|avx2|avx2-fma]\n  node lazyscriptex.js --version`);
+  console.log(`LazyScriptEX compiler ${VERSION}\n\nUsage:\n  node lazyscriptex.js check <file.lsx> [--lazy-script-root path] [--module-root Name=Path] [--diagnostics=json]\n  node lazyscriptex.js check-project <project-folder|lazyscriptex.json> [--lazy-script-root path] [--module-root Name=Path] [--diagnostics=json]\n  node lazyscriptex.js build <entry.lsx|project-folder|lazyscriptex.json> [-o output.exe] [--opt 0-6] [--pgo-generate profile.pgo] [--pgo-use profile.pgo] [--cpu baseline|avx2|avx2-fma] [--lazy-script-root path] [--module-root Name=Path]\n  node lazyscriptex.js --version`);
 }
 
 function main(argv) {
@@ -8795,14 +8927,18 @@ function main(argv) {
   const command = args[0];
   const input = args[1];
   if (!input) throw new CompileError('missing input file or project path');
+  const commandLineRoots = parseModuleRootFlags(args.slice(2));
   if (command === 'check') {
-    const result = checkFile(input);
+    const nearestConfig = findNearestProjectConfig(input);
+    const projectRoots = nearestConfig ? loadProjectConfig(nearestConfig).moduleRoots : {};
+    const result = checkFile(input, { ...projectRoots, ...commandLineRoots });
     const kind = result.entry ? 'entry-capable script' : 'module';
     console.log(`OK ${kind}: ${path.resolve(input)} (${result.program.moduleOrder.length} module${result.program.moduleOrder.length === 1 ? '' : 's'})`);
     return;
   }
   if (command === 'check-project') {
     const project = loadProjectConfig(input);
+    project.moduleRoots = { ...environmentModuleRoots(), ...project.moduleRoots, ...commandLineRoots };
     const result = checkFile(project.entry, project.moduleRoots);
     if (!result.entry) throw new CompileError('project entry does not define fn main()', null, project.entry);
     console.log(`OK project: ${project.configPath || project.entry}\nEntry: ${project.entry}\nModules: ${result.program.moduleOrder.length}`);
@@ -8824,7 +8960,7 @@ function main(argv) {
     if (pgoGenerateFlag >= 0 && (!pgoGenerate || pgoGenerate.startsWith('--'))) throw new CompileError('--pgo-generate requires a profile path');
     if (pgoUseFlag >= 0 && (!pgoUse || pgoUse.startsWith('--'))) throw new CompileError('--pgo-use requires a profile path');
     if (cpuFlag >= 0 && !['baseline', 'avx2', 'avx2-fma'].includes(targetCpu)) throw new CompileError('--cpu requires baseline, avx2, or avx2-fma');
-    const result = build(input, output, { optimization, pgoGenerate, pgoUse, targetCpu });
+    const result = build(input, output, { optimization, pgoGenerate, pgoUse, targetCpu, moduleRoots: commandLineRoots });
     console.log(`Built ${result.output}`);
     console.log(`Entry: ${result.project.entry}`);
     console.log(`Modules: ${result.program.moduleOrder.length}`);
@@ -8861,5 +8997,6 @@ if (require.main === module) {
 
 module.exports = {
   Lexer, Parser, Program, Optimizer, analyzeFunction, checkFile, build, makePe, VERSION,
-  CompileError, compilerDiagnostic, formatHumanDiagnostic, diagnosticDetails
+  CompileError, compilerDiagnostic, formatHumanDiagnostic, diagnosticDetails,
+  normalizeLazyScriptRoot, findNearestProjectConfig, findNamedDirectoryRecursive, parseModuleRootFlags
 };

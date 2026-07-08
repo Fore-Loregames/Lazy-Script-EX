@@ -13,12 +13,14 @@ The offline documentation contains:
 - project creation, build, and run instructions;
 - a complete native window example;
 - beginner language lessons;
-- tables, objects, functions, conditions, loops, modules, and ownership;
+- tables, objects, functions, conditions, loops, inheritance, and ownership;
+- a complete imports guide covering relative paths, named roots, shared folders, moduleRoots, and VS Code path completion;
 - LSHTML, LSCSS, scrolling, controls, and complete UI applications;
 - a categorized sidebar for every bundled API module;
 - practical LSX examples for every documented declaration;
 - explanations for setup, return values, cleanup, and common mistakes;
 - exact native signatures hidden behind an optional advanced view.
 
-Keep this folder at LazyScript/api so repository scripts and the Visual Studio
-Code extension can find it automatically.
+Keep this folder at LazyScript/api. Projects may live anywhere: run
+"LazyScriptEX: Select LazyScript/API Folder" in VS Code and select LazyScript,
+this api folder, or the toolkit root.

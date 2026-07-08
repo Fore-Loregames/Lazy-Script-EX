@@ -209,26 +209,15 @@ transform.destroy()
 
 Objects use fixed field offsets and direct method calls. LSX does not require a garbage collector, runtime reflection table, or prototype chain.
 
-## Base-object inheritance
+## Compile-time inheritance
 
-Base-object inheritance lets one closed object reuse the fields and methods of one other closed object. It is useful when several objects are genuinely the same kind of thing and should share a common foundation, such as `Actor` → `Player`, `Component` → `CameraComponent`, or `LazyBehavior` → a game behavior.
-
-Declare the child with `: base(Parent)`:
+A closed object can inherit from one base object:
 
 ```lsx
 const Actor = {
-    name = "Actor"
     active = true
-    x = 0.0
-
-    set_active = fn(value)
-        self.active = value
-    end
 
     update = fn(delta)
-        if self.active then
-            self.x = self.x + delta
-        end
         return 0
     end
 }
@@ -236,95 +225,6 @@ const Actor = {
 const Player : base(Actor) = {
     health = 100
 
-    heal = fn(amount)
-        self.health = self.health + amount
-        if self.health > 100 then self.health = 100 end
-    end
-
-    update = fn(delta)
-        base.update(delta)
-        if self.health < 100 then self.health = self.health + 1 end
-        return 0
-    end
-}
-
-fn main()
-    local player = Player.new()
-
-    -- These fields and methods came from Actor.
-    player.name = "Hero"
-    player.set_active(true)
-
-    -- This calls Player.update(), which then calls Actor.update().
-    player.update(0.016)
-
-    player.heal(10)
-    player.destroy()
-    return 0
-end
-```
-
-### What the child receives
-
-A child object receives the base object's fields and methods automatically:
-
-```lsx
-local player = Player.new()
-
-player.name = "Hero"       -- inherited field
-player.active = false      -- inherited field
-player.set_active(true)    -- inherited method
-player.heal(25)            -- Player method
-
-player.destroy()
-```
-
-The inherited fields are part of the same object allocation. Do not create or destroy a separate `Actor` object for a `Player`.
-
-### Overriding a method
-
-Give the child a method with the same name to replace the inherited version for that child type:
-
-```lsx
-const Player : base(Actor) = {
-    health = 100
-
-    update = fn(delta)
-        base.update(delta)
-        -- Player-only update work goes here.
-        return 0
-    end
-}
-```
-
-Inside an overriding method, `base.method(...)` calls the implementation on the immediate base object. It does not require `self` as an argument.
-
-### Multi-level inheritance
-
-A child can become the base of another object:
-
-```lsx
-const FastPlayer : base(Player) = {
-    speed = 12.0
-}
-
-local runner = FastPlayer.new()
-runner.name = "Runner"     -- from Actor
-runner.health = 100        -- from Player
-runner.speed = 18.0        -- from FastPlayer
-runner.destroy()
-```
-
-### Inheriting from an imported module
-
-The base object may come from another LSX file:
-
-```lsx
-use "../Engine/LazyBehavior.lsx" as Engine
-
-const PlayerBehavior : base(Engine.LazyBehavior) = {
-    health = 100
-
     update = fn(delta)
         base.update(delta)
         return 0
@@ -332,20 +232,14 @@ const PlayerBehavior : base(Engine.LazyBehavior) = {
 }
 ```
 
-### Rules to remember
+Inheritance is resolved at compile time:
 
-- An object can have one direct base object.
-- The base must be a closed object that the current file can access directly or through an imported module alias.
-- Inherited fields become part of the child's fixed object layout.
-- New child fields are appended after the inherited fields.
-- A child cannot declare a field with the same name as an inherited field.
-- A same-named child method overrides the inherited method.
-- `base.method(...)` calls the immediate base implementation.
-- Circular inheritance and inheriting from the object itself are compile errors.
-- Create the final child with `.new()` and destroy that one instance once with `.destroy()`.
-- Inheritance is resolved during compilation. LSX adds no runtime prototype walk, reflection lookup, or virtual-table cost.
-
-Use inheritance for a real “is a kind of” relationship. Use normal object fields when one object merely contains or uses another object.
+- inherited fields remain a fixed prefix of the derived layout;
+- derived fields are appended;
+- a same-named method overrides the base method;
+- `base.method(...)` calls the immediate base implementation;
+- circular inheritance is rejected;
+- no runtime vtable or prototype walk is added.
 
 ## Tables and native storage
 
@@ -479,29 +373,149 @@ end
 
 The compiler tracks how the value is later assigned and used.
 
-## Modules
+## Modules, imports, and source roots
 
-Import a relative module:
+LSX can import files from any folder depth. A relative import starts from the file containing the `use` statement, while a named import starts from a configured module root.
 
-```lsx
-use "../Shared/MathHelpers.lsx" as MathHelpers
-```
+### Relative imports
 
-Use exported members through the alias:
+Use `./` for the current source folder and `../` to move up one folder:
 
 ```lsx
-local result = MathHelpers.lerp(0.0, 10.0, 0.5)
+use "./CameraController.lsx" as CameraController
+use "../Input/InputManager.lsx" as Input
+
+fn main()
+    Input.update()
+    CameraController.update()
+    return 0
+end
 ```
 
-Bundled modules use the named `@LazyScript` root:
+The path is **not** calculated from the executable, VS Code workspace, or project entry file. It is calculated from the `.lsx` file that contains the import.
+
+### Named module roots
+
+Named roots remove long chains of `../` segments:
 
 ```lsx
 use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
-use "@LazyScript/bindings/Math/GLM.lsx" as GLM
+use "@Engine/Window/WindowManager.lsx" as WindowManager
 ```
 
-The compiler resolves named module roots from the project configuration and repository layout.
+`@LazyScript` represents the selected LazyScript installation folder. Additional names such as `@Engine` or `@Shared` come from `moduleRoots`.
+
+In VS Code, run:
+
+```text
+LazyScriptEX: Select LazyScript/API Folder
+```
+
+Select the `LazyScript` folder, its `api` folder, or the toolkit folder containing `LazyScript`. The extension then uses that location for:
+
+- `@LazyScript` imports;
+- compiler checks and builds;
+- recursive IntelliSense indexing;
+- API opening and hovers;
+- import-path autocomplete.
+
+This means a project can be stored anywhere on disk or several folders deeper than the language toolkit.
+
+### Import-path autocomplete
+
+Start typing inside the quotes:
+
+```lsx
+use "@LazyScript/
+```
+
+VS Code lists real child folders and `.lsx` files. Choosing a folder immediately opens completion for the next level. The same completion works with relative paths:
+
+```lsx
+use "../
+```
+
+Go to Definition on the path opens the imported file.
+
+### Module aliases
+
+The name after `as` is the local module alias:
+
+```lsx
+use "@LazyScript/bindings/Math/GLM.lsx" as GLM
+
+local position = GLM.vec3(1.0, 2.0, 3.0)
+```
+
+Type `GLM.` to browse the module's exported API.
+
+### Exporting public declarations
+
+Only declarations marked with `export` are visible through another file's alias:
+
+```lsx
+export const WindowSettings = {
+    width = 1280
+    height = 720
+}
+
+export fn create_window(title)
+    return 0
+end
+```
+
+Private helper functions can omit `export`.
+
+### Shared Engine, Editor, and Game folders
+
+A shared source tree does not need to sit inside an executable project:
+
+```text
+LazyEngineLSX/
+├─ Engine/
+│  └─ Window/WindowManager.lsx
+├─ Editor/
+│  ├─ main.lsx
+│  └─ lazyscriptex.json
+└─ Game/
+   ├─ main.lsx
+   └─ lazyscriptex.json
+```
+
+Both executable projects can map the shared folder:
+
+```json
+{
+  "entry": "main.lsx",
+  "output": "build/Game.exe",
+  "optimization": 6,
+  "moduleRoots": {
+    "Engine": "../Engine"
+  }
+}
+```
+
+Then either project can import:
+
+```lsx
+use "@Engine/Window/WindowManager.lsx" as WindowManager
+```
+
+The extension recursively indexes configured roots and passes them to the compiler even when the currently edited file is inside the shared `Engine` folder instead of beneath `Editor` or `Game`.
+
+### Command-line roots
+
+For one-off checks or projects opened outside VS Code, pass the LazyScript folder directly:
+
+```bat
+node LazyScript\compiler\lazyscriptex.js check Engine\Window\WindowManager.lsx --lazy-script-root C:\Tools\LazyScriptEX\LazyScript
+```
+
+Additional roots use `Name=Path`:
+
+```bat
+node LazyScript\compiler\lazyscriptex.js check Game\main.lsx --module-root Engine=C:\Projects\LazyEngineLSX\Engine
+```
 
 ## Files
 
@@ -729,7 +743,11 @@ A project uses `lazyscriptex.json`:
   "output": "build/MyProject.exe",
   "subsystem": "windows",
   "optimization": 6,
-  "targetCpu": "baseline"
+  "targetCpu": "baseline",
+  "moduleRoots": {
+    "Engine": "../Engine",
+    "Shared": "../Shared"
+  }
 }
 ```
 
@@ -742,16 +760,16 @@ Important fields:
 | `subsystem` | Console or Windows executable mode |
 | `optimization` | Optimization level from 0 through 6 |
 | `targetCpu` | `baseline`, `avx2`, or `avx2-fma` |
-| `moduleRoots` | Optional named module roots |
+| `moduleRoots` | Maps `@Name/...` imports to folders. Paths are relative to this JSON file. |
 | `runtimeFiles` | Extra files copied beside the executable |
 | `nativeBindings` | Optional project-specific native binding definitions |
 
 ## Compiler commands
 
 ```bat
-node LazyScript\compiler\lazyscriptex.js check path\to\main.lsx
+node LazyScript\compiler\lazyscriptex.js check path\to\main.lsx --lazy-script-root C:\Tools\LazyScriptEX\LazyScript
 node LazyScript\compiler\lazyscriptex.js check-project path\to\project
-node LazyScript\compiler\lazyscriptex.js build path\to\project
+node LazyScript\compiler\lazyscriptex.js build path\to\project --module-root Engine=C:\Projects\MyGame\Engine
 ```
 
 Structured diagnostics:

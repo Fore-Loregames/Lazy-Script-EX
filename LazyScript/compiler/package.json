@@ -1,6 +1,6 @@
 {
   "name": "lazyscriptex-compiler",
-  "version": "0.18.0",
+  "version": "0.18.2",
   "private": true,
   "description": "Direct native x64 LazyScriptEX compiler with beginner-readable source diagnostics, structured VS Code errors, LSHTML/LSCSS, inferred collections, native bindings, and O0-O6 optimization.",
   "bin": {

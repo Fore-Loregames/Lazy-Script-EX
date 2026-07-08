@@ -26,7 +26,7 @@ Do not open the `.vsix` with Microsoft Visual Studio's VSIX installer. This exte
 - Compiler diagnostics while typing and on save
 - Exact error ranges in the Problems panel
 - Beginner-oriented hints for common compiler errors
-- Completion for local symbols, imports, modules, objects, fields, methods, constants, LSHTML tags, attributes, and LSCSS properties
+- Completion for local symbols, imports, real folders and `.lsx` filenames inside `use` paths, modules, objects, fields, methods, constants, LSHTML tags, attributes, and LSCSS properties
 - Rich hover explanations with practical LSX examples
 - Go to Definition
 - Find References
@@ -34,7 +34,7 @@ Do not open the `.vsix` with Microsoft Visual Studio's VSIX installer. This exte
 - Signature Help
 - Document Symbols
 - Workspace Symbols
-- Recursive `.lsx` indexing across workspace folders
+- Recursive `.lsx` indexing across workspace folders, the selected LazyScript installation, and every configured module root
 - Build, run, check, project creation, and offline API commands
 - Persistent run terminals that keep program output and exit codes visible
 
@@ -50,6 +50,8 @@ Open the Command Palette and search for `LazyScriptEX`:
 - `LazyScriptEX: Create Project from Template`
 - `LazyScriptEX: Show Output`
 - `LazyScriptEX: Explain Symbol Under Cursor`
+- `LazyScriptEX: Select LazyScript/API Folder`
+- `LazyScriptEX: Select Offline API Page`
 
 Default shortcuts:
 
@@ -109,29 +111,57 @@ It provides help for:
 
 Use the offline API for complete runnable UI examples.
 
-## Workspace discovery
+## Imports and workspace discovery
 
-The recommended workspace layout is:
+Projects do not need to remain beside the language toolkit. Run:
 
 ```text
-LazyScriptEX/
-├─ LazyScript/
-└─ Projects/
+LazyScriptEX: Select LazyScript/API Folder
 ```
 
-When a project is opened separately, set `lazyscriptex.lazyScriptRoot` to the repository root or the `LazyScript` folder.
+Select any of these:
+
+- the `LazyScript` folder;
+- `LazyScript/api`;
+- the toolkit folder containing `LazyScript`.
+
+The extension stores the normalized location in workspace settings and passes it to the compiler automatically. The same selection controls `@LazyScript` imports, recursive API indexing, hovers, Go to Definition, import-path completion, and the offline API command.
+
+While typing inside a `use` path, completion lists real folders and `.lsx` files:
+
+```lsx
+use "@LazyScript/bindings/Math/GLM.lsx" as GLM
+use "../Window/WindowManager.lsx" as WindowManager
+```
+
+Choosing a folder retriggers completion for the next path segment. Go to Definition on the quoted path opens the target file.
+
+Additional shared roots may be configured in `lazyscriptex.json`:
+
+```json
+{
+  "entry": "main.lsx",
+  "moduleRoots": {
+    "Engine": "../Engine",
+    "Shared": "../Shared"
+  }
+}
+```
+
+Then imports can use `@Engine/...` or `@Shared/...` from any source depth. Shared files outside an executable folder are still checked directly because the extension passes associated roots to the compiler.
 
 ## Settings
 
 | Setting | Purpose |
 |---|---|
 | `lazyscriptex.compilerPath` | Optional absolute path to `lazyscriptex.js` |
-| `lazyscriptex.lazyScriptRoot` | Optional repository or `LazyScript` root |
-| `lazyscriptex.apiPath` | Optional path to the offline API `index.html` |
+| `lazyscriptex.lazyScriptRoot` | Selected `LazyScript`, `api`, or toolkit location used by imports and diagnostics |
+| `lazyscriptex.apiPath` | Optional path to the offline API `index.html`; normally set by the folder selector |
 | `lazyscriptex.checkOnType` | Check after a typing delay |
 | `lazyscriptex.checkOnSave` | Check when an LSX file is saved |
 | `lazyscriptex.checkDelay` | Delay before type-time diagnostics |
-| `lazyscriptex.recursiveIndex` | Index LSX files recursively |
+| `lazyscriptex.moduleRoots` | Extra `@Name` roots available to IntelliSense and compiler checks |
+| `lazyscriptex.recursiveIndex` | Recursively index workspace, LazyScript, and configured roots |
 | `lazyscriptex.exclude` | Glob excluded from indexing |
 
 ## Testing the extension

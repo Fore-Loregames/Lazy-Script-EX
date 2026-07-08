@@ -62,7 +62,13 @@ Run:
 INSTALL_VSCODE_EXTENSION.bat
 ```
 
-Restart Visual Studio Code, then open the complete repository root so the extension can find both `LazyScript` and `Projects`.
+Restart Visual Studio Code. Projects may be opened anywhere on disk. When a project is not beside this repository, open the Command Palette and run:
+
+```text
+LazyScriptEX: Select LazyScript/API Folder
+```
+
+Select the `LazyScript` folder, `LazyScript/api`, or this toolkit root. The extension then uses that location for `@LazyScript` imports, compiler diagnostics, recursive IntelliSense, path autocomplete, and the offline API.
 
 This step is strongly recommended but not required to compile from the command line.
 
@@ -426,27 +432,59 @@ const Player : base(Actor) = {
 
 Inheritance is resolved during compilation. It does not introduce a runtime prototype chain or reflection system.
 
-## Modules
+## Modules and imports
 
-Import another LSX file with `use`:
+Relative imports begin at the file containing the `use` statement:
 
 ```lsx
+use "./CameraController.lsx" as CameraController
 use "../Shared/MathHelpers.lsx" as MathHelpers
 ```
 
-Call exported functions and access exported objects through the module alias:
+Named roots work from any folder depth:
+
+```lsx
+use "@LazyScript/bindings/Math/GLM.lsx" as GLM
+use "@Engine/Window/WindowManager.lsx" as WindowManager
+```
+
+`@LazyScript` comes from the selected LazyScript/API folder. Additional roots are configured in `lazyscriptex.json`:
+
+```json
+{
+  "entry": "main.lsx",
+  "output": "build/Game.exe",
+  "moduleRoots": {
+    "Engine": "../Engine",
+    "Shared": "../Shared"
+  }
+}
+```
+
+Paths in `moduleRoots` are relative to that JSON file. The key omits `@`, so `"Engine"` creates the `@Engine/...` import root.
+
+While typing inside a `use` path, the VS Code extension lists real folders and `.lsx` files. Choosing a folder continues completion at the next level, and Go to Definition on the quoted path opens the imported file.
+
+Only exported declarations are visible through a module alias:
+
+```lsx
+export const Settings = {
+    width = 1280
+    height = 720
+}
+
+export fn create_window(title)
+    return 0
+end
+```
+
+Use imported members through the alias:
 
 ```lsx
 local result = MathHelpers.lerp(0.0, 10.0, 0.5)
 ```
 
-Bundled modules use the `@LazyScript` root:
-
-```lsx
-use "@LazyScript/bindings/Math/GLM.lsx" as GLM
-use "@LazyScript/bindings/System/File.lsx" as File
-use "@LazyScript/bindings/Data/Json.lsx" as Json
-```
+Shared source folders do not need their own executable project. Editor and Game projects can both map the same `../Engine` folder and import it through `@Engine`.
 
 ## Strings and raw strings
 

@@ -13,6 +13,8 @@ let output;
 let diagnostics;
 let status;
 let watcher;
+let externalWatchers = [];
+let projectConfigs = [];
 const diagnosticFiles = new Map();
 const checkTimers = new Map();
 let lastCheckGeneration = 0;
@@ -39,9 +41,7 @@ const BUILTIN_DOCS = {
   'thread.start': ['thread.start(entry:fnptr, context:ptr) -> handle', 'Starts a real Windows operating-system thread at a compiled LSX function entry point.'],
   'thread.join': ['thread.join(handle:handle) -> bool', 'Waits until a native LSX worker thread exits.'],
   'thread.close': ['thread.close(handle:handle) -> bool', 'Closes a native thread handle.'],
-  'thread.cpu_count': ['thread.cpu_count() -> i32', 'Returns the number of logical processors visible to the process.'],
-  'base': ['const Child : base(Parent) = { ... }', 'Declares one compile-time base object for a closed child object. The child receives the base fields and methods. Use base.method(...) inside an override to call the immediate base implementation.'],
-  'base.method': ['base.method(arguments)', 'Calls the immediate base implementation from inside a child method. Do not pass self manually.']
+  'thread.cpu_count': ['thread.cpu_count() -> i32', 'Returns the number of logical processors visible to the process.']
 };
 
 function keyForFile(file) {
@@ -311,10 +311,9 @@ function parseText(uri, text) {
       symbols.push({ name: m[2], kind: 'function', parameters: parameterInfo(m[3]), returnType, signature: `${m[2]}(${m[3].trim()})${returnType ? ` -> ${returnType}` : ''}`, line: i, column: raw.indexOf(m[2]), exported: Boolean(m[1]), documentation: documentationBefore(lines, i) });
       continue;
     }
-    if ((m = raw.match(/^\s*(export\s+)?const\s+([A-Za-z_]\w*)\s*(?::\s*base\s*\(([^)]+)\))?\s*=\s*\{/))) {
+    if ((m = raw.match(/^\s*(export\s+)?const\s+([A-Za-z_]\w*)\s*(?::\s*base\s*\([^)]*\))?\s*=\s*\{/))) {
       const parsed = parseMembers(lines, i, m[2]);
-      const baseRef = m[3]?.trim() || '';
-      symbols.push({ name: m[2], kind: 'object', signature: `const ${m[2]}${baseRef ? ` : base(${baseRef})` : ''}`, baseRef, line: i, column: raw.indexOf(m[2]), exported: Boolean(m[1]), members: parsed.members, endLine: parsed.endLine, documentation: documentationBefore(lines, i) });
+      symbols.push({ name: m[2], kind: 'object', signature: `const ${m[2]}`, line: i, column: raw.indexOf(m[2]), exported: Boolean(m[1]), members: parsed.members, endLine: parsed.endLine, documentation: documentationBefore(lines, i) });
       i = parsed.endLine;
       continue;
     }
@@ -348,25 +347,125 @@ function parseText(uri, text) {
   return record;
 }
 
+function directoryExists(value) {
+  try { return Boolean(value) && fs.statSync(value).isDirectory(); }
+  catch { return false; }
+}
+
+function fileExists(value) {
+  try { return Boolean(value) && fs.statSync(value).isFile(); }
+  catch { return false; }
+}
+
+function normalizeLazyScriptRoot(value) {
+  if (!value) return null;
+  let candidate = path.resolve(String(value));
+  if (fileExists(candidate)) candidate = path.dirname(candidate);
+  const base = path.basename(candidate).toLowerCase();
+  if ((base === 'api' || base === 'bindings' || base === 'compiler') && directoryExists(path.join(path.dirname(candidate), 'bindings'))) {
+    candidate = path.dirname(candidate);
+  }
+  if (directoryExists(path.join(candidate, 'bindings')) && directoryExists(path.join(candidate, 'compiler'))) return candidate;
+  const nested = path.join(candidate, 'LazyScript');
+  if (directoryExists(path.join(nested, 'bindings')) && directoryExists(path.join(nested, 'compiler'))) return nested;
+  return null;
+}
+
+function readProjectConfig(configPath) {
+  try {
+    if (!fileExists(configPath)) return null;
+    const raw = JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^\uFEFF/, ''));
+    const root = path.dirname(configPath);
+    const moduleRoots = {};
+    if (raw.moduleRoots && typeof raw.moduleRoots === 'object' && !Array.isArray(raw.moduleRoots)) {
+      for (const [name, value] of Object.entries(raw.moduleRoots)) {
+        if (typeof value === 'string' && value.trim()) moduleRoots[name] = path.resolve(root, value);
+      }
+    }
+    return { configPath, root, entry: typeof raw.entry === 'string' ? path.resolve(root, raw.entry) : null, moduleRoots, raw };
+  } catch {
+    return null;
+  }
+}
+
+function findProjectConfigAbove(startFile) {
+  let dir;
+  try { dir = directoryExists(startFile) ? path.resolve(startFile) : path.dirname(path.resolve(startFile)); }
+  catch { dir = path.dirname(path.resolve(startFile)); }
+  for (;;) {
+    const config = path.join(dir, 'lazyscriptex.json');
+    if (fileExists(config)) return readProjectConfig(config);
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+function configuredModuleRoots() {
+  const configured = vscode.workspace.getConfiguration('lazyscriptex').get('moduleRoots', {}) || {};
+  const roots = {};
+  if (configured && typeof configured === 'object' && !Array.isArray(configured)) {
+    for (const [name, value] of Object.entries(configured)) {
+      if (typeof value !== 'string' || !value.trim()) continue;
+      roots[name] = name === 'LazyScript' ? (normalizeLazyScriptRoot(value) || path.resolve(value)) : path.resolve(value);
+    }
+  }
+  return roots;
+}
+
+function pathInside(file, root) {
+  if (!file || !root) return false;
+  const relative = path.relative(path.resolve(root), path.resolve(file));
+  return relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+function associatedProjectConfigs(startFile) {
+  const direct = findProjectConfigAbove(startFile);
+  const found = direct ? [direct] : [];
+  for (const config of projectConfigs) {
+    if (!config || found.some(item => keyForFile(item.configPath) === keyForFile(config.configPath))) continue;
+    if (pathInside(startFile, config.root) || Object.values(config.moduleRoots || {}).some(root => pathInside(startFile, root))) found.push(config);
+  }
+  found.sort((a, b) => path.relative(a.root, startFile).length - path.relative(b.root, startFile).length);
+  return found;
+}
+
 function findLazyScriptRoot(startPath) {
   const configured = vscode.workspace.getConfiguration('lazyscriptex').get('lazyScriptRoot', '').trim();
-  if (configured && fs.existsSync(configured)) return path.basename(configured).toLowerCase() === 'lazyscript' ? configured : path.join(configured, 'LazyScript');
+  const selected = normalizeLazyScriptRoot(configured);
+  if (selected) return selected;
+
+  const configuredRoots = configuredModuleRoots();
+  const configuredNamed = normalizeLazyScriptRoot(configuredRoots.LazyScript);
+  if (configuredNamed) return configuredNamed;
+
+  for (const project of associatedProjectConfigs(startPath)) {
+    const projectRoot = normalizeLazyScriptRoot(project.moduleRoots?.LazyScript);
+    if (projectRoot) return projectRoot;
+  }
+
   let dir;
-  try { dir = fs.existsSync(startPath) && fs.statSync(startPath).isDirectory() ? startPath : path.dirname(startPath); }
-  catch { dir = path.dirname(startPath); }
+  try { dir = directoryExists(startPath) ? path.resolve(startPath) : path.dirname(path.resolve(startPath)); }
+  catch { dir = path.dirname(path.resolve(startPath)); }
   while (true) {
-    if (path.basename(dir).toLowerCase() === 'lazyscript') return dir;
-    const child = path.join(dir, 'LazyScript');
-    if (fs.existsSync(child) && fs.statSync(child).isDirectory()) return child;
+    if (path.basename(dir).toLowerCase() === 'lazyscript') {
+      const normalized = normalizeLazyScriptRoot(dir);
+      if (normalized) return normalized;
+    }
+    const child = normalizeLazyScriptRoot(path.join(dir, 'LazyScript'));
+    if (child) return child;
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
   for (const folder of vscode.workspace.workspaceFolders || []) {
+    const direct = normalizeLazyScriptRoot(folder.uri.fsPath);
+    if (direct) return direct;
     let current = folder.uri.fsPath;
     while (true) {
-      const candidate = path.join(current, 'LazyScript');
-      if (fs.existsSync(candidate)) return candidate;
+      const candidate = normalizeLazyScriptRoot(path.join(current, 'LazyScript'));
+      if (candidate) return candidate;
       const parent = path.dirname(current);
       if (parent === current) break;
       current = parent;
@@ -375,12 +474,140 @@ function findLazyScriptRoot(startPath) {
   return null;
 }
 
+function knownModuleRoots(fromFile) {
+  const roots = configuredModuleRoots();
+  for (const project of [...associatedProjectConfigs(fromFile), ...projectConfigs]) {
+    for (const [name, value] of Object.entries(project?.moduleRoots || {})) if (!roots[name] && directoryExists(value)) roots[name] = value;
+  }
+  const lazy = findLazyScriptRoot(fromFile);
+  if (lazy) roots.LazyScript = lazy;
+  return roots;
+}
+
 function resolveImport(spec, fromFile) {
-  if (spec.startsWith('@LazyScript/')) {
-    const root = findLazyScriptRoot(fromFile);
-    return root ? path.normalize(path.join(root, spec.slice('@LazyScript/'.length))) : null;
+  if (spec.startsWith('@')) {
+    const slash = spec.indexOf('/');
+    if (slash <= 1) return null;
+    const rootName = spec.slice(1, slash);
+    const roots = knownModuleRoots(fromFile);
+    const direct = roots[rootName] || Object.entries(roots).find(([name]) => name.toLowerCase() === rootName.toLowerCase())?.[1];
+    return direct ? path.normalize(path.join(direct, spec.slice(slash + 1))) : null;
   }
   return path.normalize(path.resolve(path.dirname(fromFile), spec));
+}
+
+function compilerModuleRootArgs(startFile) {
+  const roots = knownModuleRoots(startFile);
+  const args = [];
+  for (const [name, value] of Object.entries(roots)) {
+    if (!directoryExists(value)) continue;
+    if (name === 'LazyScript') args.push('--lazy-script-root', value);
+    else args.push('--module-root', `${name}=${value}`);
+  }
+  return args;
+}
+
+function importPathContext(document, position, requireOpen = true) {
+  const line = document.lineAt(position.line).text;
+  const quoteStart = line.indexOf('"');
+  if (quoteStart < 0 || !/^\s*use\s+"/.test(line)) return null;
+  const quoteEnd = line.indexOf('"', quoteStart + 1);
+  if (position.character < quoteStart + 1) return null;
+  if (quoteEnd >= 0 && position.character > quoteEnd) return null;
+  if (requireOpen && quoteEnd >= 0 && position.character === quoteEnd + 1) return null;
+  const end = quoteEnd >= 0 ? quoteEnd : line.length;
+  const full = line.slice(quoteStart + 1, end);
+  const typed = line.slice(quoteStart + 1, position.character);
+  return { line, quoteStart, quoteEnd, full, typed };
+}
+
+function importCompletionItems(document, position) {
+  const context = importPathContext(document, position, false);
+  if (!context) return null;
+  const typed = context.typed.replace(/\\/g, '/');
+  const roots = knownModuleRoots(document.uri.fsPath);
+  if (typed.startsWith('@') && !typed.includes('/')) {
+    const start = new vscode.Position(position.line, context.quoteStart + 1);
+    const range = new vscode.Range(start, position);
+    return Object.keys(roots).sort().map(name => {
+      const item = new vscode.CompletionItem(`@${name}/`, vscode.CompletionItemKind.Module);
+      item.insertText = `@${name}/`;
+      item.range = range;
+      item.detail = `Named LSX module root: ${roots[name]}`;
+      item.documentation = new vscode.MarkdownString(`Starts an import from the configured \`@${name}\` root. Continue typing a folder or file; path completion stays active after each slash.`);
+      item.command = { command: 'editor.action.triggerSuggest', title: 'Continue LSX import path' };
+      return item;
+    });
+  }
+
+  let baseDirectory;
+  let relativePart;
+  let namedRoot = false;
+  if (typed.startsWith('@')) {
+    const slash = typed.indexOf('/');
+    if (slash <= 1) return [];
+    const name = typed.slice(1, slash);
+    const root = roots[name] || Object.entries(roots).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
+    if (!root) return [];
+    baseDirectory = root;
+    relativePart = typed.slice(slash + 1);
+    namedRoot = true;
+  } else {
+    baseDirectory = path.dirname(document.uri.fsPath);
+    relativePart = typed;
+  }
+
+  const slash = relativePart.lastIndexOf('/');
+  const parentPart = slash >= 0 ? relativePart.slice(0, slash + 1) : '';
+  const segment = slash >= 0 ? relativePart.slice(slash + 1) : relativePart;
+  const browseDirectory = path.resolve(baseDirectory, parentPart.replace(/\//g, path.sep) || '.');
+  if (!directoryExists(browseDirectory)) return [];
+  const ignored = new Set(['.git', '.cache', 'node_modules', 'build', 'dist', 'out']);
+  let entries = [];
+  try {
+    entries = fs.readdirSync(browseDirectory, { withFileTypes: true })
+      .filter(entry => (entry.isDirectory() && !ignored.has(entry.name.toLowerCase())) || (entry.isFile() && entry.name.toLowerCase().endsWith('.lsx')))
+      .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
+  } catch { return []; }
+
+  const start = new vscode.Position(position.line, Math.max(context.quoteStart + 1, position.character - segment.length));
+  const range = new vscode.Range(start, position);
+  const items = entries.map(entry => {
+    const directory = entry.isDirectory();
+    const label = directory ? `${entry.name}/` : entry.name;
+    const kind = directory ? (vscode.CompletionItemKind.Folder || vscode.CompletionItemKind.Module) : (vscode.CompletionItemKind.File || vscode.CompletionItemKind.Module);
+    const item = new vscode.CompletionItem(label, kind);
+    item.insertText = label;
+    item.range = range;
+    const resolved = path.join(browseDirectory, entry.name);
+    item.detail = directory ? `LSX source folder: ${resolved}` : `LSX module: ${resolved}`;
+    item.documentation = new vscode.MarkdownString(directory
+      ? `Open this folder in the import path. Completion will immediately show its LSX files and child folders.`
+      : `Imports \`${resolved}\`. Add \`as Alias\` after the closing quote, then call exported members with \`Alias.member\`.`);
+    if (directory) item.command = { command: 'editor.action.triggerSuggest', title: 'Continue LSX import path' };
+    return item;
+  });
+
+  if (!namedRoot && !parentPart && !segment) {
+    for (const name of Object.keys(roots).sort().reverse()) {
+      const item = new vscode.CompletionItem(`@${name}/`, vscode.CompletionItemKind.Module);
+      item.insertText = `@${name}/`;
+      item.range = range;
+      item.detail = `Named LSX module root: ${roots[name]}`;
+      item.documentation = new vscode.MarkdownString(`Import from the configured \`@${name}\` folder without counting parent directories.`);
+      item.command = { command: 'editor.action.triggerSuggest', title: 'Continue LSX import path' };
+      items.unshift(item);
+    }
+    for (const value of ['../', './']) {
+      const item = new vscode.CompletionItem(value, vscode.CompletionItemKind.Folder || vscode.CompletionItemKind.Module);
+      item.insertText = value;
+      item.range = range;
+      item.detail = value === './' ? 'Import from the current source folder' : 'Import from the parent source folder';
+      item.command = { command: 'editor.action.triggerSuggest', title: 'Continue LSX import path' };
+      items.unshift(item);
+    }
+  }
+  return items;
 }
 
 function loadRecordSync(file, seen = new Set()) {
@@ -409,16 +636,66 @@ async function indexUri(uri) {
   loadRecordSync(uri.fsPath);
 }
 
+function walkLsxFiles(root, outputFiles, maxFiles = 20000) {
+  if (!directoryExists(root) || outputFiles.length >= maxFiles) return;
+  const ignored = new Set(['.git', '.cache', 'node_modules', 'build', 'dist', 'out', '.vs']);
+  const stack = [path.resolve(root)];
+  while (stack.length && outputFiles.length < maxFiles) {
+    const current = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(current, { withFileTypes: true }); }
+    catch { continue; }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (!ignored.has(entry.name.toLowerCase())) stack.push(path.join(current, entry.name));
+      } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.lsx')) outputFiles.push(path.join(current, entry.name));
+    }
+  }
+}
+
+function refreshExternalWatchers(roots) {
+  for (const external of externalWatchers) external.dispose?.();
+  externalWatchers = [];
+  if (!vscode.workspace.createFileSystemWatcher || !vscode.RelativePattern) return;
+  for (const root of roots) {
+    if (!directoryExists(root)) continue;
+    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '**/*.lsx'));
+    watcher.onDidCreate(indexUri);
+    watcher.onDidChange(indexUri);
+    watcher.onDidDelete(uri => index.delete(keyForFile(uri.fsPath)));
+    externalWatchers.push(watcher);
+  }
+}
+
 async function refreshIndex() {
   if (!vscode.workspace.workspaceFolders) return;
   status.text = '$(sync~spin) LSX indexing';
   const exclude = vscode.workspace.getConfiguration('lazyscriptex').get('exclude', '**/{build,node_modules,.git,.cache}/**');
   const uris = await vscode.workspace.findFiles('**/*.lsx', exclude);
+  const configUris = await vscode.workspace.findFiles('**/lazyscriptex.json', exclude);
+  projectConfigs = configUris.map(uri => readProjectConfig(uri.fsPath)).filter(Boolean);
   index.clear();
   for (const uri of uris) loadRecordSync(uri.fsPath);
+
+  const roots = new Set();
+  for (const folder of vscode.workspace.workspaceFolders || []) roots.add(path.resolve(folder.uri.fsPath));
+  for (const config of projectConfigs) for (const root of Object.values(config.moduleRoots || {})) roots.add(path.resolve(root));
+  for (const root of Object.values(configuredModuleRoots())) roots.add(path.resolve(root));
+  const lazy = findLazyScriptRoot(vscode.window.activeTextEditor?.document?.uri?.fsPath || vscode.workspace.workspaceFolders[0].uri.fsPath);
+  if (lazy) roots.add(path.resolve(lazy));
+
+  if (vscode.workspace.getConfiguration('lazyscriptex').get('recursiveIndex', true)) {
+    const externalFiles = [];
+    for (const root of roots) walkLsxFiles(root, externalFiles);
+    for (const file of externalFiles) loadRecordSync(file);
+  }
+  refreshExternalWatchers([...roots]);
+
   loadApiMetadata();
   status.text = `$(database) LSX ${index.size} files`;
-  status.tooltip = 'LazyScriptEX workspace and imported-module index. Click to refresh.';
+  status.tooltip = lazy
+    ? `LazyScriptEX recursively indexed ${index.size} LSX files. @LazyScript = ${lazy}`
+    : `LazyScriptEX indexed ${index.size} LSX files. Select the LazyScript/API folder to enable @LazyScript imports.`;
 }
 
 function indexedFile(file) {
@@ -503,60 +780,18 @@ function resolveTypeObject(record, typeRef) {
   return null;
 }
 
-function resolveObjectReference(record, reference) {
-  if (!reference) return null;
-  const parts = reference.split('.').map(part => part.trim()).filter(Boolean);
-  if (parts.length === 2 && record.imports.has(parts[0])) {
-    const hit = importedSymbol(record, parts[0], parts[1]);
-    return hit?.symbol?.members ? { record: hit.record, object: hit.symbol } : null;
-  }
-  if (parts.length === 1) {
-    const local = record.symbols.find(symbol => symbol.name === parts[0] && symbol.members);
-    if (local) return { record, object: local };
-    for (const [alias] of record.imports) {
-      const hit = importedSymbol(record, alias, parts[0]);
-      if (hit?.symbol?.members) return { record: hit.record, object: hit.symbol };
-    }
-  }
-  return null;
-}
-
-function inheritedMembers(record, object, visited = new Set()) {
-  if (!object) return [];
-  const key = `${record.uri.fsPath}|${object.name}`.toLowerCase();
-  if (visited.has(key)) return object.members || [];
-  visited.add(key);
-  const own = object.members || [];
-  const base = resolveObjectReference(record, object.baseRef);
-  if (!base) return own;
-  const inherited = inheritedMembers(base.record, base.object, visited);
-  const overridden = new Set(own.map(member => member.name));
-  return [...own, ...inherited.filter(member => !overridden.has(member.name))];
-}
-
-function memberFromHierarchy(record, object, memberName) {
-  const own = object?.members?.find(member => member.name === memberName);
-  if (own) return { record, symbol: own, parent: object };
-  const base = resolveObjectReference(record, object?.baseRef);
-  if (!base) return null;
-  const hit = memberFromHierarchy(base.record, base.object, memberName);
-  return hit ? { ...hit, inheritedBy: object } : null;
-}
-
-function containingObject(record, line) {
-  return record.symbols.find(symbol => symbol.members && symbol.line <= line && symbol.endLine >= line) || null;
-}
-
-function resolveInstanceMember(record, variableName, memberName, line = -1) {
+function resolveInstanceMember(record, variableName, memberName) {
   if (variableName === 'self') {
-    const object = line >= 0 ? containingObject(record, line) : record.symbols.find(symbol => symbol.members);
-    return object ? memberFromHierarchy(record, object, memberName) : null;
+    const object = record.symbols.find(s => s.members?.some(m => m.name === memberName));
+    const member = object?.members?.find(m => m.name === memberName);
+    return member ? { record, symbol: member, parent: object } : null;
   }
   const variable = record.symbols.find(s => s.kind === 'variable' && s.name === variableName);
   if (!variable) return null;
   const typeRef = variable.typeRef || inferTypeFromInitializer(record, variable.initializer);
   const resolved = resolveTypeObject(record, typeRef);
-  return resolved ? memberFromHierarchy(resolved.record, resolved.object, memberName) : null;
+  const member = resolved?.object?.members?.find(m => m.name === memberName);
+  return member ? { record: resolved.record, symbol: member, parent: resolved.object } : null;
 }
 
 function chainContext(document, position) {
@@ -575,17 +810,12 @@ function chainContext(document, position) {
   return { chain, word: wordRange ? document.getText(wordRange) : chain.at(-1) || '', range: wordRange, line, text };
 }
 
-function resolveChain(record, chain, line = -1) {
+function resolveChain(record, chain) {
   if (!chain.length) return null;
-  if (chain.length >= 2 && chain[0] === 'base') {
-    const object = containingObject(record, line);
-    const base = resolveObjectReference(record, object?.baseRef);
-    if (base) return memberFromHierarchy(base.record, base.object, chain[1]);
-  }
   if (chain.length >= 3 && record.imports.has(chain[0])) return importedSymbol(record, chain[0], chain[1], chain[2]);
   if (chain.length >= 2 && record.imports.has(chain[0])) return importedSymbol(record, chain[0], chain[1]);
   if (chain.length >= 2) {
-    const instance = resolveInstanceMember(record, chain[0], chain[1], line);
+    const instance = resolveInstanceMember(record, chain[0], chain[1]);
     if (instance) return instance;
     const object = record.symbols.find(s => s.name === chain[0] && s.members);
     const member = object?.members?.find(m => m.name === chain[1]);
@@ -945,6 +1175,8 @@ function lscssCompletionItems(document, position) {
 
 class CompletionProvider {
   provideCompletionItems(document, position) {
+    const importItems = importCompletionItems(document, position);
+    if (importItems) return importItems;
     const markupItems = lshtmlCompletionItems(document, position);
     if (markupItems) return markupItems;
     const styleItems = lscssCompletionItems(document, position);
@@ -964,12 +1196,7 @@ class CompletionProvider {
         return target ? target.exports.map(sym => completionFor(target, sym, `${base[0]}.`)) : [];
       }
       if (base.length === 1) {
-        if (base[0] === 'base') {
-          const object = containingObject(record, position.line);
-          const resolvedBase = resolveObjectReference(record, object?.baseRef);
-          if (resolvedBase) return inheritedMembers(resolvedBase.record, resolvedBase.object).filter(sym => sym.kind === 'method' && !sym.name.startsWith('_')).map(sym => completionFor(resolvedBase.record, sym, 'base.', resolvedBase.object));
-        }
-        const builtinItems = Object.entries(BUILTIN_DOCS).filter(([name]) => name.startsWith(`${base[0]}.`) && name !== 'base.method').map(([name, info]) => {
+        const builtinItems = Object.entries(BUILTIN_DOCS).filter(([name]) => name.startsWith(`${base[0]}.`)).map(([name, info]) => {
           const method = name.slice(base[0].length + 1);
           const item = new vscode.CompletionItem(method, vscode.CompletionItemKind.Function);
           item.detail = info[0];
@@ -986,10 +1213,10 @@ class CompletionProvider {
         if (variable) {
           const typeRef = variable.typeRef || inferTypeFromInitializer(record, variable.initializer);
           const resolved = resolveTypeObject(record, typeRef);
-          if (resolved) return inheritedMembers(resolved.record, resolved.object).filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(resolved.record, sym, `${base[0]}.`, resolved.object));
+          if (resolved) return resolved.object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(resolved.record, sym, `${base[0]}.`, resolved.object));
         }
         const object = record.symbols.find(s => s.name === base[0] && s.members);
-        if (object) return inheritedMembers(record, object).filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(record, sym, `${base[0]}.`, object));
+        if (object) return object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(record, sym, `${base[0]}.`, object));
       }
     }
     const items = KEYWORDS.map(keyword => new vscode.CompletionItem(keyword, vscode.CompletionItemKind.Keyword));
@@ -1006,6 +1233,15 @@ class CompletionProvider {
 
 class HoverProvider {
   provideHover(document, position) {
+    const importContext = importPathContext(document, position, false);
+    if (importContext) {
+      const resolved = resolveImport(importContext.full, document.uri.fsPath);
+      const md = new vscode.MarkdownString();
+      md.appendCodeblock(`use "${importContext.full}" as Alias`, 'lazyscriptex');
+      if (resolved) md.appendMarkdown(`\n**Resolved file:** \`${resolved}\`\n\n${fileExists(resolved) ? 'This module exists and can be opened with Go to Definition.' : 'This path does not currently point to an LSX file.'}`);
+      else md.appendMarkdown('\nThis named module root is not configured. Run **LazyScriptEX: Select LazyScript/API Folder** or configure `moduleRoots`.');
+      return new vscode.Hover(md);
+    }
     const ctx = chainContext(document, position);
     if (insideLshtml(document, position) && ctx.word && TAG_FUNCTIONS.has(ctx.word.toLowerCase())) {
       return new vscode.Hover(markdownForLshtmlTag(ctx.word.toLowerCase()));
@@ -1014,7 +1250,7 @@ class HoverProvider {
       return new vscode.Hover(markdownForLscssProperty(ctx.word));
     }
     const record = activeRecord(document);
-    const hit = resolveChain(record, ctx.chain, position.line);
+    const hit = resolveChain(record, ctx.chain);
     if (hit) return new vscode.Hover(markdownForSymbol(hit.record, hit.symbol, hit.parent));
     const builtinKey = ctx.chain.slice(-2).join('.');
     const builtin = BUILTIN_DOCS[builtinKey];
@@ -1034,6 +1270,11 @@ class HoverProvider {
 
 class DefinitionProvider {
   provideDefinition(document, position) {
+    const importContext = importPathContext(document, position, false);
+    if (importContext) {
+      const target = resolveImport(importContext.full, document.uri.fsPath);
+      if (target && fileExists(target)) return new vscode.Location(vscode.Uri.file(target), new vscode.Position(0, 0));
+    }
     const record = activeRecord(document);
     const ctx = chainContext(document, position);
     if (!ctx.chain.length) return null;
@@ -1043,7 +1284,7 @@ class DefinitionProvider {
       const target = indexedFile(resolveImport(imp.spec, record.uri.fsPath));
       if (target) return new vscode.Location(target.uri, new vscode.Position(0, 0));
     }
-    const hit = resolveChain(record, ctx.chain, position.line);
+    const hit = resolveChain(record, ctx.chain);
     if (hit) return symbolLocation(hit.record, hit.symbol);
     for (const r of index.values()) {
       const sym = r.exports.find(s => s.name === word);
@@ -1160,15 +1401,23 @@ class WorkspaceSymbolProvider {
 }
 
 function findProject(startFile) {
-  let dir = path.dirname(startFile);
-  while (true) {
-    const config = path.join(dir, 'lazyscriptex.json');
-    if (fs.existsSync(config)) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
+  const direct = findProjectConfigAbove(startFile);
+  return direct?.root || null;
+}
+
+async function selectProjectForFile(startFile) {
+  const direct = findProject(startFile);
+  if (direct) return direct;
+  const candidates = associatedProjectConfigs(startFile);
+  if (!candidates.length) return null;
+  if (candidates.length === 1) return candidates[0].root;
+  const picked = await vscode.window.showQuickPick(candidates.map(config => ({
+    label: path.basename(config.root),
+    description: config.root,
+    detail: config.entry ? `Entry: ${config.entry}` : config.configPath,
+    root: config.root
+  })), { placeHolder: 'This shared LSX file belongs to more than one executable project. Choose which project to build.' });
+  return picked?.root || null;
 }
 
 function compilerPath(startFile) {
@@ -1288,9 +1537,7 @@ async function checkDocument(document, showOutput = false) {
   const generation = ++lastCheckGeneration;
   const compiler = compilerPath(document.uri.fsPath);
   const project = findProject(document.uri.fsPath);
-  const args = project
-    ? [compiler, 'check-project', project, '--diagnostics=json']
-    : [compiler, 'check', document.uri.fsPath, '--diagnostics=json'];
+  const args = [compiler, 'check', document.uri.fsPath, ...compilerModuleRootArgs(document.uri.fsPath), '--diagnostics=json'];
   const result = await runProcess(args, project || path.dirname(document.uri.fsPath), 'LSX check', showOutput);
   if (generation !== lastCheckGeneration && !showOutput) return;
   const found = parseCompilerDiagnostics(result.text);
@@ -1317,11 +1564,11 @@ function scheduleCheck(document) {
 async function buildProject(runAfter = false) {
   const editor = vscode.window.activeTextEditor;
   if (!editor) return vscode.window.showErrorMessage('Open an LSX file first.');
-  const project = findProject(editor.document.uri.fsPath);
-  if (!project) return vscode.window.showErrorMessage('No lazyscriptex.json was found above the current file.');
+  const project = await selectProjectForFile(editor.document.uri.fsPath);
+  if (!project) return vscode.window.showErrorMessage('No lazyscriptex.json is associated with this file. Open the workspace containing the executable project, or add the shared folder through moduleRoots.');
   await editor.document.save();
   const compiler = compilerPath(editor.document.uri.fsPath);
-  const result = await runProcess([compiler, 'build', project, '--diagnostics=json'], project, 'LSX build');
+  const result = await runProcess([compiler, 'build', project, ...compilerModuleRootArgs(editor.document.uri.fsPath), '--diagnostics=json'], project, 'LSX build');
   const buildDiagnostics = parseCompilerDiagnostics(result.text);
   const buildProblemCount = applyCompilerDiagnostics(buildDiagnostics, editor.document, project);
   if (result.code !== 0) return vscode.window.showErrorMessage(`LazyScriptEX build failed with ${buildProblemCount || 1} compiler problem${buildProblemCount === 1 ? '' : 's'}. See Problems or Output.`);
@@ -1354,6 +1601,55 @@ async function buildProject(runAfter = false) {
     }
   } catch (err) {
     vscode.window.showErrorMessage(`Could not run project: ${err.message}`);
+  }
+}
+
+async function selectLazyScriptRoot() {
+  const picked = await vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    title: 'Select the LazyScript folder, its api folder, or the toolkit root'
+  });
+  if (!picked?.length) return;
+  const root = normalizeLazyScriptRoot(picked[0].fsPath);
+  if (!root) return vscode.window.showErrorMessage('That folder does not contain LazyScript bindings and compiler folders. Select LazyScript, LazyScript/api, or the toolkit root.');
+  const configuration = vscode.workspace.getConfiguration('lazyscriptex');
+  await configuration.update('lazyScriptRoot', root, vscode.ConfigurationTarget.Workspace);
+  const api = path.join(root, 'api', 'index.html');
+  if (fileExists(api)) await configuration.update('apiPath', api, vscode.ConfigurationTarget.Workspace);
+  await refreshIndex();
+  vscode.window.showInformationMessage(`LazyScriptEX root set to ${root}. @LazyScript imports, API opening, diagnostics, and path completion now use this folder.`);
+}
+
+async function selectApiPath() {
+  const picked = await vscode.window.showOpenDialog({
+    canSelectFiles: true,
+    canSelectFolders: true,
+    canSelectMany: false,
+    filters: { 'API page': ['html'] },
+    title: 'Select LazyScript/api or its index.html'
+  });
+  if (!picked?.length) return;
+  let selected = picked[0].fsPath;
+  if (directoryExists(selected)) selected = path.join(selected, 'index.html');
+  if (!fileExists(selected)) return vscode.window.showErrorMessage('No index.html was found at that API location.');
+  await vscode.workspace.getConfiguration('lazyscriptex').update('apiPath', selected, vscode.ConfigurationTarget.Workspace);
+  vscode.window.showInformationMessage(`LazyScriptEX offline API set to ${selected}.`);
+}
+
+class ImportCodeActionProvider {
+  provideCodeActions(_document, _range, context) {
+    const actions = [];
+    for (const diagnostic of context.diagnostics || []) {
+      if (String(diagnostic.code) !== 'LSX2101') continue;
+      const action = new vscode.CodeAction('Select LazyScript/API folder', vscode.CodeActionKind.QuickFix);
+      action.command = { command: 'lazyscriptex.selectLazyScriptRoot', title: 'Select LazyScript/API folder' };
+      action.diagnostics = [diagnostic];
+      action.isPreferred = true;
+      actions.push(action);
+    }
+    return actions;
   }
 }
 
@@ -1421,6 +1717,8 @@ async function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand('lazyscriptex.createProject', createProject));
   context.subscriptions.push(vscode.commands.registerCommand('lazyscriptex.showOutput', () => output.show(true)));
   context.subscriptions.push(vscode.commands.registerCommand('lazyscriptex.explainSymbol', () => vscode.commands.executeCommand('editor.action.showHover')));
+  context.subscriptions.push(vscode.commands.registerCommand('lazyscriptex.selectLazyScriptRoot', selectLazyScriptRoot));
+  context.subscriptions.push(vscode.commands.registerCommand('lazyscriptex.selectApiPath', selectApiPath));
 
   const selector = { language: LANGUAGE, scheme: 'file' };
   const completionTriggers = ['.', '<', '/', ' ', '=', '"', '{', '-', ...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'];
@@ -1432,6 +1730,7 @@ async function activate(context) {
   context.subscriptions.push(vscode.languages.registerSignatureHelpProvider(selector, new SignatureProvider(), '(', ','));
   context.subscriptions.push(vscode.languages.registerDocumentSymbolProvider(selector, new DocumentSymbolProvider()));
   context.subscriptions.push(vscode.languages.registerWorkspaceSymbolProvider(new WorkspaceSymbolProvider()));
+  context.subscriptions.push(vscode.languages.registerCodeActionsProvider(selector, new ImportCodeActionProvider(), { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }));
 
   watcher = vscode.workspace.createFileSystemWatcher('**/*.lsx');
   watcher.onDidCreate(indexUri);
@@ -1453,17 +1752,19 @@ async function activate(context) {
   }));
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(refreshIndex));
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
-    if (event.affectsConfiguration('lazyscriptex.lazyScriptRoot') || event.affectsConfiguration('lazyscriptex.exclude')) refreshIndex();
+    if (event.affectsConfiguration('lazyscriptex.lazyScriptRoot') || event.affectsConfiguration('lazyscriptex.moduleRoots') || event.affectsConfiguration('lazyscriptex.exclude')) refreshIndex();
   }));
 
   await refreshIndex();
 }
 
 function deactivate() {
+  for (const external of externalWatchers) external.dispose?.();
+  externalWatchers = [];
   for (const timer of checkTimers.values()) clearTimeout(timer);
   checkTimers.clear();
 }
 module.exports = {
   activate, deactivate, parseText, resolveImport, chainContext, inferTypeFromInitializer,
-  _test: { index, loadRecordSync, importedSymbol, resolveChain, resolveInstanceMember, inheritedMembers, memberFromHierarchy, resolveObjectReference, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, HoverProvider, parseCompilerDiagnostics }
+  _test: { index, loadRecordSync, importedSymbol, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, HoverProvider, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs }
 };

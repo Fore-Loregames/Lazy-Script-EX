@@ -160,7 +160,7 @@ assert(!audio.includes('table<'), 'generated audio still exposes a typed collect
 assert(!fs.existsSync(path.join(lazy, 'bindings', 'Platform', 'WICImage.lsx')), 'WIC should not be active');
 const api = JSON.parse(fs.readFileSync(path.join(lazy, 'api', 'api-data.json'), 'utf8'));
 assert(api.stats.total >= 9000, 'offline HTML API is incomplete');
-assert(fs.existsSync(path.join(toolkit, 'LazyScriptEX-Native-GameKit-0.18.0.vsix')), 'VS Code VSIX missing');
+assert(fs.existsSync(path.join(toolkit, 'LazyScriptEX-Native-GameKit-0.18.2.vsix')), 'VS Code VSIX missing');
 assert(fs.existsSync(path.join(toolkit, 'INSTALL_VSCODE_EXTENSION.bat')), 'VS Code extension installer missing');
 assert(api.stats.modules['System/Threading'] > 0, 'threading API is missing from offline docs');
 assert(api.stats.modules['Network/Sockets'] > 0, 'socket API is missing from offline docs');
