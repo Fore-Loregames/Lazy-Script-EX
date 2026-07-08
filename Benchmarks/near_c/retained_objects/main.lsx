@@ -1,0 +1,31 @@
+const Pair = {
+    x:i64 = 0
+    y:i64 = 0
+}
+
+fn main() -> i32
+    local items:table<Pair> = {}
+    local checksum:i64 = 0
+    local round:i64 = 0
+    while round < 250000 do
+        local index:i64 = 0
+        while index < 128 do
+            local item = Pair.new()
+            item.x = round + index
+            item.y = item.x * 3 + 7
+            items.push(item)
+            index = index + 1
+        end
+        index = 0
+        while index < items.count() do
+            local retained = items.at(index)
+            checksum = checksum + retained.x + retained.y
+            retained.destroy()
+            index = index + 1
+        end
+        items.clear()
+        round = round + 1
+    end
+    if checksum == 0 then return 1 end
+    return 0
+end

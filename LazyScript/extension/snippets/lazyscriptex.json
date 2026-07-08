@@ -1,0 +1,444 @@
+{
+  "Native GLFW game project": {
+    "prefix": "lsx-game",
+    "body": [
+      "use \"@LazyScript/bindings/GLFW/GLFW.lsx\" as GLFW",
+      "use \"@LazyScript/bindings/OpenGL/OpenGL46.lsx\" as GL",
+      "",
+      "fn main()",
+      "    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return 1 end",
+      "    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR, 4)",
+      "    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR, 6)",
+      "    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE, GLFW.GLFW_OPENGL_CORE_PROFILE)",
+      "    local window = GLFW.glfwCreateWindow(1280, 720, \"${1:My LSX Game}\", 0, 0)",
+      "    if window == 0 then return 1 end",
+      "    GLFW.glfwMakeContextCurrent(window)",
+      "    GL.lsxLoadOpenGL()",
+      "    local framebuffer = GLFW.FramebufferSize.new()",
+      "    while GLFW.glfwWindowShouldClose(window) == 0 do",
+      "        framebuffer.refresh(window)",
+      "        GL.glViewport(0, 0, framebuffer.width, framebuffer.height)",
+      "        GL.glClearColor(${2:0.03}, ${3:0.04}, ${4:0.07}, 1.0)",
+      "        GL.glClear(GL.GL_COLOR_BUFFER_BIT)",
+      "        GLFW.glfwSwapBuffers(window)",
+      "        GLFW.glfwPollEvents()",
+      "    end",
+      "    framebuffer.destroy()",
+      "    GLFW.glfwDestroyWindow(window)",
+      "    GLFW.glfwTerminate()",
+      "    GLFW.lsxUnloadLibraries()",
+      "    return 0",
+      "end"
+    ],
+    "description": "Complete GLFW/OpenGL LSX entry point without per-frame output allocations"
+  },
+  "Reusable framebuffer size": {
+    "prefix": "glfw-framebuffer-size",
+    "body": [
+      "local framebuffer = GLFW.FramebufferSize.new()",
+      "framebuffer.refresh(window)",
+      "GL.glViewport(0, 0, framebuffer.width, framebuffer.height)",
+      "$0",
+      "framebuffer.destroy()"
+    ],
+    "description": "Typed GLFW framebuffer size output"
+  },
+  "OpenGL resource helpers": {
+    "prefix": "gl-resources",
+    "body": [
+      "local vao = GL.createVertexArray()",
+      "local vbo = GL.createBuffer()",
+      "local texture = GL.createTexture()",
+      "$0",
+      "GL.deleteTexture(texture)",
+      "GL.deleteBuffer(vbo)",
+      "GL.deleteVertexArray(vao)"
+    ],
+    "description": "Create and delete scalar OpenGL resources without scratch pointers"
+  },
+  "Packed OpenGL geometry": {
+    "prefix": "lsx-packed-geometry",
+    "body": [
+      "local vertices = {",
+      "    ${1:-1.0},${2:-1.0},${3:0.0},",
+      "    ${4:1.0},${5:-1.0},${6:0.0},",
+      "    ${7:0.0},${8:1.0},${9:0.0}",
+      "}",
+      "local indices = {0,1,2}",
+      "GL.glBufferData(GL.GL_ARRAY_BUFFER,vertices.byte_length(),vertices,GL.GL_STATIC_DRAW)",
+      "GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER,indices.byte_length(),indices,GL.GL_STATIC_DRAW)",
+      "$0",
+      "indices.destroy()",
+      "vertices.destroy()"
+    ],
+    "description": "Use normal LSX literals for compiler-inferred packed f32 vertex and u32 index data"
+  },
+  "OpenAL source and buffer": {
+    "prefix": "openal-source",
+    "body": [
+      "local buffer = AL.createBuffer()",
+      "local source = AL.createSource()",
+      "$0",
+      "AL.deleteSource(source)",
+      "AL.deleteBuffer(buffer)"
+    ],
+    "description": "OpenAL scalar resource helpers"
+  },
+  "Window icon RGBA": {
+    "prefix": "glfw-icon",
+    "body": [
+      "GLFW.setWindowIconRGBA(window, ${1:32}, ${2:32}, ${3:pixels})"
+    ],
+    "description": "Set a GLFW window icon from RGBA pixels"
+  },
+  "Native worker thread": {
+    "prefix": "lsx-thread",
+    "body": [
+      "use \"@LazyScript/bindings/System/Threading.lsx\" as Threading",
+      "",
+      "const ${1:Work} = {",
+      "    ${2:value} = 0",
+      "}",
+      "",
+      "fn ${3:worker}(work)",
+      "    ${4:-- worker code}",
+      "    return 0",
+      "end",
+      "",
+      "local work = ${1:Work}.new()",
+      "local task = Threading.Thread.start(${3:worker},work)",
+      "task.join()",
+      "task.close()",
+      "$0",
+      "work.destroy()"
+    ],
+    "description": "Start and join a real native LSX worker thread"
+  },
+  "Native TCP client": {
+    "prefix": "lsx-tcp-client",
+    "body": [
+      "use \"@LazyScript/bindings/Network/Sockets.lsx\" as Sockets",
+      "",
+      "if not Sockets.initialize() then return 1 end",
+      "local socket = Sockets.Socket.connect(\"${1:127.0.0.1}\",\"${2:7777}\")",
+      "if socket.valid() then",
+      "    socket.send_text(\"${3:hello}\",0)",
+      "    local reply = socket.receive(${4:4096},0)",
+      "    $0",
+      "    reply.destroy()",
+      "    socket.close()",
+      "end",
+      "socket.destroy()",
+      "Sockets.cleanup()"
+    ],
+    "description": "Connect and exchange typed data through native WinSock2 TCP"
+  },
+  "Native HTTPS GET": {
+    "prefix": "lsx-http-get",
+    "body": [
+      "use \"@LazyScript/bindings/Network/Http.lsx\" as Http",
+      "",
+      "local client = Http.Client.create(\"${1:MyGame/1.0}\")",
+      "client.set_timeout(${2:15000})",
+      "local response = client.get(\"${3:example.com}\",\"${4:/}\",true)",
+      "if response.succeeded() then",
+      "    local text = response.text()",
+      "    $0",
+      "end",
+      "response.close()",
+      "response.destroy()",
+      "client.close()",
+      "client.destroy()"
+    ],
+    "description": "Perform a native WinHTTP HTTPS GET"
+  },
+  "Native file read": {
+    "prefix": "lsx-file-read",
+    "body": [
+      "use \"@LazyScript/bindings/System/File.lsx\" as File",
+      "",
+      "local loaded = File.read_text(\"${1:Game/Assets/settings.json}\")",
+      "if loaded.ok then",
+      "    local text = loaded.text()",
+      "    $0",
+      "end",
+      "loaded.destroy()"
+    ],
+    "description": "Read an owned UTF-8 file through the native LSX file API"
+  },
+  "Native JSON load": {
+    "prefix": "lsx-json-load",
+    "body": [
+      "use \"@LazyScript/bindings/Data/Json.lsx\" as Json",
+      "",
+      "local document = Json.load(\"${1:Game/Assets/settings.json}\")",
+      "if document.valid then",
+      "    local value = document.get(document.root,\"${2:key}\")",
+      "    $0",
+      "end",
+      "document.destroy()"
+    ],
+    "description": "Load and query an LSX-native JSON document"
+  },
+  "Raw multiline string": {
+    "prefix": "lsx-raw-string",
+    "body": [
+      "local ${1:text} = `{",
+      "    \"name\": \"${2:LazyScriptEX}\",",
+      "    \"enabled\": true",
+      "}`",
+      "$0"
+    ],
+    "description": "Embed quote-heavy or multiline text without escaping double quotes"
+  },
+  "Deep JSON file traversal": {
+    "prefix": "lsx-json-traverse",
+    "body": [
+      "use \"@LazyScript/bindings/Data/Json.lsx\" as Json",
+      "",
+      "local document = Json.load(\"${1:assets/data.json}\")",
+      "if not document.valid then return 1 end",
+      "local array = document.get(document.root,\"${2:items}\")",
+      "local index = 0",
+      "while index < document.count(array) do",
+      "    local item = document.at(array,index)",
+      "    console.write_line(document.get_string(item,\"${3:name}\",\"unnamed\"))",
+      "    index = index + 1",
+      "end",
+      "$0",
+      "document.destroy()"
+    ],
+    "description": "Load a real JSON asset and traverse an array with a while loop"
+  },
+  "Native image texture": {
+    "prefix": "lsx-texture",
+    "body": [
+      "use \"@LazyScript/bindings/OpenGL/OpenGL46.lsx\" as GL",
+      "use \"@LazyScript/bindings/Graphics/Texture2D.lsx\" as Texture2D",
+      "",
+      "local texture = Texture2D.load_ui(\"${1:assets/texture.png}\")",
+      "if not texture.valid() then",
+      "    console.error_line(texture.error())",
+      "    return 1",
+      "end",
+      "GL.glBindTexture(GL.GL_TEXTURE_2D,texture.id)",
+      "$0",
+      "texture.destroy()"
+    ],
+    "description": "Copy stb_image RGBA bytes through the compiler table API and upload through the example 04 OpenGL path"
+  },
+  "Native flipped image texture": {
+    "prefix": "lsx-texture-flipped",
+    "body": [
+      "use \"@LazyScript/bindings/OpenGL/OpenGL46.lsx\" as GL",
+      "use \"@LazyScript/bindings/Graphics/Texture2D.lsx\" as Texture2D",
+      "",
+      "local texture = Texture2D.load_ui_flipped(\"${1:assets/texture.png}\")",
+      "if not texture.valid() then",
+      "    console.error_line(texture.error())",
+      "    return 1",
+      "end",
+      "GL.glBindTexture(GL.GL_TEXTURE_2D,texture.id)",
+      "$0",
+      "texture.destroy()"
+    ],
+    "description": "Load a UI texture for meshes that use V=0 at the bottom and V=1 at the top"
+  },
+  "Direct stb_image decode": {
+    "prefix": "lsx-stb-image",
+    "body": [
+      "use \"@LazyScript/bindings/Graphics/STBImage.lsx\" as STBImage",
+      "",
+      "local image = STBImage.load(\"${1:assets/texture.png}\")",
+      "if not image.valid() then",
+      "    console.error_line(image.error())",
+      "    return 1",
+      "end",
+      "local firstRGBA = image.rgba32(0)",
+      "$0",
+      "image.destroy()"
+    ],
+    "description": "Decode an image for CPU-side pixel access while preserving stb_image row order"
+  },
+  "Direct FreeType face": {
+    "prefix": "lsx-freetype",
+    "body": [
+      "use \"@LazyScript/bindings/Text/FreeType.lsx\" as FreeType",
+      "",
+      "local face = FreeType.load(\"${1:C:/Windows/Fonts/segoeui.ttf}\",${2:64})",
+      "if not face.valid() then",
+      "    console.error_line(face.error())",
+      "    return 1",
+      "end",
+      "if not face.load_char(${3:65},FreeType.RENDER_SDF) then",
+      "    console.error_line(face.error())",
+      "    face.destroy()",
+      "    return 1",
+      "end",
+      "$0",
+      "face.destroy()"
+    ],
+    "description": "Load and rasterize a glyph through FreeType"
+  },
+  "FreeType SDF font": {
+    "prefix": "lsx-sdf-font",
+    "body": [
+      "use \"@LazyScript/bindings/Text/Font.lsx\" as Font",
+      "",
+      "local face = Font.system(\"${1:Segoe UI}\",${2:64})",
+      "if not face.valid() then",
+      "    console.error_line(face.error())",
+      "    return 1",
+      "end",
+      "local atlas = Font.create_ascii_atlas(face)",
+      "if not atlas.valid() then",
+      "    console.error_line(atlas.error())",
+      "    face.destroy()",
+      "    return 1",
+      "end",
+      "local texture = Font.upload_atlas(atlas)",
+      "if not texture.valid() then",
+      "    console.error_line(texture.error())",
+      "    atlas.destroy()",
+      "    face.destroy()",
+      "    return 1",
+      "end",
+      "local mesh = Font.build_text(face,atlas,\"${3:Hello LSX}\",${4:24},${5:24},${6:1})",
+      "if not mesh.valid() then return 1 end",
+      "$0",
+      "mesh.destroy()",
+      "texture.destroy()",
+      "atlas.destroy()",
+      "face.destroy()"
+    ],
+    "description": "Build and upload a FreeType SDF atlas and one batched text mesh"
+  },
+  "GLM camera": {
+    "prefix": "lsx-glm-camera",
+    "body": [
+      "use \"@LazyScript/bindings/Math/GLM.lsx\" as GLM",
+      "use \"@LazyScript/bindings/Math/Camera.lsx\" as Camera",
+      "",
+      "local camera = Camera.create()",
+      "camera.set_position(${1:4.0},${2:3.0},${3:6.0})",
+      "camera.set_target(${4:0.0},${5:0.0},${6:0.0})",
+      "camera.set_perspective(${7:60.0},${8:16.0/9.0},${9:0.1},${10:1000.0})",
+      "local view = camera.view()",
+      "local projection = camera.projection()",
+      "$0",
+      "projection.destroy()",
+      "view.destroy()",
+      "camera.destroy()"
+    ],
+    "description": "Create an LSX-first GLM perspective camera and its view/projection matrices"
+  },
+  "GLM TRS transform": {
+    "prefix": "lsx-glm-trs",
+    "body": [
+      "use \"@LazyScript/bindings/Math/GLM.lsx\" as GLM",
+      "",
+      "local position = GLM.vec3(${1:0.0},${2:0.0},${3:0.0})",
+      "local axis = GLM.vec3_up()",
+      "local rotation = GLM.quat_angle_axis(GLM.radians(${4:45.0}),axis)",
+      "local scale = GLM.vec3(${5:1.0},${6:1.0},${7:1.0})",
+      "local model = GLM.trs(position,rotation,scale)",
+      "$0",
+      "model.destroy()",
+      "scale.destroy()",
+      "rotation.destroy()",
+      "axis.destroy()",
+      "position.destroy()"
+    ],
+    "description": "Build a wrapped GLM translation/rotation/scale matrix using LSX objects"
+  },
+  "GLM matrix uniforms": {
+    "prefix": "lsx-glm-uniforms",
+    "body": [
+      "use \"@LazyScript/bindings/Math/OpenGL.lsx\" as GLMOpenGL",
+      "",
+      "GLMOpenGL.uniform_mat4(${1:modelLocation},${2:model})",
+      "GLMOpenGL.uniform_mat4(${3:viewLocation},${4:view})",
+      "GLMOpenGL.uniform_mat4(${5:projectionLocation},${6:projection})$0"
+    ],
+    "description": "Upload wrapped GLM matrices directly to OpenGL uniforms"
+  },
+  "Inline LSHTML component": {
+    "prefix": "lsx-lshtml",
+    "body": [
+      "lshtml ${1:inspector}(${2:props}) = {(",
+      "    <panel id=\"${3:inspector}\" class=\"${4:inspector}\">",
+      "        <label class=\"heading\">{${2:props}.${5:title}}</label>",
+      "        <button class=\"primary\" onclick={${6:on_click}} context={${2:props}}>${7:Apply}</button>",
+      "    </panel>",
+      ")}",
+      "$0"
+    ],
+    "description": "Declare a cached LSHTML tree directly inside an LSX file"
+  },
+  "Inline LSCSS style": {
+    "prefix": "lsx-lscss",
+    "body": [
+      "lscss .${1:inspector} = {",
+      "    display = flex",
+      "    flex_direction = column",
+      "    width = {${2:props.width}}",
+      "    padding = ${3:12px}",
+      "    gap = ${4:8px}",
+      "    background = ${5:linear-gradient(135deg, #181b22, #222938)}",
+      "    border = ${6:1px solid #303746}",
+      "    border_radius = ${7:8px}",
+      "    box_shadow = ${8:0px 8px 24px 0px #00000066}",
+      "}",
+      "$0"
+    ],
+    "description": "Declare native LSCSS with CSS styling and direct {lsxVar} values inside an LSX file"
+  },
+  "Declarative LazyUI canvas": {
+    "prefix": "lsx-ui-canvas",
+    "body": [
+      "lscss #${1:preview} = {",
+      "    width = \"100%\"",
+      "    height = \"360px\"",
+      "    overflow = \"hidden\"",
+      "    background = \"linear-gradient(135deg, #101827, #090d14)\"",
+      "    border = \"1px solid #35445f\"",
+      "    border_radius = \"12px\"",
+      "}",
+      "",
+      "lscss .${2:preview-shape} = {",
+      "    background = {${3:props.accent}}",
+      "    border = \"2px solid #8fb0ff\"",
+      "    border_radius = \"16px\"",
+      "    box_shadow = \"0 10px 28px 0 rgba(0,0,0,0.35)\"",
+      "}",
+      "",
+      "<canvas id=\"${1:preview}\">",
+      "    <rect class=\"${2:preview-shape}\" x=\"24\" y=\"24\" width=\"300\" height=\"180\" />",
+      "    <circle class=\"${2:preview-shape}\" cx=\"410\" cy=\"114\" r=\"62\" />",
+      "    <canvas-text class=\"${4:canvas-title}\" x=\"48\" y=\"70\">${5:LazyUI canvas}</canvas-text>",
+      "</canvas>",
+      "$0"
+    ],
+    "description": "Declare canvas shapes in LSHTML and style them entirely through LSCSS; no context drawing commands"
+  },
+  "LazyUI document and renderer": {
+    "prefix": "lsx-ui-renderer",
+    "body": [
+      "use \"@LazyScript/bindings/UI/LazyUI.lsx\" as UI",
+      "use \"@LazyScript/bindings/UI/Renderer.lsx\" as UIRenderer",
+      "",
+      "local root = ${1:view}(${2:props})",
+      "local document = UI.document(root)",
+      "local renderer = UIRenderer.create()",
+      "renderer.initialize()",
+      "document.resize(framebuffer.width,framebuffer.height)",
+      "renderer.begin(framebuffer.width,framebuffer.height)",
+      "renderer.submit(root)",
+      "renderer.flush()",
+      "$0",
+      "document.destroy()",
+      "renderer.destroy()"
+    ],
+    "description": "Create and render a retained LazyUI tree without exposed pointers"
+  }
+}

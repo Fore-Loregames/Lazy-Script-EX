@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/23_text_logging.exe",
+  "subsystem": "console",
+  "optimization": 6
+}

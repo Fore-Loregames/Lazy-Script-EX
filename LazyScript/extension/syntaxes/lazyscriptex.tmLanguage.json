@@ -1,0 +1,636 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "LazyScriptEX",
+  "scopeName": "source.lazyscriptex",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#dotParameterTypes"
+    },
+    {
+      "include": "#uiDeclarations"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#imports"
+    },
+    {
+      "include": "#externs"
+    },
+    {
+      "include": "#tableDeclarations"
+    },
+    {
+      "include": "#structDeclarations"
+    },
+    {
+      "include": "#tableFunctions"
+    },
+    {
+      "include": "#functions"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#builtins"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#fields"
+    },
+    {
+      "include": "#calls"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.lazyscriptex",
+          "begin": "--\\[\\[",
+          "end": "\\]\\]"
+        },
+        {
+          "name": "comment.line.double-dash.lazyscriptex",
+          "match": "--.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.other.raw.lazyscriptex",
+          "begin": "`",
+          "end": "`"
+        },
+        {
+          "name": "string.quoted.double.lazyscriptex",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.lazyscriptex",
+              "match": "\\\\(?:[\\\\\"nrt]|u[0-9A-Fa-f]{4})"
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.integer.hexadecimal.lazyscriptex",
+          "match": "\\b0[xX][0-9A-Fa-f]+\\b"
+        },
+        {
+          "name": "constant.numeric.float.lazyscriptex",
+          "match": "(?<![A-Za-z0-9_])(?:[0-9]+\\.[0-9]*|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?[fF]?\\b|\\b[0-9]+[eE][+-]?[0-9]+[fF]?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.decimal.lazyscriptex",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "imports": {
+      "patterns": [
+        {
+          "name": "meta.import.lazyscriptex",
+          "match": "\\b(use)\\s+(\"(?:[^\"\\\\]|\\\\.)*\")\\s+(as)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.import.lazyscriptex"
+            },
+            "2": {
+              "name": "string.quoted.double.lazyscriptex"
+            },
+            "3": {
+              "name": "keyword.control.import.lazyscriptex"
+            },
+            "4": {
+              "name": "entity.name.namespace.lazyscriptex"
+            }
+          }
+        }
+      ]
+    },
+    "externs": {
+      "patterns": [
+        {
+          "name": "meta.function.external.lazyscriptex",
+          "match": "\\b(export\\s+)?(extern)\\s+(\"(?:[^\"\\\\]|\\\\.)*\")\\s+(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "storage.modifier.export.lazyscriptex"
+            },
+            "2": {
+              "name": "storage.modifier.extern.lazyscriptex"
+            },
+            "3": {
+              "name": "string.quoted.double.lazyscriptex"
+            },
+            "4": {
+              "name": "storage.type.function.lazyscriptex"
+            },
+            "5": {
+              "name": "entity.name.function.foreign.lazyscriptex"
+            }
+          }
+        }
+      ]
+    },
+    "tableDeclarations": {
+      "patterns": [
+        {
+          "name": "meta.table.declaration.lazyscriptex",
+          "match": "\\b(export\\s+)?(const)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?:(:)\\s*(base)\\s*(\\()\\s*([A-Za-z_][A-Za-z0-9_.]*)\\s*(\\)))?\\s*=\\s*(\\{)",
+          "captures": {
+            "1": {
+              "name": "storage.modifier.export.lazyscriptex"
+            },
+            "2": {
+              "name": "storage.modifier.const.lazyscriptex"
+            },
+            "3": {
+              "name": "entity.name.type.table.lazyscriptex"
+            },
+            "4": {
+              "name": "punctuation.separator.inheritance.lazyscriptex"
+            },
+            "5": {
+              "name": "keyword.other.inheritance.lazyscriptex"
+            },
+            "6": {
+              "name": "punctuation.section.group.begin.lazyscriptex"
+            },
+            "7": {
+              "name": "entity.other.inherited-class.lazyscriptex"
+            },
+            "8": {
+              "name": "punctuation.section.group.end.lazyscriptex"
+            },
+            "9": {
+              "name": "punctuation.section.block.begin.lazyscriptex"
+            }
+          }
+        }
+      ]
+    },
+    "tableFunctions": {
+      "patterns": [
+        {
+          "name": "meta.function.table-member.lazyscriptex",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\.([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(fn)\\b",
+          "captures": {
+            "1": {
+              "name": "entity.name.namespace.lazyscriptex"
+            },
+            "2": {
+              "name": "entity.name.function.lazyscriptex"
+            },
+            "3": {
+              "name": "storage.type.function.lazyscriptex"
+            }
+          }
+        },
+        {
+          "name": "meta.function.table-literal-member.lazyscriptex",
+          "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(fn)\\b",
+          "captures": {
+            "1": {
+              "name": "entity.name.function.lazyscriptex"
+            },
+            "2": {
+              "name": "storage.type.function.lazyscriptex"
+            }
+          }
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "meta.function.definition.lazyscriptex",
+          "match": "\\b(export\\s+)?(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "storage.modifier.export.lazyscriptex"
+            },
+            "2": {
+              "name": "storage.type.function.lazyscriptex"
+            },
+            "3": {
+              "name": "entity.name.function.lazyscriptex"
+            }
+          }
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.primitive.lazyscriptex",
+          "match": "\\b(int|uint|float|i8|u8|i16|u16|i32|u32|i64|u64|f32|byte|sbyte|short|ushort|bool|ptr|handle|fnptr|string|void)\\b"
+        },
+        {
+          "name": "storage.type.container.lazyscriptex",
+          "match": "\\btable(?=\\s*<)"
+        },
+        {
+          "name": "entity.name.type.lazyscriptex",
+          "match": "\\b[A-Z][A-Za-z0-9_]*(?=\\s*(?:[>,)]|[A-Za-z_][A-Za-z0-9_]*\\s*[:=]))"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "storage.modifier.lazyscriptex",
+          "match": "\\b(export|local|const|extern|struct|lshtml|lscss)\\b"
+        },
+        {
+          "name": "keyword.control.lazyscriptex",
+          "match": "\\b(use|as|fn|return|if|then|elseif|else|end|while|for|in|do|break|not|and|or|base)\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.class.lazyscriptex",
+          "match": "\\b(window|console|memory|simd|debug|system|string|thread|ffi)\\b"
+        },
+        {
+          "name": "meta.function.builtin.lazyscriptex",
+          "match": "\\b(window|console|memory|simd|debug|system|string|thread|ffi)\\.(create|poll|is_open|handle|hinstance|destroy|open|write|write_line|error|error_line|wait|close|alloc|free|ptr|write_u8|write_u16|write_u32|write_u64|read_u8|read_u16|read_u32|read_u64|copy_f32x4|add_f32x4|sub_f32x4|mul_f32x4|madd_f32x4|scale_f32x4|dot_f32x4|message|output|sleep|exit|length|start|start_with_stack|join|is_finished|exit_code|current_id|id|current_handle|yield|cpu_count|set_priority|call0|call1|call2|call3|call4|call5|call6|call7|call8)\\b",
+          "captures": {
+            "1": {
+              "name": "support.class.lazyscriptex"
+            },
+            "2": {
+              "name": "support.function.builtin.lazyscriptex"
+            }
+          }
+        },
+        {
+          "name": "support.function.table.lazyscriptex",
+          "match": "(?<=\\.)(new|clone|destroy|push|get|length|count|capacity|byte_length|bytes|data|data_at|is_empty|reserve|resize|remove|remove_fast|pop|clear|add|add_copy|at|first|last|remove_at|remove_swap)\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.lazyscriptex",
+          "match": "\\b(true|false|null)\\b"
+        },
+        {
+          "name": "constant.other.lazyscriptex",
+          "match": "\\b[A-Z][A-Z0-9_]+\\b"
+        }
+      ]
+    },
+    "fields": {
+      "patterns": [
+        {
+          "name": "variable.language.self.lazyscriptex",
+          "match": "\\bself\\b"
+        },
+        {
+          "name": "variable.language.base.lazyscriptex",
+          "match": "\\bbase\\b"
+        },
+        {
+          "name": "variable.other.member.lazyscriptex",
+          "match": "(?<=\\.)[A-Za-z_][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "variable.other.member.declaration.lazyscriptex",
+          "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(?=:)"
+        },
+        {
+          "name": "variable.other.member.declaration.inferred.lazyscriptex",
+          "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(?==)",
+          "captures": {
+            "1": {
+              "name": "variable.other.member.lazyscriptex"
+            }
+          }
+        }
+      ]
+    },
+    "calls": {
+      "patterns": [
+        {
+          "name": "entity.name.function.call.lazyscriptex",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()"
+        },
+        {
+          "name": "entity.name.namespace.lazyscriptex",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\.)"
+        }
+      ]
+    },
+    "structDeclarations": {
+      "patterns": [
+        {
+          "name": "meta.struct.declaration.lazyscriptex",
+          "match": "\\b(export\\s+)?(struct)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "storage.modifier.export.lazyscriptex"
+            },
+            "2": {
+              "name": "storage.type.struct.lazyscriptex"
+            },
+            "3": {
+              "name": "entity.name.type.struct.lazyscriptex"
+            }
+          }
+        }
+      ]
+    },
+    "uiDeclarations": {
+      "patterns": [
+        {
+          "name": "meta.declaration.lshtml.lazyscriptex",
+          "begin": "\\b(?:(export)\\s+)?(lshtml)\\s+([A-Za-z_][A-Za-z0-9_]*)(\\s*\\([^)]*\\))?\\s*(=)\\s*(\\{)\\s*(\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "storage.modifier.export.lazyscriptex"
+            },
+            "2": {
+              "name": "keyword.declaration.lshtml.lazyscriptex"
+            },
+            "3": {
+              "name": "entity.name.function.ui.lazyscriptex"
+            },
+            "4": {
+              "name": "meta.function.parameters.lazyscriptex"
+            },
+            "5": {
+              "name": "keyword.operator.assignment.lazyscriptex"
+            },
+            "6": {
+              "name": "punctuation.section.block.begin.lazyscriptex"
+            },
+            "7": {
+              "name": "punctuation.section.embedded.begin.lazyscriptex"
+            }
+          },
+          "end": "(\\))\\s*(\\})",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.embedded.end.lazyscriptex"
+            },
+            "2": {
+              "name": "punctuation.section.block.end.lazyscriptex"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#uiTags"
+            },
+            {
+              "include": "#uiExpressions"
+            }
+          ]
+        },
+        {
+          "name": "meta.declaration.lscss.lazyscriptex",
+          "begin": "^\\s*(?:(export)\\s+)?(lscss)\\s+(.+?)\\s*(=)\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "storage.modifier.export.lazyscriptex"
+            },
+            "2": {
+              "name": "keyword.declaration.lscss.lazyscriptex"
+            },
+            "3": {
+              "name": "meta.selector.lscss.lazyscriptex"
+            },
+            "4": {
+              "name": "keyword.operator.assignment.lazyscriptex"
+            },
+            "5": {
+              "name": "punctuation.section.block.begin.lazyscriptex"
+            }
+          },
+          "end": "^\\s*(\\})",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.block.end.lazyscriptex"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#lscssNested"
+            },
+            {
+              "include": "#lscssProperties"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#uiExpressions"
+            }
+          ]
+        }
+      ]
+    },
+    "uiTags": {
+      "patterns": [
+        {
+          "name": "meta.tag.lshtml.lazyscriptex",
+          "begin": "(<)(/?)([A-Za-z_][A-Za-z0-9_-]*)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.tag.begin.lazyscriptex"
+            },
+            "2": {
+              "name": "punctuation.definition.tag.slash.lazyscriptex"
+            },
+            "3": {
+              "name": "entity.name.tag.lazyscriptex"
+            }
+          },
+          "end": "(/?>)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.tag.end.lazyscriptex"
+            }
+          },
+          "patterns": [
+            {
+              "name": "entity.other.attribute-name.lazyscriptex",
+              "match": "\\b[A-Za-z_:][A-Za-z0-9_:.-]*(?=\\s*(?:=|/?>))"
+            },
+            {
+              "name": "keyword.operator.assignment.lazyscriptex",
+              "match": "="
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#uiExpressions"
+            }
+          ]
+        }
+      ]
+    },
+    "uiExpressions": {
+      "patterns": [
+        {
+          "name": "meta.embedded.expression.lazyscriptex",
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.embedded.begin.lazyscriptex"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.embedded.end.lazyscriptex"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#types"
+            },
+            {
+              "include": "#keywords"
+            },
+            {
+              "include": "#builtins"
+            },
+            {
+              "include": "#constants"
+            },
+            {
+              "include": "#fields"
+            },
+            {
+              "include": "#calls"
+            }
+          ]
+        }
+      ]
+    },
+    "lscssProperties": {
+      "patterns": [
+        {
+          "name": "support.type.property-name.lscss.lazyscriptex",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_-]*(?=\\s*(?:=|:))"
+        },
+        {
+          "name": "keyword.operator.assignment.lazyscriptex",
+          "match": "=|:"
+        },
+        {
+          "name": "constant.other.color.lazyscriptex",
+          "match": "#[0-9A-Fa-f]{3,8}\\b"
+        },
+        {
+          "name": "constant.numeric.dimension.lazyscriptex",
+          "match": "(?<![A-Za-z0-9_])(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:px|%|vw|vh|em|rem|ms|s|deg)\\b"
+        },
+        {
+          "name": "support.constant.property-value.lscss.lazyscriptex",
+          "match": "\\b(?:auto|none|flex|block|grid|inline|relative|absolute|fixed|sticky|row|column|wrap|nowrap|start|center|end|stretch|space-between|space-around|space-evenly|hidden|scroll|visible|clip|pointer|text|move|grab|contain|cover|linear|radial|solid|ellipsis|normal|pre|pre-wrap)\\b"
+        }
+      ]
+    },
+    "lscssNested": {
+      "patterns": [
+        {
+          "name": "meta.selector.lscss.lazyscriptex",
+          "begin": "([.#:]?[A-Za-z_][A-Za-z0-9_:#.\\- >,]*)\\s*(\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "entity.other.attribute-name.class.lscss.lazyscriptex"
+            },
+            "2": {
+              "name": "punctuation.section.block.begin.lazyscriptex"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.lazyscriptex"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#lscssNested"
+            },
+            {
+              "include": "#lscssProperties"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#uiExpressions"
+            }
+          ]
+        }
+      ]
+    },
+    "dotParameterTypes": {
+      "patterns": [
+        {
+          "name": "meta.parameter.typed.dot.lazyscriptex",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\.([A-Z][A-Za-z0-9_]*(?:\\.[A-Z][A-Za-z0-9_]*)*)\\b(?=\\s*[,\\)])",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.lazyscriptex"
+            },
+            "2": {
+              "name": "entity.name.type.lazyscriptex"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

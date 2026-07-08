@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/21_file_io.exe",
+  "subsystem": "console",
+  "optimization": 6
+}

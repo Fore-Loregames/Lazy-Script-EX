@@ -1,0 +1,61 @@
+use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
+use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+
+fn fail(message) Win32.MessageBoxA(0,message,"LazyScriptEX Native GameKit",Win32.MB_OK+Win32.MB_ICONERROR) return 1 end
+
+fn main()
+    if GLFW.lsxLoadLibraries()<1 or GLFW.glfwInit()==0 then return fail("GLFW initialization failed.") end
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
+    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
+    local window=GLFW.glfwCreateWindow(1000,700,"02 - OpenGL triangle",0,0)
+    if window==0 then GLFW.glfwTerminate() return fail("Window creation failed.") end
+    GLFW.glfwMakeContextCurrent(window)
+    GLFW.glfwSwapInterval(1)
+    if GL.lsxLoadOpenGL()<1 then return fail("OpenGL loading failed.") end
+
+    local vs="#version 460 core\nlayout(location=0) in vec2 p;layout(location=1) in vec3 c;out vec3 color;void main(){color=c;gl_Position=vec4(p,0,1);}" 
+    local fs="#version 460 core\nin vec3 color;out vec4 outColor;void main(){outColor=vec4(color,1);}" 
+    local program=GL.lsxCreateProgram(vs,fs)
+    if program==0 then return fail("Shader compilation failed.") end
+
+    local vertices = {
+        -0.75,-0.65, 1.0,0.2,0.15,
+         0.75,-0.65, 0.15,0.8,0.25,
+         0.0, 0.75, 0.2,0.35,1.0
+    }
+
+    local vao=GL.createVertexArray()
+    local vbo=GL.createBuffer()
+    GL.glBindVertexArray(vao)
+    GL.glBindBuffer(GL.GL_ARRAY_BUFFER,vbo)
+    GL.glBufferData(GL.GL_ARRAY_BUFFER,vertices.byte_length(),vertices,GL.GL_STATIC_DRAW)
+    GL.glVertexAttribPointer(0,2,GL.GL_FLOAT,0,20,0)
+    GL.glEnableVertexAttribArray(0)
+    GL.glVertexAttribPointer(1,3,GL.GL_FLOAT,0,20,20)
+    GL.glEnableVertexAttribArray(1)
+
+    local framebuffer=GLFW.FramebufferSize.new()
+    while GLFW.glfwWindowShouldClose(window)==0 do
+        framebuffer.refresh(window)
+        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
+        GL.glClearColor(0.035,0.045,0.07,1.0)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        GL.glUseProgram(program)
+        GL.glBindVertexArray(vao)
+        GL.glDrawArrays(GL.GL_TRIANGLES,0,3)
+        GLFW.glfwSwapBuffers(window)
+        GLFW.glfwPollEvents()
+    end
+
+    framebuffer.destroy()
+    GL.deleteBuffer(vbo)
+    GL.deleteVertexArray(vao)
+    GL.glDeleteProgram(program)
+    vertices.destroy()
+    GLFW.glfwDestroyWindow(window)
+    GLFW.glfwTerminate()
+    GLFW.lsxUnloadLibraries()
+    return 0
+end

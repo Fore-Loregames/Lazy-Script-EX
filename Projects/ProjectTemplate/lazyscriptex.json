@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/MyGame.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

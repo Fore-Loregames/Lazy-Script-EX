@@ -1,0 +1,7 @@
+{
+  "entry": "main.lsx",
+  "output": "build/vector_fma_lsx.exe",
+  "subsystem": "console",
+  "optimization": 6,
+  "targetCpu": "avx2-fma"
+}

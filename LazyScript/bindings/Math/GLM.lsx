@@ -1,0 +1,754 @@
+use "GLMRaw.lsx" as Raw
+
+-- GLM 1.0.2 wrapped as native LazyScriptEX types. The C++ implementation,
+-- GLM headers, pointer marshaling, and matrix layout stay behind this LSX API.
+-- Matrices use GLM/OpenGL column-major storage and can be passed directly to
+-- glUniformMatrix* through Math/OpenGL.lsx.
+
+export const RIGHT_HANDED = 0
+export const LEFT_HANDED = 1
+export const DEPTH_NEGATIVE_ONE_TO_ONE = 0
+export const DEPTH_ZERO_TO_ONE = 1
+
+export fn ready() -> bool return Raw._lsxGLMReady() ~= 0 end
+export fn version_major() -> i32 return Raw._lsxGLMVersionMajor() end
+export fn version_minor() -> i32 return Raw._lsxGLMVersionMinor() end
+export fn version_patch() -> i32 return Raw._lsxGLMVersionPatch() end
+export fn pi() -> f32 return Raw._lsxGLMPi() end
+export fn two_pi() -> f32 return Raw._lsxGLMTwoPi() end
+export fn half_pi() -> f32 return Raw._lsxGLMHalfPi() end
+export fn epsilon() -> f32 return Raw._lsxGLMEpsilon() end
+export fn radians(value:f32) -> f32 return Raw._lsxGLMRadians(value) end
+export fn degrees(value:f32) -> f32 return Raw._lsxGLMDegrees(value) end
+export fn clamp(value:f32, minimum:f32, maximum:f32) -> f32 return Raw._lsxGLMClamp(value,minimum,maximum) end
+export fn mix(a:f32, b:f32, amount:f32) -> f32 return Raw._lsxGLMMix(a,b,amount) end
+export fn step(edge:f32, value:f32) -> f32 return Raw._lsxGLMStep(edge,value) end
+export fn smoothstep(edge0:f32, edge1:f32, value:f32) -> f32 return Raw._lsxGLMSmoothstep(edge0,edge1,value) end
+export fn fract(value:f32) -> f32 return Raw._lsxGLMFract(value) end
+export fn mod(value:f32, divisor:f32) -> f32 return Raw._lsxGLMMod(value,divisor) end
+export fn sign(value:f32) -> f32 return Raw._lsxGLMSign(value) end
+export fn inverse_sqrt(value:f32) -> f32 return Raw._lsxGLMInverseSqrt(value) end
+
+export const Vec2 = {
+    x:f32 = 0.0,
+    y:f32 = 0.0,
+
+    set = fn(x:f32, y:f32) self.x=x self.y=y end,
+    copy = fn() -> Vec2 return vec2(self.x,self.y) end,
+    add = fn(other:Vec2) -> Vec2 return vec2(self.x+other.x,self.y+other.y) end,
+    sub = fn(other:Vec2) -> Vec2 return vec2(self.x-other.x,self.y-other.y) end,
+    mul = fn(other:Vec2) -> Vec2 return vec2(self.x*other.x,self.y*other.y) end,
+    div = fn(other:Vec2) -> Vec2 return vec2(self.x/other.x,self.y/other.y) end,
+    scale = fn(value:f32) -> Vec2 return vec2(self.x*value,self.y*value) end,
+    negate = fn() -> Vec2 return vec2(-self.x,-self.y) end,
+    dot = fn(other:Vec2) -> f32
+        local a ={self.x,self.y}
+        local b ={other.x,other.y}
+        local result=Raw._lsxGLMVec2Dot(a,b)
+        a.destroy() b.destroy()
+        return result
+    end,
+    length = fn() -> f32
+        local a ={self.x,self.y}
+        local result=Raw._lsxGLMVec2Length(a)
+        a.destroy()
+        return result
+    end,
+    length_squared = fn() -> f32 return self.x*self.x+self.y*self.y end,
+    distance = fn(other:Vec2) -> f32
+        local a ={self.x,self.y}
+        local b ={other.x,other.y}
+        local result=Raw._lsxGLMVec2Distance(a,b)
+        a.destroy() b.destroy()
+        return result
+    end,
+    normalized = fn() -> Vec2
+        local a ={self.x,self.y}
+        local output ={} output.resize(2)
+        Raw._lsxGLMVec2Normalize(a,output)
+        local result=vec2(output[0],output[1])
+        a.destroy() output.destroy()
+        return result
+    end,
+    reflect = fn(normal:Vec2) -> Vec2
+        local a ={self.x,self.y}
+        local n ={normal.x,normal.y}
+        local output ={} output.resize(2)
+        Raw._lsxGLMVec2Reflect(a,n,output)
+        local result=vec2(output[0],output[1])
+        a.destroy() n.destroy() output.destroy()
+        return result
+    end,
+    refract = fn(normal:Vec2, eta:f32) -> Vec2
+        local a ={self.x,self.y}
+        local n ={normal.x,normal.y}
+        local output ={} output.resize(2)
+        Raw._lsxGLMVec2Refract(a,n,eta,output)
+        local result=vec2(output[0],output[1])
+        a.destroy() n.destroy() output.destroy()
+        return result
+    end,
+    faceforward = fn(incident:Vec2, reference:Vec2) -> Vec2
+        local n ={self.x,self.y}
+        local i ={incident.x,incident.y}
+        local r ={reference.x,reference.y}
+        local output ={} output.resize(2)
+        Raw._lsxGLMVec2Faceforward(n,i,r,output)
+        local result=vec2(output[0],output[1])
+        n.destroy() i.destroy() r.destroy() output.destroy()
+        return result
+    end,
+    angle = fn(other:Vec2) -> f32
+        local a ={self.x,self.y}
+        local b ={other.x,other.y}
+        local result=Raw._lsxGLMVec2Angle(a,b)
+        a.destroy() b.destroy()
+        return result
+    end,
+    rotated = fn(angleRadians:f32) -> Vec2
+        local a ={self.x,self.y}
+        local output ={} output.resize(2)
+        Raw._lsxGLMVec2Rotate(a,angleRadians,output)
+        local result=vec2(output[0],output[1])
+        a.destroy() output.destroy()
+        return result
+    end,
+    lerp = fn(other:Vec2, amount:f32) -> Vec2
+        return vec2(mix(self.x,other.x,amount),mix(self.y,other.y,amount))
+    end,
+    destroy = fn() self.x=0.0 self.y=0.0 end
+}
+
+export fn vec2(x:f32, y:f32) -> Vec2
+    local result=Vec2.new() result.x=x result.y=y return result
+end
+export fn vec2_zero() -> Vec2 return vec2(0.0,0.0) end
+export fn vec2_one() -> Vec2 return vec2(1.0,1.0) end
+
+export const Vec3 = {
+    x:f32 = 0.0,
+    y:f32 = 0.0,
+    z:f32 = 0.0,
+
+    set = fn(x:f32, y:f32, z:f32) self.x=x self.y=y self.z=z end,
+    copy = fn() -> Vec3 return vec3(self.x,self.y,self.z) end,
+    add = fn(other:Vec3) -> Vec3 return vec3(self.x+other.x,self.y+other.y,self.z+other.z) end,
+    sub = fn(other:Vec3) -> Vec3 return vec3(self.x-other.x,self.y-other.y,self.z-other.z) end,
+    mul = fn(other:Vec3) -> Vec3 return vec3(self.x*other.x,self.y*other.y,self.z*other.z) end,
+    div = fn(other:Vec3) -> Vec3 return vec3(self.x/other.x,self.y/other.y,self.z/other.z) end,
+    scale = fn(value:f32) -> Vec3 return vec3(self.x*value,self.y*value,self.z*value) end,
+    negate = fn() -> Vec3 return vec3(-self.x,-self.y,-self.z) end,
+    dot = fn(other:Vec3) -> f32
+        local a ={self.x,self.y,self.z}
+        local b ={other.x,other.y,other.z}
+        local result=Raw._lsxGLMVec3Dot(a,b)
+        a.destroy() b.destroy()
+        return result
+    end,
+    cross = fn(other:Vec3) -> Vec3
+        local a ={self.x,self.y,self.z}
+        local b ={other.x,other.y,other.z}
+        local output ={} output.resize(3)
+        Raw._lsxGLMVec3Cross(a,b,output)
+        local result=vec3(output[0],output[1],output[2])
+        a.destroy() b.destroy() output.destroy()
+        return result
+    end,
+    length = fn() -> f32
+        local a ={self.x,self.y,self.z}
+        local result=Raw._lsxGLMVec3Length(a)
+        a.destroy()
+        return result
+    end,
+    length_squared = fn() -> f32 return self.x*self.x+self.y*self.y+self.z*self.z end,
+    distance = fn(other:Vec3) -> f32
+        local a ={self.x,self.y,self.z}
+        local b ={other.x,other.y,other.z}
+        local result=Raw._lsxGLMVec3Distance(a,b)
+        a.destroy() b.destroy()
+        return result
+    end,
+    normalized = fn() -> Vec3
+        local a ={self.x,self.y,self.z}
+        local output ={} output.resize(3)
+        Raw._lsxGLMVec3Normalize(a,output)
+        local result=vec3(output[0],output[1],output[2])
+        a.destroy() output.destroy()
+        return result
+    end,
+    reflect = fn(normal:Vec3) -> Vec3
+        local a ={self.x,self.y,self.z}
+        local n ={normal.x,normal.y,normal.z}
+        local output ={} output.resize(3)
+        Raw._lsxGLMVec3Reflect(a,n,output)
+        local result=vec3(output[0],output[1],output[2])
+        a.destroy() n.destroy() output.destroy()
+        return result
+    end,
+    refract = fn(normal:Vec3, eta:f32) -> Vec3
+        local a ={self.x,self.y,self.z}
+        local n ={normal.x,normal.y,normal.z}
+        local output ={} output.resize(3)
+        Raw._lsxGLMVec3Refract(a,n,eta,output)
+        local result=vec3(output[0],output[1],output[2])
+        a.destroy() n.destroy() output.destroy()
+        return result
+    end,
+    faceforward = fn(incident:Vec3, reference:Vec3) -> Vec3
+        local n ={self.x,self.y,self.z}
+        local i ={incident.x,incident.y,incident.z}
+        local r ={reference.x,reference.y,reference.z}
+        local output ={} output.resize(3)
+        Raw._lsxGLMVec3Faceforward(n,i,r,output)
+        local result=vec3(output[0],output[1],output[2])
+        n.destroy() i.destroy() r.destroy() output.destroy()
+        return result
+    end,
+    angle = fn(other:Vec3) -> f32
+        local a ={self.x,self.y,self.z}
+        local b ={other.x,other.y,other.z}
+        local result=Raw._lsxGLMVec3Angle(a,b)
+        a.destroy() b.destroy()
+        return result
+    end,
+    rotated = fn(angleRadians:f32, axis:Vec3) -> Vec3
+        local a ={self.x,self.y,self.z}
+        local n ={axis.x,axis.y,axis.z}
+        local output ={} output.resize(3)
+        Raw._lsxGLMVec3Rotate(a,angleRadians,n,output)
+        local result=vec3(output[0],output[1],output[2])
+        a.destroy() n.destroy() output.destroy()
+        return result
+    end,
+    orthonormalized = fn(reference:Vec3) -> Vec3
+        local a ={self.x,self.y,self.z}
+        local b ={reference.x,reference.y,reference.z}
+        local output ={} output.resize(3)
+        Raw._lsxGLMVec3Orthonormalize(a,b,output)
+        local result=vec3(output[0],output[1],output[2])
+        a.destroy() b.destroy() output.destroy()
+        return result
+    end,
+    lerp = fn(other:Vec3, amount:f32) -> Vec3
+        return vec3(mix(self.x,other.x,amount),mix(self.y,other.y,amount),mix(self.z,other.z,amount))
+    end,
+    destroy = fn() self.x=0.0 self.y=0.0 self.z=0.0 end
+}
+
+export fn vec3(x:f32, y:f32, z:f32) -> Vec3
+    local result=Vec3.new() result.x=x result.y=y result.z=z return result
+end
+export fn vec3_zero() -> Vec3 return vec3(0.0,0.0,0.0) end
+export fn vec3_one() -> Vec3 return vec3(1.0,1.0,1.0) end
+export fn vec3_right() -> Vec3 return vec3(1.0,0.0,0.0) end
+export fn vec3_up() -> Vec3 return vec3(0.0,1.0,0.0) end
+export fn vec3_forward() -> Vec3 return vec3(0.0,0.0,-1.0) end
+
+export const Vec4 = {
+    x:f32 = 0.0,
+    y:f32 = 0.0,
+    z:f32 = 0.0,
+    w:f32 = 0.0,
+
+    set = fn(x:f32,y:f32,z:f32,w:f32) self.x=x self.y=y self.z=z self.w=w end,
+    copy = fn() -> Vec4 return vec4(self.x,self.y,self.z,self.w) end,
+    add = fn(other:Vec4) -> Vec4 return vec4(self.x+other.x,self.y+other.y,self.z+other.z,self.w+other.w) end,
+    sub = fn(other:Vec4) -> Vec4 return vec4(self.x-other.x,self.y-other.y,self.z-other.z,self.w-other.w) end,
+    mul = fn(other:Vec4) -> Vec4 return vec4(self.x*other.x,self.y*other.y,self.z*other.z,self.w*other.w) end,
+    div = fn(other:Vec4) -> Vec4 return vec4(self.x/other.x,self.y/other.y,self.z/other.z,self.w/other.w) end,
+    scale = fn(value:f32) -> Vec4 return vec4(self.x*value,self.y*value,self.z*value,self.w*value) end,
+    negate = fn() -> Vec4 return vec4(-self.x,-self.y,-self.z,-self.w) end,
+    dot = fn(other:Vec4) -> f32
+        local a ={self.x,self.y,self.z,self.w}
+        local b ={other.x,other.y,other.z,other.w}
+        local result=Raw._lsxGLMVec4Dot(a,b)
+        a.destroy() b.destroy()
+        return result
+    end,
+    length = fn() -> f32
+        local a ={self.x,self.y,self.z,self.w}
+        local result=Raw._lsxGLMVec4Length(a)
+        a.destroy()
+        return result
+    end,
+    length_squared = fn() -> f32 return self.x*self.x+self.y*self.y+self.z*self.z+self.w*self.w end,
+    distance = fn(other:Vec4) -> f32
+        local a ={self.x,self.y,self.z,self.w}
+        local b ={other.x,other.y,other.z,other.w}
+        local result=Raw._lsxGLMVec4Distance(a,b)
+        a.destroy() b.destroy()
+        return result
+    end,
+    reflect = fn(normal:Vec4) -> Vec4
+        local a ={self.x,self.y,self.z,self.w}
+        local n ={normal.x,normal.y,normal.z,normal.w}
+        local output ={} output.resize(4)
+        Raw._lsxGLMVec4Reflect(a,n,output)
+        local result=vec4(output[0],output[1],output[2],output[3])
+        a.destroy() n.destroy() output.destroy()
+        return result
+    end,
+    refract = fn(normal:Vec4, eta:f32) -> Vec4
+        local a ={self.x,self.y,self.z,self.w}
+        local n ={normal.x,normal.y,normal.z,normal.w}
+        local output ={} output.resize(4)
+        Raw._lsxGLMVec4Refract(a,n,eta,output)
+        local result=vec4(output[0],output[1],output[2],output[3])
+        a.destroy() n.destroy() output.destroy()
+        return result
+    end,
+    faceforward = fn(incident:Vec4, reference:Vec4) -> Vec4
+        local n ={self.x,self.y,self.z,self.w}
+        local i ={incident.x,incident.y,incident.z,incident.w}
+        local r ={reference.x,reference.y,reference.z,reference.w}
+        local output ={} output.resize(4)
+        Raw._lsxGLMVec4Faceforward(n,i,r,output)
+        local result=vec4(output[0],output[1],output[2],output[3])
+        n.destroy() i.destroy() r.destroy() output.destroy()
+        return result
+    end,
+    normalized = fn() -> Vec4
+        local a ={self.x,self.y,self.z,self.w}
+        local output ={} output.resize(4)
+        Raw._lsxGLMVec4Normalize(a,output)
+        local result=vec4(output[0],output[1],output[2],output[3])
+        a.destroy() output.destroy()
+        return result
+    end,
+    xyz = fn() -> Vec3 return vec3(self.x,self.y,self.z) end,
+    lerp = fn(other:Vec4, amount:f32) -> Vec4
+        return vec4(mix(self.x,other.x,amount),mix(self.y,other.y,amount),mix(self.z,other.z,amount),mix(self.w,other.w,amount))
+    end,
+    destroy = fn() self.x=0.0 self.y=0.0 self.z=0.0 self.w=0.0 end
+}
+
+export fn vec4(x:f32,y:f32,z:f32,w:f32) -> Vec4
+    local result=Vec4.new() result.x=x result.y=y result.z=z result.w=w return result
+end
+export fn vec4_zero() -> Vec4 return vec4(0.0,0.0,0.0,0.0) end
+export fn vec4_one() -> Vec4 return vec4(1.0,1.0,1.0,1.0) end
+
+export const Mat2 = {
+    data = {},
+    valid = fn() -> bool return self.data ~= 0 and self.data.length() == 4 end,
+    at = fn(column:i32,row:i32) -> f32 return self.data[column*2+row] end,
+    set = fn(column:i32,row:i32,value:f32) self.data[column*2+row]=value end,
+    set_identity = fn() Raw._lsxGLMMat2Identity(self.data) end,
+    set_zero = fn() Raw._lsxGLMMat2Zero(self.data) end,
+    copy = fn() -> Mat2
+        local result=mat2_zero() local i:i32=0
+        while i<4 do result.data[i]=self.data[i] i=i+1 end
+        return result
+    end,
+    add = fn(other:Mat2) -> Mat2 local result=mat2_zero() Raw._lsxGLMMat2Add(self.data,other.data,result.data) return result end,
+    sub = fn(other:Mat2) -> Mat2 local result=mat2_zero() Raw._lsxGLMMat2Sub(self.data,other.data,result.data) return result end,
+    multiply = fn(other:Mat2) -> Mat2 local result=mat2_zero() Raw._lsxGLMMat2Mul(self.data,other.data,result.data) return result end,
+    scaled = fn(value:f32) -> Mat2 local result=mat2_zero() Raw._lsxGLMMat2MulScalar(self.data,value,result.data) return result end,
+    transposed = fn() -> Mat2 local result=mat2_zero() Raw._lsxGLMMat2Transpose(self.data,result.data) return result end,
+    inverse = fn() -> Mat2 local result=mat2_zero() Raw._lsxGLMMat2Inverse(self.data,result.data) return result end,
+    determinant = fn() -> f32 return Raw._lsxGLMMat2Determinant(self.data) end,
+    transform = fn(value:Vec2) -> Vec2
+        local v ={value.x,value.y} local output ={} output.resize(2)
+        Raw._lsxGLMMat2Transform(self.data,v,output)
+        local result=vec2(output[0],output[1]) v.destroy() output.destroy() return result
+    end,
+    multiply_into = fn(other:Mat2, output:Mat2) Raw._lsxGLMMat2Mul(self.data,other.data,output.data) end,
+    destroy = fn() if self.data ~= 0 then self.data.destroy() self.data=null end end
+}
+
+export fn mat2_identity() -> Mat2 local result=Mat2.new() result.data.resize(4) Raw._lsxGLMMat2Identity(result.data) return result end
+export fn mat2_zero() -> Mat2 local result=Mat2.new() result.data.resize(4) Raw._lsxGLMMat2Zero(result.data) return result end
+
+export const Mat3 = {
+    data = {},
+    valid = fn() -> bool return self.data ~= 0 and self.data.length() == 9 end,
+    at = fn(column:i32,row:i32) -> f32 return self.data[column*3+row] end,
+    set = fn(column:i32,row:i32,value:f32) self.data[column*3+row]=value end,
+    set_identity = fn() Raw._lsxGLMMat3Identity(self.data) end,
+    set_zero = fn() Raw._lsxGLMMat3Zero(self.data) end,
+    copy = fn() -> Mat3
+        local result=mat3_zero() local i:i32=0
+        while i<9 do result.data[i]=self.data[i] i=i+1 end
+        return result
+    end,
+    add = fn(other:Mat3) -> Mat3 local result=mat3_zero() Raw._lsxGLMMat3Add(self.data,other.data,result.data) return result end,
+    sub = fn(other:Mat3) -> Mat3 local result=mat3_zero() Raw._lsxGLMMat3Sub(self.data,other.data,result.data) return result end,
+    multiply = fn(other:Mat3) -> Mat3 local result=mat3_zero() Raw._lsxGLMMat3Mul(self.data,other.data,result.data) return result end,
+    scaled = fn(value:f32) -> Mat3 local result=mat3_zero() Raw._lsxGLMMat3MulScalar(self.data,value,result.data) return result end,
+    transposed = fn() -> Mat3 local result=mat3_zero() Raw._lsxGLMMat3Transpose(self.data,result.data) return result end,
+    inverse = fn() -> Mat3 local result=mat3_zero() Raw._lsxGLMMat3Inverse(self.data,result.data) return result end,
+    determinant = fn() -> f32 return Raw._lsxGLMMat3Determinant(self.data) end,
+    transform = fn(value:Vec3) -> Vec3
+        local v ={value.x,value.y,value.z} local output ={} output.resize(3)
+        Raw._lsxGLMMat3Transform(self.data,v,output)
+        local result=vec3(output[0],output[1],output[2]) v.destroy() output.destroy() return result
+    end,
+    multiply_into = fn(other:Mat3, output:Mat3) Raw._lsxGLMMat3Mul(self.data,other.data,output.data) end,
+    destroy = fn() if self.data ~= 0 then self.data.destroy() self.data=null end end
+}
+
+export fn mat3_identity() -> Mat3 local result=Mat3.new() result.data.resize(9) Raw._lsxGLMMat3Identity(result.data) return result end
+export fn mat3_zero() -> Mat3 local result=Mat3.new() result.data.resize(9) Raw._lsxGLMMat3Zero(result.data) return result end
+
+export const Mat4 = {
+    data = {},
+    valid = fn() -> bool return self.data ~= 0 and self.data.length() == 16 end,
+    at = fn(column:i32,row:i32) -> f32 return self.data[column*4+row] end,
+    set = fn(column:i32,row:i32,value:f32) self.data[column*4+row]=value end,
+    set_identity = fn() Raw._lsxGLMMat4Identity(self.data) end,
+    set_zero = fn() Raw._lsxGLMMat4Zero(self.data) end,
+    copy = fn() -> Mat4
+        local result=mat4_zero() local i:i32=0
+        while i<16 do result.data[i]=self.data[i] i=i+1 end
+        return result
+    end,
+    add = fn(other:Mat4) -> Mat4 local result=mat4_zero() Raw._lsxGLMMat4Add(self.data,other.data,result.data) return result end,
+    sub = fn(other:Mat4) -> Mat4 local result=mat4_zero() Raw._lsxGLMMat4Sub(self.data,other.data,result.data) return result end,
+    multiply = fn(other:Mat4) -> Mat4 local result=mat4_zero() Raw._lsxGLMMat4Mul(self.data,other.data,result.data) return result end,
+    scaled = fn(value:f32) -> Mat4 local result=mat4_zero() Raw._lsxGLMMat4MulScalar(self.data,value,result.data) return result end,
+    transposed = fn() -> Mat4 local result=mat4_zero() Raw._lsxGLMMat4Transpose(self.data,result.data) return result end,
+    inverse = fn() -> Mat4 local result=mat4_zero() Raw._lsxGLMMat4Inverse(self.data,result.data) return result end,
+    affine_inverse = fn() -> Mat4 local result=mat4_zero() Raw._lsxGLMMat4AffineInverse(self.data,result.data) return result end,
+    determinant = fn() -> f32 return Raw._lsxGLMMat4Determinant(self.data) end,
+    transform_vec4 = fn(value:Vec4) -> Vec4
+        local v ={value.x,value.y,value.z,value.w} local output ={} output.resize(4)
+        Raw._lsxGLMMat4TransformVec4(self.data,v,output)
+        local result=vec4(output[0],output[1],output[2],output[3]) v.destroy() output.destroy() return result
+    end,
+    transform_point = fn(value:Vec3) -> Vec3
+        local v ={value.x,value.y,value.z} local output ={} output.resize(3)
+        Raw._lsxGLMMat4TransformPoint(self.data,v,output)
+        local result=vec3(output[0],output[1],output[2]) v.destroy() output.destroy() return result
+    end,
+    transform_direction = fn(value:Vec3) -> Vec3
+        local v ={value.x,value.y,value.z} local output ={} output.resize(3)
+        Raw._lsxGLMMat4TransformDirection(self.data,v,output)
+        local result=vec3(output[0],output[1],output[2]) v.destroy() output.destroy() return result
+    end,
+    translated = fn(value:Vec3) -> Mat4
+        local v ={value.x,value.y,value.z} local result=mat4_zero()
+        Raw._lsxGLMMat4Translate(self.data,v,result.data) v.destroy() return result
+    end,
+    rotated = fn(angleRadians:f32, axis:Vec3) -> Mat4
+        local v ={axis.x,axis.y,axis.z} local result=mat4_zero()
+        Raw._lsxGLMMat4Rotate(self.data,angleRadians,v,result.data) v.destroy() return result
+    end,
+    resized = fn(value:Vec3) -> Mat4
+        local v ={value.x,value.y,value.z} local result=mat4_zero()
+        Raw._lsxGLMMat4Scale(self.data,v,result.data) v.destroy() return result
+    end,
+    interpolate = fn(other:Mat4, amount:f32) -> Mat4
+        local result=mat4_zero() Raw._lsxGLMMat4Interpolate(self.data,other.data,amount,result.data) return result
+    end,
+    multiply_into = fn(other:Mat4, output:Mat4) Raw._lsxGLMMat4Mul(self.data,other.data,output.data) end,
+    inverse_into = fn(output:Mat4) Raw._lsxGLMMat4Inverse(self.data,output.data) end,
+    destroy = fn() if self.data ~= 0 then self.data.destroy() self.data=null end end
+}
+
+export fn mat4_identity() -> Mat4 local result=Mat4.new() result.data.resize(16) Raw._lsxGLMMat4Identity(result.data) return result end
+export fn mat4_zero() -> Mat4 local result=Mat4.new() result.data.resize(16) Raw._lsxGLMMat4Zero(result.data) return result end
+export fn mat4_from_mat3(value:Mat3) -> Mat4 local result=mat4_zero() Raw._lsxGLMMat4FromMat3(value.data,result.data) return result end
+export fn mat3_from_mat4(value:Mat4) -> Mat3 local result=mat3_zero() Raw._lsxGLMMat3FromMat4(value.data,result.data) return result end
+export fn normal_matrix(value:Mat4) -> Mat3 local result=mat3_zero() Raw._lsxGLMMat3NormalFromMat4(value.data,result.data) return result end
+
+export const Quat = {
+    x:f32 = 0.0,
+    y:f32 = 0.0,
+    z:f32 = 0.0,
+    w:f32 = 1.0,
+
+    set = fn(x:f32,y:f32,z:f32,w:f32) self.x=x self.y=y self.z=z self.w=w end,
+    copy = fn() -> Quat return quat(self.x,self.y,self.z,self.w) end,
+    conjugate = fn() -> Quat
+        local input ={self.x,self.y,self.z,self.w} local output ={} output.resize(4)
+        Raw._lsxGLMQuatConjugate(input,output) local result=quat(output[0],output[1],output[2],output[3])
+        input.destroy() output.destroy() return result
+    end,
+    inverse = fn() -> Quat
+        local input ={self.x,self.y,self.z,self.w} local output ={} output.resize(4)
+        Raw._lsxGLMQuatInverse(input,output) local result=quat(output[0],output[1],output[2],output[3])
+        input.destroy() output.destroy() return result
+    end,
+    normalized = fn() -> Quat
+        local input ={self.x,self.y,self.z,self.w} local output ={} output.resize(4)
+        Raw._lsxGLMQuatNormalize(input,output) local result=quat(output[0],output[1],output[2],output[3])
+        input.destroy() output.destroy() return result
+    end,
+    add = fn(other:Quat) -> Quat
+        local a ={self.x,self.y,self.z,self.w} local b ={other.x,other.y,other.z,other.w}
+        local output ={} output.resize(4) Raw._lsxGLMQuatAdd(a,b,output)
+        local result=quat(output[0],output[1],output[2],output[3]) a.destroy() b.destroy() output.destroy() return result
+    end,
+    sub = fn(other:Quat) -> Quat
+        local a ={self.x,self.y,self.z,self.w} local b ={other.x,other.y,other.z,other.w}
+        local output ={} output.resize(4) Raw._lsxGLMQuatSub(a,b,output)
+        local result=quat(output[0],output[1],output[2],output[3]) a.destroy() b.destroy() output.destroy() return result
+    end,
+    multiply = fn(other:Quat) -> Quat
+        local a ={self.x,self.y,self.z,self.w} local b ={other.x,other.y,other.z,other.w}
+        local output ={} output.resize(4) Raw._lsxGLMQuatMul(a,b,output)
+        local result=quat(output[0],output[1],output[2],output[3]) a.destroy() b.destroy() output.destroy() return result
+    end,
+    scaled = fn(value:f32) -> Quat
+        local a ={self.x,self.y,self.z,self.w} local output ={} output.resize(4)
+        Raw._lsxGLMQuatMulScalar(a,value,output) local result=quat(output[0],output[1],output[2],output[3])
+        a.destroy() output.destroy() return result
+    end,
+    dot = fn(other:Quat) -> f32
+        local a ={self.x,self.y,self.z,self.w} local b ={other.x,other.y,other.z,other.w}
+        local result=Raw._lsxGLMQuatDot(a,b) a.destroy() b.destroy() return result
+    end,
+    length = fn() -> f32 local a ={self.x,self.y,self.z,self.w} local result=Raw._lsxGLMQuatLength(a) a.destroy() return result end,
+    slerp = fn(other:Quat, amount:f32) -> Quat
+        local a ={self.x,self.y,self.z,self.w} local b ={other.x,other.y,other.z,other.w}
+        local output ={} output.resize(4) Raw._lsxGLMQuatSlerp(a,b,amount,output)
+        local result=quat(output[0],output[1],output[2],output[3]) a.destroy() b.destroy() output.destroy() return result
+    end,
+    lerp = fn(other:Quat, amount:f32) -> Quat
+        local a ={self.x,self.y,self.z,self.w} local b ={other.x,other.y,other.z,other.w}
+        local output ={} output.resize(4) Raw._lsxGLMQuatLerp(a,b,amount,output)
+        local result=quat(output[0],output[1],output[2],output[3]) a.destroy() b.destroy() output.destroy() return result
+    end,
+    mix = fn(other:Quat, amount:f32) -> Quat
+        local a ={self.x,self.y,self.z,self.w} local b ={other.x,other.y,other.z,other.w}
+        local output ={} output.resize(4) Raw._lsxGLMQuatMix(a,b,amount,output)
+        local result=quat(output[0],output[1],output[2],output[3]) a.destroy() b.destroy() output.destroy() return result
+    end,
+    rotate = fn(value:Vec3) -> Vec3
+        local q ={self.x,self.y,self.z,self.w} local v ={value.x,value.y,value.z}
+        local output ={} output.resize(3) Raw._lsxGLMQuatRotateVec3(q,v,output)
+        local result=vec3(output[0],output[1],output[2]) q.destroy() v.destroy() output.destroy() return result
+    end,
+    rotate_vec4 = fn(value:Vec4) -> Vec4
+        local q ={self.x,self.y,self.z,self.w} local v ={value.x,value.y,value.z,value.w}
+        local output ={} output.resize(4) Raw._lsxGLMQuatRotateVec4(q,v,output)
+        local result=vec4(output[0],output[1],output[2],output[3]) q.destroy() v.destroy() output.destroy() return result
+    end,
+    to_mat3 = fn() -> Mat3
+        local q ={self.x,self.y,self.z,self.w} local result=mat3_zero()
+        Raw._lsxGLMQuatToMat3(q,result.data) q.destroy() return result
+    end,
+    to_mat4 = fn() -> Mat4
+        local q ={self.x,self.y,self.z,self.w} local result=mat4_zero()
+        Raw._lsxGLMQuatToMat4(q,result.data) q.destroy() return result
+    end,
+    euler_angles = fn() -> Vec3
+        local q ={self.x,self.y,self.z,self.w} local output ={} output.resize(3)
+        Raw._lsxGLMQuatEulerAngles(q,output) local result=vec3(output[0],output[1],output[2]) q.destroy() output.destroy() return result
+    end,
+    angle = fn() -> f32 local q ={self.x,self.y,self.z,self.w} local result=Raw._lsxGLMQuatAngle(q) q.destroy() return result end,
+    axis = fn() -> Vec3
+        local q ={self.x,self.y,self.z,self.w} local output ={} output.resize(3)
+        Raw._lsxGLMQuatAxis(q,output) local result=vec3(output[0],output[1],output[2]) q.destroy() output.destroy() return result
+    end,
+    pitch = fn() -> f32 local q ={self.x,self.y,self.z,self.w} local result=Raw._lsxGLMQuatPitch(q) q.destroy() return result end,
+    yaw = fn() -> f32 local q ={self.x,self.y,self.z,self.w} local result=Raw._lsxGLMQuatYaw(q) q.destroy() return result end,
+    roll = fn() -> f32 local q ={self.x,self.y,self.z,self.w} local result=Raw._lsxGLMQuatRoll(q) q.destroy() return result end,
+    destroy = fn() self.x=0.0 self.y=0.0 self.z=0.0 self.w=1.0 end
+}
+
+export fn quat(x:f32,y:f32,z:f32,w:f32) -> Quat local result=Quat.new() result.x=x result.y=y result.z=z result.w=w return result end
+export fn quat_identity() -> Quat return quat(0.0,0.0,0.0,1.0) end
+export fn quat_angle_axis(angleRadians:f32, axis:Vec3) -> Quat
+    local a ={axis.x,axis.y,axis.z} local output ={} output.resize(4)
+    Raw._lsxGLMQuatAngleAxis(angleRadians,a,output) local result=quat(output[0],output[1],output[2],output[3])
+    a.destroy() output.destroy() return result
+end
+export fn quat_euler(eulerRadians:Vec3) -> Quat
+    local e ={eulerRadians.x,eulerRadians.y,eulerRadians.z} local output ={} output.resize(4)
+    Raw._lsxGLMQuatFromEuler(e,output) local result=quat(output[0],output[1],output[2],output[3])
+    e.destroy() output.destroy() return result
+end
+export fn quat_from_to(fromDirection:Vec3,toDirection:Vec3) -> Quat
+    local a ={fromDirection.x,fromDirection.y,fromDirection.z} local b ={toDirection.x,toDirection.y,toDirection.z}
+    local output ={} output.resize(4) Raw._lsxGLMQuatFromTwoVectors(a,b,output)
+    local result=quat(output[0],output[1],output[2],output[3]) a.destroy() b.destroy() output.destroy() return result
+end
+export fn quat_look_at_rh(direction:Vec3,up:Vec3) -> Quat
+    local a ={direction.x,direction.y,direction.z} local b ={up.x,up.y,up.z}
+    local output ={} output.resize(4) Raw._lsxGLMQuatLookAtRH(a,b,output)
+    local result=quat(output[0],output[1],output[2],output[3]) a.destroy() b.destroy() output.destroy() return result
+end
+export fn quat_look_at_lh(direction:Vec3,up:Vec3) -> Quat
+    local a ={direction.x,direction.y,direction.z} local b ={up.x,up.y,up.z}
+    local output ={} output.resize(4) Raw._lsxGLMQuatLookAtLH(a,b,output)
+    local result=quat(output[0],output[1],output[2],output[3]) a.destroy() b.destroy() output.destroy() return result
+end
+export fn quat_from_mat3(value:Mat3) -> Quat
+    local output ={} output.resize(4) Raw._lsxGLMQuatFromMat3(value.data,output)
+    local result=quat(output[0],output[1],output[2],output[3]) output.destroy() return result
+end
+export fn quat_from_mat4(value:Mat4) -> Quat
+    local output ={} output.resize(4) Raw._lsxGLMQuatFromMat4(value.data,output)
+    local result=quat(output[0],output[1],output[2],output[3]) output.destroy() return result
+end
+
+export const DualQuat = {
+    data = {},
+    valid = fn() -> bool return self.data ~= 0 and self.data.length()==8 end,
+    normalized = fn() -> DualQuat local result=dual_quat_identity() Raw._lsxGLMDualQuatNormalize(self.data,result.data) return result end,
+    inverse = fn() -> DualQuat local result=dual_quat_identity() Raw._lsxGLMDualQuatInverse(self.data,result.data) return result end,
+    multiply = fn(other:DualQuat) -> DualQuat local result=dual_quat_identity() Raw._lsxGLMDualQuatMul(self.data,other.data,result.data) return result end,
+    lerp = fn(other:DualQuat,amount:f32) -> DualQuat local result=dual_quat_identity() Raw._lsxGLMDualQuatLerp(self.data,other.data,amount,result.data) return result end,
+    transform_point = fn(point:Vec3) -> Vec3
+        local p ={point.x,point.y,point.z} local output ={} output.resize(3)
+        Raw._lsxGLMDualQuatTransformPoint(self.data,p,output) local result=vec3(output[0],output[1],output[2])
+        p.destroy() output.destroy() return result
+    end,
+    to_mat4 = fn() -> Mat4 local result=mat4_zero() Raw._lsxGLMDualQuatToMat4(self.data,result.data) return result end,
+    destroy = fn() if self.data ~= 0 then self.data.destroy() self.data=null end end
+}
+
+export fn dual_quat_identity() -> DualQuat local result=DualQuat.new() result.data.resize(8) Raw._lsxGLMDualQuatIdentity(result.data) return result end
+export fn dual_quat(rotation:Quat,translation:Vec3) -> DualQuat
+    local q ={rotation.x,rotation.y,rotation.z,rotation.w} local t ={translation.x,translation.y,translation.z}
+    local result=dual_quat_identity() Raw._lsxGLMDualQuatFromRotationTranslation(q,t,result.data)
+    q.destroy() t.destroy() return result
+end
+
+export fn trs(translation:Vec3, rotation:Quat, scale:Vec3) -> Mat4
+    local t ={translation.x,translation.y,translation.z}
+    local q ={rotation.x,rotation.y,rotation.z,rotation.w}
+    local s ={scale.x,scale.y,scale.z}
+    local result=mat4_zero() Raw._lsxGLMMat4TRS(t,q,s,result.data)
+    t.destroy() q.destroy() s.destroy() return result
+end
+
+export fn inverse_trs(translation:Vec3, rotation:Quat, scale:Vec3) -> Mat4
+    local t ={translation.x,translation.y,translation.z}
+    local q ={rotation.x,rotation.y,rotation.z,rotation.w}
+    local s ={scale.x,scale.y,scale.z}
+    local result=mat4_zero() Raw._lsxGLMMat4TRSInverse(t,q,s,result.data)
+    t.destroy() q.destroy() s.destroy() return result
+end
+
+export fn look_at_rh(eye:Vec3,center:Vec3,up:Vec3) -> Mat4
+    local e ={eye.x,eye.y,eye.z} local c ={center.x,center.y,center.z} local u ={up.x,up.y,up.z}
+    local result=mat4_zero() Raw._lsxGLMMat4LookAtRH(e,c,u,result.data)
+    e.destroy() c.destroy() u.destroy() return result
+end
+export fn look_at_lh(eye:Vec3,center:Vec3,up:Vec3) -> Mat4
+    local e ={eye.x,eye.y,eye.z} local c ={center.x,center.y,center.z} local u ={up.x,up.y,up.z}
+    local result=mat4_zero() Raw._lsxGLMMat4LookAtLH(e,c,u,result.data)
+    e.destroy() c.destroy() u.destroy() return result
+end
+
+export fn perspective_rh_no(fovYRadians:f32,aspect:f32,nearPlane:f32,farPlane:f32) -> Mat4
+    local result=mat4_zero() Raw._lsxGLMMat4PerspectiveRHNO(fovYRadians,aspect,nearPlane,farPlane,result.data) return result
+end
+export fn perspective_rh_zo(fovYRadians:f32,aspect:f32,nearPlane:f32,farPlane:f32) -> Mat4
+    local result=mat4_zero() Raw._lsxGLMMat4PerspectiveRHZO(fovYRadians,aspect,nearPlane,farPlane,result.data) return result
+end
+export fn perspective_lh_no(fovYRadians:f32,aspect:f32,nearPlane:f32,farPlane:f32) -> Mat4
+    local result=mat4_zero() Raw._lsxGLMMat4PerspectiveLHNO(fovYRadians,aspect,nearPlane,farPlane,result.data) return result
+end
+export fn perspective_lh_zo(fovYRadians:f32,aspect:f32,nearPlane:f32,farPlane:f32) -> Mat4
+    local result=mat4_zero() Raw._lsxGLMMat4PerspectiveLHZO(fovYRadians,aspect,nearPlane,farPlane,result.data) return result
+end
+export fn perspective(fovYRadians:f32,aspect:f32,nearPlane:f32,farPlane:f32,handedness:i32,depthRange:i32) -> Mat4
+    if handedness==LEFT_HANDED then
+        if depthRange==DEPTH_ZERO_TO_ONE then return perspective_lh_zo(fovYRadians,aspect,nearPlane,farPlane) end
+        return perspective_lh_no(fovYRadians,aspect,nearPlane,farPlane)
+    end
+    if depthRange==DEPTH_ZERO_TO_ONE then return perspective_rh_zo(fovYRadians,aspect,nearPlane,farPlane) end
+    return perspective_rh_no(fovYRadians,aspect,nearPlane,farPlane)
+end
+export fn infinite_perspective_rh(fovYRadians:f32,aspect:f32,nearPlane:f32) -> Mat4
+    local result=mat4_zero() Raw._lsxGLMMat4InfinitePerspectiveRH(fovYRadians,aspect,nearPlane,result.data) return result
+end
+export fn infinite_perspective_lh(fovYRadians:f32,aspect:f32,nearPlane:f32) -> Mat4
+    local result=mat4_zero() Raw._lsxGLMMat4InfinitePerspectiveLH(fovYRadians,aspect,nearPlane,result.data) return result
+end
+
+export fn infinite_perspective(fovYRadians:f32,aspect:f32,nearPlane:f32,handedness:i32) -> Mat4
+    if handedness==LEFT_HANDED then return infinite_perspective_lh(fovYRadians,aspect,nearPlane) end
+    return infinite_perspective_rh(fovYRadians,aspect,nearPlane)
+end
+
+export fn ortho_rh_no(left:f32,right:f32,bottom:f32,top:f32,nearPlane:f32,farPlane:f32) -> Mat4
+    local result=mat4_zero() Raw._lsxGLMMat4OrthoRHNO(left,right,bottom,top,nearPlane,farPlane,result.data) return result
+end
+export fn ortho_rh_zo(left:f32,right:f32,bottom:f32,top:f32,nearPlane:f32,farPlane:f32) -> Mat4
+    local result=mat4_zero() Raw._lsxGLMMat4OrthoRHZO(left,right,bottom,top,nearPlane,farPlane,result.data) return result
+end
+export fn ortho_lh_no(left:f32,right:f32,bottom:f32,top:f32,nearPlane:f32,farPlane:f32) -> Mat4
+    local result=mat4_zero() Raw._lsxGLMMat4OrthoLHNO(left,right,bottom,top,nearPlane,farPlane,result.data) return result
+end
+export fn ortho_lh_zo(left:f32,right:f32,bottom:f32,top:f32,nearPlane:f32,farPlane:f32) -> Mat4
+    local result=mat4_zero() Raw._lsxGLMMat4OrthoLHZO(left,right,bottom,top,nearPlane,farPlane,result.data) return result
+end
+export fn ortho(left:f32,right:f32,bottom:f32,top:f32,nearPlane:f32,farPlane:f32,handedness:i32,depthRange:i32) -> Mat4
+    if handedness==LEFT_HANDED then
+        if depthRange==DEPTH_ZERO_TO_ONE then return ortho_lh_zo(left,right,bottom,top,nearPlane,farPlane) end
+        return ortho_lh_no(left,right,bottom,top,nearPlane,farPlane)
+    end
+    if depthRange==DEPTH_ZERO_TO_ONE then return ortho_rh_zo(left,right,bottom,top,nearPlane,farPlane) end
+    return ortho_rh_no(left,right,bottom,top,nearPlane,farPlane)
+end
+
+export const Decomposition = {
+    valid:bool=false,
+    scale:Vec3=null,
+    rotation:Quat=null,
+    translation:Vec3=null,
+    skew:Vec3=null,
+    perspective:Vec4=null,
+    destroy = fn()
+        if self.scale ~= 0 then self.scale.destroy() self.scale=null end
+        if self.rotation ~= 0 then self.rotation.destroy() self.rotation=null end
+        if self.translation ~= 0 then self.translation.destroy() self.translation=null end
+        if self.skew ~= 0 then self.skew.destroy() self.skew=null end
+        if self.perspective ~= 0 then self.perspective.destroy() self.perspective=null end
+        self.valid=false
+    end
+}
+
+export fn decompose(value:Mat4) -> Decomposition
+    local s ={} s.resize(3) local q ={} q.resize(4) local t ={} t.resize(3)
+    local k ={} k.resize(3) local p ={} p.resize(4)
+    local result=Decomposition.new()
+    result.valid=Raw._lsxGLMMat4Decompose(value.data,s,q,t,k,p) ~= 0
+    result.scale=vec3(s[0],s[1],s[2]) result.rotation=quat(q[0],q[1],q[2],q[3])
+    result.translation=vec3(t[0],t[1],t[2]) result.skew=vec3(k[0],k[1],k[2]) result.perspective=vec4(p[0],p[1],p[2],p[3])
+    s.destroy() q.destroy() t.destroy() k.destroy() p.destroy()
+    return result
+end
+
+export fn pick_matrix(center:Vec2,delta:Vec2,viewport:Vec4) -> Mat4
+    local c ={center.x,center.y} local d ={delta.x,delta.y}
+    local v ={viewport.x,viewport.y,viewport.z,viewport.w} local result=mat4_zero()
+    Raw._lsxGLMMat4PickMatrix(c,d,v,result.data)
+    c.destroy() d.destroy() v.destroy()
+    return result
+end
+
+export fn project_no(point:Vec3,model:Mat4,projection:Mat4,viewport:Vec4) -> Vec3
+    local p ={point.x,point.y,point.z} local v ={viewport.x,viewport.y,viewport.z,viewport.w}
+    local output ={} output.resize(3) Raw._lsxGLMMat4ProjectNO(p,model.data,projection.data,v,output)
+    local result=vec3(output[0],output[1],output[2]) p.destroy() v.destroy() output.destroy() return result
+end
+export fn project_zo(point:Vec3,model:Mat4,projection:Mat4,viewport:Vec4) -> Vec3
+    local p ={point.x,point.y,point.z} local v ={viewport.x,viewport.y,viewport.z,viewport.w}
+    local output ={} output.resize(3) Raw._lsxGLMMat4ProjectZO(p,model.data,projection.data,v,output)
+    local result=vec3(output[0],output[1],output[2]) p.destroy() v.destroy() output.destroy() return result
+end
+export fn unproject_no(point:Vec3,model:Mat4,projection:Mat4,viewport:Vec4) -> Vec3
+    local p ={point.x,point.y,point.z} local v ={viewport.x,viewport.y,viewport.z,viewport.w}
+    local output ={} output.resize(3) Raw._lsxGLMMat4UnProjectNO(p,model.data,projection.data,v,output)
+    local result=vec3(output[0],output[1],output[2]) p.destroy() v.destroy() output.destroy() return result
+end
+export fn unproject_zo(point:Vec3,model:Mat4,projection:Mat4,viewport:Vec4) -> Vec3
+    local p ={point.x,point.y,point.z} local v ={viewport.x,viewport.y,viewport.z,viewport.w}
+    local output ={} output.resize(3) Raw._lsxGLMMat4UnProjectZO(p,model.data,projection.data,v,output)
+    local result=vec3(output[0],output[1],output[2]) p.destroy() v.destroy() output.destroy() return result
+end
+
+export fn project(point:Vec3,model:Mat4,projection:Mat4,viewport:Vec4,depthRange:i32) -> Vec3
+    if depthRange==DEPTH_ZERO_TO_ONE then return project_zo(point,model,projection,viewport) end
+    return project_no(point,model,projection,viewport)
+end
+
+export fn unproject(point:Vec3,model:Mat4,projection:Mat4,viewport:Vec4,depthRange:i32) -> Vec3
+    if depthRange==DEPTH_ZERO_TO_ONE then return unproject_zo(point,model,projection,viewport) end
+    return unproject_no(point,model,projection,viewport)
+end

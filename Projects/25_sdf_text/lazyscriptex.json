@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/25_sdf_text.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

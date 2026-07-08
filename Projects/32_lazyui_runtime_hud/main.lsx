@@ -1,0 +1,161 @@
+use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
+use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
+use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
+
+lscss .root = { width = "100vw";
+    height = "100vh";
+    position = "relative";
+    background = "linear-gradient(180deg, #22334c, #081019)";
+    color = "#f3f6ff" }
+lscss .world = { position = "absolute";
+    left = "0px";
+    top = "0px";
+    width = "100%";
+    height = "100%" }
+lscss .top-left = { position = "absolute";
+    left = "18px";
+    top = "18px";
+    width = "340px";
+    gap = "7px" }
+lscss .bar-shell = { height = "28px";
+    background = "rgba(8,12,19,0.82)";
+    border = "2px #65758e";
+    border_radius = "10px";
+    overflow = "hidden" }
+lscss .health-fill = { width = "78%";
+    height = "100%";
+    background = "linear-gradient(90deg, #b8243c, #ff5a67)" }
+lscss .mana-fill = { width = "62%";
+    height = "100%";
+    background = "linear-gradient(90deg, #245ed1, #53b9ff)" }
+lscss .bar-label = { position = "absolute";
+    left = "12px";
+    top = "5px";
+    font_size = "14px";
+    color = "#ffffff" }
+lscss .quest = { position = "absolute";
+    right = "18px";
+    top = "18px";
+    width = "330px";
+    padding = "12px";
+    gap = "7px";
+    background = "rgba(11,18,28,0.88)";
+    border = "1px #6b7f9d";
+    border_radius = "12px";
+    box_shadow = "0 8 24 0 rgba(0,0,0,0.4)" }
+lscss .quest-title = { font_size = "20px";
+    color = "#ffe28b" }
+lscss .objective = { padding = "6px 8px";
+    background = "rgba(35,49,70,0.8)";
+    border_radius = "6px" }
+lscss .minimap = { position = "absolute";
+    right = "18px";
+    bottom = "150px";
+    width = "230px";
+    height = "230px";
+    background = "rgba(8,13,21,0.88)";
+    border = "3px #7185a4";
+    border_radius = "115px";
+    overflow = "hidden" }
+lscss .hotbar = { position = "absolute";
+    left = "50%";
+    bottom = "22px";
+    width = "620px";
+    height = "74px";
+    translate_x = "-310px";
+    padding = "7px";
+    flex_direction = "row";
+    gap = "6px";
+    background = "rgba(8,12,19,0.86)";
+    border = "2px #667995";
+    border_radius = "13px" }
+lscss inventoryslot = { width = "58px";
+    height = "58px";
+    padding = "7px";
+    background = "#1b2637";
+    border = "2px #405474";
+    border_radius = "8px";
+    text_align = "center" }
+lscss .selected = { border = "3px #ffd66a";
+    background = "#3a3423" }
+lscss .dialogue = { position = "absolute";
+    left = "18%";
+    right = "18%";
+    bottom = "115px";
+    min_height = "120px";
+    padding = "14px";
+    gap = "8px";
+    background = "rgba(12,17,25,0.92)";
+    border = "2px #7d8da8";
+    border_radius = "14px";
+    box_shadow = "0 10 28 0 rgba(0,0,0,0.5)" }
+lscss .speaker = { font_size = "20px";
+    color = "#8fc6ff" }
+lscss .notification = { position = "absolute";
+    left = "50%";
+    top = "70px";
+    width = "420px";
+    translate_x = "-210px";
+    padding = "10px";
+    background = "rgba(32,66,51,0.9)";
+    border = "1px #64c28e";
+    border_radius = "9px";
+    text_align = "center";
+    color = "#d9ffea" }
+lscss .crosshair-h = { position = "absolute";
+    left = "50%";
+    top = "50%";
+    width = "34px";
+    height = "3px";
+    translate_x = "-17px";
+    background = "#ffffff" }
+lscss .crosshair-v = { position = "absolute";
+    left = "50%";
+    top = "50%";
+    width = "3px";
+    height = "34px";
+    translate_y = "-17px";
+    background = "#ffffff" }
+
+lshtml hud_view = {(
+    <ui class="root">
+        <canvas class="world">
+            <circle cx=250 cy=210 r=110 fill="#3e6d45" />
+            <ellipse cx=660 cy=310 rx=290 ry=115 fill="#285279" />
+            <polygon points="0,520 300,330 580,510 920,260 1280,520" fill="#263f32" />
+            <canvas-text x=30 y=700 fill="#9cb0ca" font_size=15>Runtime scene placeholder behind the same instanced UI renderer</canvas-text>
+        </canvas>
+        <column class="top-left">
+            <panel class="bar-shell"><panel class="health-fill" /><span class="bar-label">HP 780 / 1000</span></panel>
+            <panel class="bar-shell"><panel class="mana-fill" /><span class="bar-label">MP 310 / 500</span></panel>
+            <row><chip>Lv. 24</chip><chip>Poison Resist +15%</chip></row>
+        </column>
+        <questlog class="quest"><span class="quest-title">The Forgotten Gate</span><span>Reach the ruins before nightfall.</span><panel class="objective">[x] Find the old map</panel><panel class="objective">[ ] Enter the northern gate</panel><panel class="objective">[ ] Defeat the gatekeeper</panel></questlog>
+        <notification class="notification">Quest updated: The Forgotten Gate</notification>
+        <minimap class="minimap"><canvas><circle cx=115 cy=115 r=102 fill="#203b2d" /><line x1=20 y1=115 x2=210 y2=115 stroke="#526d5a" stroke_width=2 /><line x1=115 y1=20 x2=115 y2=210 stroke="#526d5a" stroke_width=2 /><circle cx=115 cy=115 r=7 fill="#72b7ff" /><circle cx=165 cy=72 r=6 fill="#ff6f75" /><canvas-text x=82 y=32 fill="#ffffff" font_size=14>NORTH</canvas-text></canvas></minimap>
+        <panel class="crosshair-h" /><panel class="crosshair-v" />
+        <dialogue class="dialogue"><span class="speaker">Captain Elara</span><p>The gate is reacting to your mana. Keep your weapon ready and stay behind me.</p><row><spacer /><badge>Space: Continue</badge></row></dialogue>
+        <hotbar class="hotbar"><inventoryslot class="selected">1 Sword</inventoryslot><inventoryslot>2 Bow</inventoryslot><inventoryslot>3 Potion</inventoryslot><inventoryslot>4 Bomb</inventoryslot><inventoryslot>5 Torch</inventoryslot><inventoryslot>6 Map</inventoryslot><inventoryslot>7 Food</inventoryslot><inventoryslot>8 Empty</inventoryslot><inventoryslot>9 Empty</inventoryslot></hotbar>
+    </ui>
+)}
+
+fn main()
+    local root = hud_view()
+    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return fail("GLFW initialization failed.") end
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4) GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6) GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
+    local window = GLFW.glfwCreateWindow(1280,760,"32 - LazyUI runtime HUD",0,0)
+    if window == 0 then return fail("Window creation failed.") end
+    GLFW.glfwMakeContextCurrent(window) GLFW.glfwSwapInterval(1)
+    if GL.lsxLoadOpenGL() < 1 then return fail("OpenGL initialization failed.") end
+    local renderer = UIRenderer.create(null,64) local document = UI.document(root) local framebuffer = GLFW.FramebufferSize.new()
+    while GLFW.glfwWindowShouldClose(window) == 0 do
+        framebuffer.refresh(window) document.resize(framebuffer.width,framebuffer.height)
+        GL.glViewport(0,0,framebuffer.width,framebuffer.height) GL.glClearColor(0.02,0.03,0.05,1.0) GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        renderer.begin(framebuffer.width,framebuffer.height) renderer.submit(root) renderer.flush()
+        GLFW.glfwSwapBuffers(window) GLFW.glfwPollEvents()
+    end
+    framebuffer.destroy() document.destroy() renderer.destroy() GLFW.glfwDestroyWindow(window) GLFW.glfwTerminate() GLFW.lsxUnloadLibraries() return 0
+end
+fn fail(message) Win32.MessageBoxA(0,message,"LazyUI",Win32.MB_OK+Win32.MB_ICONERROR) return 1 end

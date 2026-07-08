@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/lazyui-node-graph.exe",
+  "subsystem": "console",
+  "optimization": 6
+}

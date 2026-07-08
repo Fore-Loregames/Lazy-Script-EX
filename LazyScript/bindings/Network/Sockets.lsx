@@ -1,0 +1,472 @@
+use "WinSockRaw.lsx" as Raw
+
+-- LazyScriptEX native WinSock2 TCP/UDP sockets.
+-- Payloads use LSX tables; no raw allocation or byte-offset code is required.
+
+export const AF_UNSPEC = 0
+export const AF_INET = 2
+export const AF_INET6 = 23
+export const SOCK_STREAM = 1
+export const SOCK_DGRAM = 2
+export const IPPROTO_TCP = 6
+export const IPPROTO_UDP = 17
+export const AI_PASSIVE = 1
+export const INVALID_SOCKET = -1
+export const SOCKET_ERROR = -1
+export const SD_RECEIVE = 0
+export const SD_SEND = 1
+export const SD_BOTH = 2
+export const SOL_SOCKET = 65535
+export const SO_REUSEADDR = 4
+export const SO_BROADCAST = 32
+export const TCP_NODELAY = 1
+export const FIONBIO = 2147772030
+export const POLL_ERROR = 1
+export const POLL_HANGUP = 2
+export const POLL_INVALID = 4
+export const POLL_WRITE = 16
+export const POLL_READ = 768
+export const WSAEWOULDBLOCK = 10035
+export const WSAECONNRESET = 10054
+export const WSAETIMEDOUT = 10060
+export const NI_NUMERICHOST = 2
+export const NI_NUMERICSERV = 8
+export const NI_MAXHOST = 1025
+export const NI_MAXSERV = 32
+export const SOCKADDR_STORAGE_BYTES = 128
+
+export struct AddrInfo
+    flags:i32
+    family:i32
+    socket_type:i32
+    protocol:i32
+    address_length:u64
+    canonical_name:ptr
+    address:ptr
+    next:ptr
+end
+
+export struct PointerBox
+    value:ptr
+end
+
+export struct U32Box
+    value:u32
+end
+
+export struct I32Box
+    value:i32
+end
+
+export struct PollDescriptor
+    socket:handle
+    events:i16
+    returned_events:i16
+end
+
+export fn initialize()
+    local data = {}
+    data[0] = 0
+    data.resize(512)
+    local result = Raw.WSAStartup(514,data)
+    data.destroy()
+    return result == 0
+end
+
+export fn cleanup()
+    return Raw.WSACleanup() == 0
+end
+
+export fn last_error()
+    return Raw.WSAGetLastError()
+end
+
+export const Datagram = {
+    data = {},
+    address = {},
+    address_length:i32 = 0,
+    host = {},
+    service = {},
+
+    valid = fn()
+        return self.data ~= 0 and self.address ~= 0 and self.address_length > 0
+    end,
+
+    host_text = fn()
+        if self.host == 0 or self.host.length() == 0 then return null end
+        return self.host.data()
+    end,
+
+    service_text = fn()
+        if self.service == 0 or self.service.length() == 0 then return null end
+        return self.service.data()
+    end,
+
+    reply = fn(socketValue:handle, data, flags:i32)
+        if not self.valid() or socketValue == INVALID_SOCKET or data.length() == 0 then return SOCKET_ERROR end
+        return Raw.sendto(socketValue,data,data.length(),flags,self.address,self.address_length)
+    end,
+
+    close = fn()
+        if self.data ~= 0 then self.data.destroy() self.data = null end
+        if self.address ~= 0 then self.address.destroy() self.address = null end
+        if self.host ~= 0 then self.host.destroy() self.host = null end
+        if self.service ~= 0 then self.service.destroy() self.service = null end
+        self.address_length = 0
+    end
+}
+
+export const Socket = {
+    handle:handle = -1,
+    family:i32 = AF_UNSPEC,
+    socket_type:i32 = 0,
+    protocol:i32 = 0,
+
+    connect = fn(host:string, service:string)
+        local resultSocket = Socket.new()
+        local hints = AddrInfo.new()
+        hints.family = AF_UNSPEC
+        hints.socket_type = SOCK_STREAM
+        hints.protocol = IPPROTO_TCP
+        local result = PointerBox.new()
+        if Raw.getaddrinfo(host,service,hints,result) ~= 0 then
+            hints.destroy()
+            result.destroy()
+            return resultSocket
+        end
+        local current:AddrInfo = result.value
+        while current ~= null do
+            local candidate = Raw.socket(current.family,current.socket_type,current.protocol)
+            if candidate ~= INVALID_SOCKET then
+                if Raw.connect(candidate,current.address,current.address_length) == 0 then
+                    resultSocket.handle = candidate
+                    resultSocket.family = current.family
+                    resultSocket.socket_type = current.socket_type
+                    resultSocket.protocol = current.protocol
+                    current = null
+                else
+                    Raw.closesocket(candidate)
+                    current = current.next
+                end
+            else
+                current = current.next
+            end
+        end
+        Raw.freeaddrinfo(result.value)
+        hints.destroy()
+        result.destroy()
+        return resultSocket
+    end,
+
+    listen = fn(host:string, service:string, backlog:i32)
+        local resultSocket = Socket.new()
+        local hints = AddrInfo.new()
+        hints.flags = AI_PASSIVE
+        hints.family = AF_UNSPEC
+        hints.socket_type = SOCK_STREAM
+        hints.protocol = IPPROTO_TCP
+        local result = PointerBox.new()
+        if Raw.getaddrinfo(host,service,hints,result) ~= 0 then
+            hints.destroy()
+            result.destroy()
+            return resultSocket
+        end
+        local current:AddrInfo = result.value
+        while current ~= null do
+            local candidate = Raw.socket(current.family,current.socket_type,current.protocol)
+            if candidate ~= INVALID_SOCKET then
+                local enabled = I32Box.new()
+                enabled.value = 1
+                Raw.setsockopt(candidate,SOL_SOCKET,SO_REUSEADDR,enabled,4)
+                enabled.destroy()
+                if Raw.bind(candidate,current.address,current.address_length) == 0 and Raw.listen(candidate,backlog) == 0 then
+                    resultSocket.handle = candidate
+                    resultSocket.family = current.family
+                    resultSocket.socket_type = current.socket_type
+                    resultSocket.protocol = current.protocol
+                    current = null
+                else
+                    Raw.closesocket(candidate)
+                    current = current.next
+                end
+            else
+                current = current.next
+            end
+        end
+        Raw.freeaddrinfo(result.value)
+        hints.destroy()
+        result.destroy()
+        return resultSocket
+    end,
+
+    tcp = fn(family:i32)
+        local resultSocket = Socket.new()
+        resultSocket.handle = Raw.socket(family,SOCK_STREAM,IPPROTO_TCP)
+        resultSocket.family = family
+        resultSocket.socket_type = SOCK_STREAM
+        resultSocket.protocol = IPPROTO_TCP
+        return resultSocket
+    end,
+
+    udp = fn(family:i32)
+        local resultSocket = Socket.new()
+        resultSocket.handle = Raw.socket(family,SOCK_DGRAM,IPPROTO_UDP)
+        resultSocket.family = family
+        resultSocket.socket_type = SOCK_DGRAM
+        resultSocket.protocol = IPPROTO_UDP
+        return resultSocket
+    end,
+
+    udp_bind = fn(host:string, service:string)
+        local resultSocket = Socket.new()
+        local hints = AddrInfo.new()
+        hints.flags = AI_PASSIVE
+        hints.family = AF_UNSPEC
+        hints.socket_type = SOCK_DGRAM
+        hints.protocol = IPPROTO_UDP
+        local result = PointerBox.new()
+        if Raw.getaddrinfo(host,service,hints,result) ~= 0 then
+            hints.destroy()
+            result.destroy()
+            return resultSocket
+        end
+        local current:AddrInfo = result.value
+        while current ~= null do
+            local candidate = Raw.socket(current.family,current.socket_type,current.protocol)
+            if candidate ~= INVALID_SOCKET then
+                if Raw.bind(candidate,current.address,current.address_length) == 0 then
+                    resultSocket.handle = candidate
+                    resultSocket.family = current.family
+                    resultSocket.socket_type = current.socket_type
+                    resultSocket.protocol = current.protocol
+                    current = null
+                else
+                    Raw.closesocket(candidate)
+                    current = current.next
+                end
+            else
+                current = current.next
+            end
+        end
+        Raw.freeaddrinfo(result.value)
+        hints.destroy()
+        result.destroy()
+        return resultSocket
+    end,
+
+    valid = fn()
+        return self.handle ~= INVALID_SOCKET
+    end,
+
+    accept = fn()
+        local client = Socket.new()
+        if not self.valid() then return client end
+        client.handle = Raw.accept(self.handle,null,null)
+        client.family = self.family
+        client.socket_type = SOCK_STREAM
+        client.protocol = IPPROTO_TCP
+        return client
+    end,
+
+    send = fn(data, flags:i32)
+        if not self.valid() or data.length() == 0 then return 0 end
+        return Raw.send(self.handle,data,data.length(),flags)
+    end,
+
+    send_all = fn(data, flags:i32)
+        if not self.valid() then return SOCKET_ERROR end
+        local total = 0
+        local count = data.length()
+        while total < count do
+            local written = Raw.send(self.handle,data.data_at(total),count-total,flags)
+            if written <= 0 then return SOCKET_ERROR end
+            total = total + written
+        end
+        return total
+    end,
+
+    send_text = fn(text:string, flags:i32)
+        if not self.valid() then return SOCKET_ERROR end
+        local count = string.length(text)
+        if count == 0 then return 0 end
+        return Raw.send(self.handle,text,count,flags)
+    end,
+
+    receive = fn(maximumBytes:i64, flags:i32)
+        local output = {}
+        output[0] = 0
+        if not self.valid() or maximumBytes <= 0 then return output end
+        output.resize(maximumBytes)
+        local received = Raw.recv(self.handle,output,maximumBytes,flags)
+        if received <= 0 then output.resize(0) return output end
+        output.resize(received)
+        return output
+    end,
+
+    receive_into = fn(output, flags:i32)
+        if not self.valid() or output.length() == 0 then return 0 end
+        return Raw.recv(self.handle,output,output.length(),flags)
+    end,
+
+    receive_exact = fn(byteCount:i64, flags:i32)
+        local output = {}
+        output[0] = 0
+        if not self.valid() or byteCount <= 0 then return output end
+        output.resize(byteCount)
+        local total = 0
+        while total < byteCount do
+            local received = Raw.recv(self.handle,output.data_at(total),byteCount-total,flags)
+            if received <= 0 then output.resize(total) return output end
+            total = total + received
+        end
+        return output
+    end,
+
+    send_to = fn(host:string, service:string, data, flags:i32)
+        if not self.valid() or data.length() == 0 then return SOCKET_ERROR end
+        local hints = AddrInfo.new()
+        hints.family = self.family
+        hints.socket_type = SOCK_DGRAM
+        hints.protocol = IPPROTO_UDP
+        local result = PointerBox.new()
+        if Raw.getaddrinfo(host,service,hints,result) ~= 0 then
+            hints.destroy()
+            result.destroy()
+            return SOCKET_ERROR
+        end
+        local current:AddrInfo = result.value
+        local sent = SOCKET_ERROR
+        while current ~= null and sent == SOCKET_ERROR do
+            sent = Raw.sendto(self.handle,data,data.length(),flags,current.address,current.address_length)
+            current = current.next
+        end
+        Raw.freeaddrinfo(result.value)
+        hints.destroy()
+        result.destroy()
+        return sent
+    end,
+
+    receive_from = fn(maximumBytes:i64, flags:i32)
+        local output = {}
+        output[0] = 0
+        if not self.valid() or maximumBytes <= 0 then return output end
+        output.resize(maximumBytes)
+        local received = Raw.recvfrom(self.handle,output,maximumBytes,flags,null,null)
+        if received <= 0 then output.resize(0) return output end
+        output.resize(received)
+        return output
+    end,
+
+    receive_datagram = fn(maximumBytes:i64, flags:i32)
+        local packet = Datagram.new()
+        packet.data = {}
+        packet.address = {}
+        packet.host = {}
+        packet.service = {}
+        packet.data[0] = 0
+        packet.address[0] = 0
+        packet.host[0] = 0
+        packet.service[0] = 0
+        if not self.valid() or maximumBytes <= 0 then return packet end
+
+        packet.data.resize(maximumBytes)
+        packet.address.resize(SOCKADDR_STORAGE_BYTES)
+        local addressLength = I32Box.new()
+        addressLength.value = SOCKADDR_STORAGE_BYTES
+        local received = Raw.recvfrom(self.handle,packet.data,maximumBytes,flags,packet.address,addressLength)
+        if received <= 0 then
+            packet.data.resize(0)
+            packet.address.resize(0)
+            addressLength.destroy()
+            return packet
+        end
+
+        packet.data.resize(received)
+        packet.address_length = addressLength.value
+        packet.host.resize(NI_MAXHOST)
+        packet.service.resize(NI_MAXSERV)
+        if Raw.getnameinfo(packet.address,packet.address_length,packet.host,NI_MAXHOST,packet.service,NI_MAXSERV,NI_NUMERICHOST+NI_NUMERICSERV) ~= 0 then
+            packet.host.resize(0)
+            packet.service.resize(0)
+        end
+        addressLength.destroy()
+        return packet
+    end,
+
+    reply = fn(packet:Datagram, data, flags:i32)
+        if not self.valid() then return SOCKET_ERROR end
+        return packet.reply(self.handle,data,flags)
+    end,
+
+    set_nonblocking = fn(enabled:bool)
+        if not self.valid() then return false end
+        local value = U32Box.new()
+        if enabled then value.value = 1 else value.value = 0 end
+        local result = Raw.ioctlsocket(self.handle,FIONBIO,value) == 0
+        value.destroy()
+        return result
+    end,
+
+    set_no_delay = fn(enabled:bool)
+        if not self.valid() then return false end
+        local value = I32Box.new()
+        if enabled then value.value = 1 else value.value = 0 end
+        local result = Raw.setsockopt(self.handle,IPPROTO_TCP,TCP_NODELAY,value,4) == 0
+        value.destroy()
+        return result
+    end,
+
+    set_broadcast = fn(enabled:bool)
+        if not self.valid() then return false end
+        local value = I32Box.new()
+        if enabled then value.value = 1 else value.value = 0 end
+        local result = Raw.setsockopt(self.handle,SOL_SOCKET,SO_BROADCAST,value,4) == 0
+        value.destroy()
+        return result
+    end,
+
+    set_reuse_address = fn(enabled:bool)
+        if not self.valid() then return false end
+        local value = I32Box.new()
+        if enabled then value.value = 1 else value.value = 0 end
+        local result = Raw.setsockopt(self.handle,SOL_SOCKET,SO_REUSEADDR,value,4) == 0
+        value.destroy()
+        return result
+    end,
+
+    wait_readable = fn(timeoutMilliseconds:i32)
+        if not self.valid() then return false end
+        local descriptor = PollDescriptor.new()
+        local descriptors = {descriptor}
+        descriptor.socket = self.handle
+        descriptor.events = POLL_READ
+        local ready = Raw.WSAPoll(descriptors,1,timeoutMilliseconds)
+        local readable = ready > 0 and descriptor.returned_events ~= 0
+        descriptors.destroy()
+        return readable
+    end,
+
+    wait_writable = fn(timeoutMilliseconds:i32)
+        if not self.valid() then return false end
+        local descriptor = PollDescriptor.new()
+        local descriptors = {descriptor}
+        descriptor.socket = self.handle
+        descriptor.events = POLL_WRITE
+        local ready = Raw.WSAPoll(descriptors,1,timeoutMilliseconds)
+        local writable = ready > 0 and descriptor.returned_events ~= 0
+        descriptors.destroy()
+        return writable
+    end,
+
+    shutdown = fn(how:i32)
+        if not self.valid() then return false end
+        return Raw.shutdown(self.handle,how) == 0
+    end,
+
+    close = fn()
+        if not self.valid() then self.handle = INVALID_SOCKET return true end
+        local result = Raw.closesocket(self.handle) == 0
+        if result then self.handle = INVALID_SOCKET end
+        return result
+    end
+}

@@ -1,0 +1,27 @@
+
+-- Scalar resource helpers for common OpenAL pointer-output calls.
+extern "LSXGameKit.dll" fn _lsxAlCreateBuffer() -> u32
+extern "LSXGameKit.dll" fn _lsxAlCreateSource() -> u32
+extern "LSXGameKit.dll" fn _lsxAlCreateEffect() -> u32
+extern "LSXGameKit.dll" fn _lsxAlCreateFilter() -> u32
+extern "LSXGameKit.dll" fn _lsxAlCreateAuxiliaryEffectSlot() -> u32
+extern "LSXGameKit.dll" fn _lsxAlDeleteBuffer(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxAlDeleteSource(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxAlDeleteEffect(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxAlDeleteFilter(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxAlDeleteAuxiliaryEffectSlot(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxAlGetSourceInteger(source: u32, pname: u32) -> i32
+extern "LSXGameKit.dll" fn _lsxAlGetBufferInteger(buffer: u32, pname: u32) -> i32
+
+export fn createBuffer() return _lsxAlCreateBuffer() end
+export fn createSource() return _lsxAlCreateSource() end
+export fn createEffect() return _lsxAlCreateEffect() end
+export fn createFilter() return _lsxAlCreateFilter() end
+export fn createAuxiliaryEffectSlot() return _lsxAlCreateAuxiliaryEffectSlot() end
+export fn deleteBuffer(value) _lsxAlDeleteBuffer(value) end
+export fn deleteSource(value) _lsxAlDeleteSource(value) end
+export fn deleteEffect(value) _lsxAlDeleteEffect(value) end
+export fn deleteFilter(value) _lsxAlDeleteFilter(value) end
+export fn deleteAuxiliaryEffectSlot(value) _lsxAlDeleteAuxiliaryEffectSlot(value) end
+export fn getSourceInteger(source, pname) return _lsxAlGetSourceInteger(source, pname) end
+export fn getBufferInteger(buffer, pname) return _lsxAlGetBufferInteger(buffer, pname) end

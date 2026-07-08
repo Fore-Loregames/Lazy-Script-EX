@@ -1,0 +1,32 @@
+use "@LazyScript/bindings/System/Log.lsx" as Log
+
+fn main()
+    local logger = Log.open_default()
+    logger.stage("Program entered main")
+
+    if not console.open("LazyScriptEX - Persistent Text Logging") then
+        logger.error_line("Could not open the console window")
+        logger.close()
+        return 1
+    end
+
+    console.write_line("Running a fast loop. The permanent log stays behind after the window closes.")
+    logger.stage("Starting fast loop")
+
+    local value = 0
+    while value < 100000 do
+        value = value + 1
+    end
+
+    logger.success("Fast loop completed")
+    logger.stage("Writing final status")
+    console.write_line("Loop completed.")
+    console.write_line("Open logs/LazyScriptEX.log to see the persistent application log.")
+    console.write_line("LazyScriptEX-runtime.log also records process start, normal exit, or a native crash.")
+
+    logger.success("Program completed normally")
+    logger.close()
+    console.wait()
+    console.close()
+    return 0
+end

@@ -1,0 +1,50 @@
+const Node = {
+    value:i64 = 0
+    children:table<Node> = {}
+}
+
+fn main() -> i32
+    local nodes:table<Node> = {}
+    local item = Node.new()
+    local second = Node.new()
+    item.value = 42
+    second.value = 7
+
+    nodes.push(item)
+    if nodes.count() ~= 1 then return 1 end
+    if nodes.at(0) ~= item then return 2 end
+    if nodes.get(0) ~= item then return 3 end
+    if nodes[0] ~= item then return 4 end
+    if nodes.first() ~= item or nodes.last() ~= item then return 5 end
+    local firstNode = nodes.at(0)
+    if firstNode.value ~= 42 then return 6 end
+    firstNode.value = 99
+    if item.value ~= 99 then return 7 end
+
+    local copied = nodes.add_copy(second)
+    if copied ~= second or nodes.at(1) ~= second then return 8 end
+
+    local created = nodes.add()
+    if created == null or nodes.at(2) ~= created or created.value ~= 0 then return 9 end
+    created.value = 123
+    local lastNode = nodes.last()
+    if lastNode.value ~= 123 then return 10 end
+
+    local literal:table<Node> = {item,second}
+    if literal.count() ~= 2 or literal.at(0) ~= item or literal.at(1) ~= second then return 11 end
+
+    local reserved = Node.table(2)
+    reserved.push(second)
+    if reserved.at(0) ~= second then return 12 end
+
+    item.children.push(second)
+    if item.children.at(0) ~= second then return 13 end
+
+    nodes.destroy()
+    literal.destroy()
+    reserved.destroy()
+    item.destroy()
+    second.destroy()
+    created.destroy()
+    return 0
+end

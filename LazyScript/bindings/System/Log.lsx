@@ -1,0 +1,192 @@
+-- Thread-safe native text logging for LazyScriptEX.
+-- Game code uses Logger objects and plain strings. Windows handles, byte counts,
+-- synchronization, and flushing remain inside this module.
+
+export const GENERIC_WRITE = 0x40000000
+export const FILE_SHARE_READ = 1
+export const FILE_SHARE_WRITE = 2
+export const CREATE_ALWAYS = 2
+export const OPEN_ALWAYS = 4
+export const FILE_ATTRIBUTE_NORMAL = 0x80
+export const FILE_END = 2
+export const INFINITE = 0xFFFFFFFF
+export const INVALID_HANDLE_VALUE = -1
+
+extern "KERNEL32.dll" fn CreateFileA(path:string, access:u32, share:u32, security:ptr, creation:u32, flags:u32, templateFile:handle) -> handle
+extern "KERNEL32.dll" fn WriteFile(file:handle, input:ptr, bytes:u32, writtenOut:ptr, overlapped:ptr) -> i32
+extern "KERNEL32.dll" fn FlushFileBuffers(file:handle) -> i32
+extern "KERNEL32.dll" fn SetFilePointerEx(file:handle, distance:i64, newPosition:ptr, moveMethod:u32) -> i32
+extern "KERNEL32.dll" fn CloseHandle(value:handle) -> i32
+extern "KERNEL32.dll" fn CreateMutexA(attributes:ptr, initialOwner:i32, name:string) -> handle
+extern "KERNEL32.dll" fn WaitForSingleObject(object:handle, milliseconds:u32) -> u32
+extern "KERNEL32.dll" fn ReleaseMutex(mutex:handle) -> i32
+extern "KERNEL32.dll" fn CreateDirectoryA(path:string, security:ptr) -> i32
+extern "KERNEL32.dll" fn GetLastError() -> u32
+extern "KERNEL32.dll" fn lstrlenA(text:string) -> i32
+
+const U32Box = { value:u32 = 0 }
+
+export const Logger = {
+    file:handle = INVALID_HANDLE_VALUE,
+    mutex:handle = 0,
+    opened:bool = false,
+    error:u32 = 0,
+
+    is_open = fn() -> bool
+        return self.opened and self.file ~= INVALID_HANDLE_VALUE
+    end,
+
+    _lock = fn() -> bool
+        if self.mutex == 0 then return true end
+        return WaitForSingleObject(self.mutex,INFINITE) == 0
+    end,
+
+    _unlock = fn()
+        if self.mutex ~= 0 then ReleaseMutex(self.mutex) end
+    end,
+
+    _write_raw = fn(text:string) -> bool
+        if not self.is_open() or text == null then return false end
+        local count = lstrlenA(text)
+        if count <= 0 then return true end
+        local written = U32Box.new()
+        local ok = WriteFile(self.file,text,count,written,null) ~= 0
+        if not ok then self.error = GetLastError() end
+        written.destroy()
+        return ok
+    end,
+
+    _write_i64_raw = fn(value:i64) -> bool
+        local buffer = memory.alloc(32)
+        if buffer == 0 then return false end
+        local cursor = 31
+        memory.write_u8(buffer,cursor,0)
+        local remaining = value
+        local negative = remaining < 0
+        if negative then remaining = 0 - remaining end
+        if remaining == 0 then
+            cursor = cursor - 1
+            memory.write_u8(buffer,cursor,48)
+        else
+            while remaining > 0 do
+                local digit = remaining % 10
+                cursor = cursor - 1
+                memory.write_u8(buffer,cursor,48 + digit)
+                remaining = remaining / 10
+            end
+        end
+        if negative then
+            cursor = cursor - 1
+            memory.write_u8(buffer,cursor,45)
+        end
+        local ok = self._write_raw(string.from_utf8(memory.ptr(buffer,cursor)))
+        memory.free(buffer)
+        return ok
+    end,
+
+    number = fn(label:string,value:i64) -> bool
+        if not self._lock() then return false end
+        local ok = true
+        if label ~= null then ok = self._write_raw(label) end
+        if ok then ok = self._write_i64_raw(value) end
+        if ok then ok = self._write_raw("\r\n") end
+        if ok then FlushFileBuffers(self.file) else self.error = GetLastError() end
+        self._unlock()
+        return ok
+    end,
+
+    _write_record = fn(prefix:string, text:string) -> bool
+        if not self._lock() then return false end
+        local ok = true
+        if prefix ~= null then ok = self._write_raw(prefix) end
+        if ok and text ~= null then ok = self._write_raw(text) end
+        if ok then ok = self._write_raw("\r\n") end
+        if ok then FlushFileBuffers(self.file) else self.error = GetLastError() end
+        self._unlock()
+        return ok
+    end,
+
+    line = fn(text:string) -> bool
+        return self._write_record(null,text)
+    end,
+
+    info = fn(text:string) -> bool
+        return self._write_record("[INFO] ",text)
+    end,
+
+    stage = fn(text:string) -> bool
+        return self._write_record("[STAGE] ",text)
+    end,
+
+    warning = fn(text:string) -> bool
+        return self._write_record("[WARNING] ",text)
+    end,
+
+    error_line = fn(text:string) -> bool
+        return self._write_record("[ERROR] ",text)
+    end,
+
+    success = fn(text:string) -> bool
+        return self._write_record("[SUCCESS] ",text)
+    end,
+
+    flush = fn() -> bool
+        if not self.is_open() then return false end
+        if not self._lock() then return false end
+        local ok = FlushFileBuffers(self.file) ~= 0
+        if not ok then self.error = GetLastError() end
+        self._unlock()
+        return ok
+    end,
+
+    close = fn()
+        if self.opened then
+            self.info("Log closed normally")
+            self.flush()
+        end
+        if self.file ~= INVALID_HANDLE_VALUE then CloseHandle(self.file) end
+        if self.mutex ~= 0 then CloseHandle(self.mutex) end
+        self.file = INVALID_HANDLE_VALUE
+        self.mutex = 0
+        self.opened = false
+    end,
+
+    destroy = fn()
+        self.close()
+    end
+}
+
+fn _open(path:string, append:bool) -> Logger
+    local logger = Logger.new()
+    logger.mutex = CreateMutexA(null,0,null)
+    local creation = CREATE_ALWAYS
+    if append then creation = OPEN_ALWAYS end
+    logger.file = CreateFileA(path,GENERIC_WRITE,FILE_SHARE_READ + FILE_SHARE_WRITE,null,creation,FILE_ATTRIBUTE_NORMAL,0)
+    if logger.file == INVALID_HANDLE_VALUE then
+        logger.error = GetLastError()
+        if logger.mutex ~= 0 then CloseHandle(logger.mutex) logger.mutex = 0 end
+        return logger
+    end
+    if append then SetFilePointerEx(logger.file,0,null,FILE_END) end
+    logger.opened = true
+    logger.info("LazyScriptEX log opened")
+    return logger
+end
+
+export fn open(path:string) -> Logger
+    return _open(path,false)
+end
+
+export fn append(path:string) -> Logger
+    return _open(path,true)
+end
+
+export fn open_default() -> Logger
+    CreateDirectoryA("logs",null)
+    return _open("logs/LazyScriptEX.log",false)
+end
+
+export fn append_default() -> Logger
+    CreateDirectoryA("logs",null)
+    return _open("logs/LazyScriptEX.log",true)
+end

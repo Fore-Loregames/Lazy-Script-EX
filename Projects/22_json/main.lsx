@@ -1,0 +1,94 @@
+use "@LazyScript/bindings/Data/Json.lsx" as Json
+use "@LazyScript/bindings/System/Log.lsx" as Log
+
+fn main()
+    local logger = Log.open_default()
+    logger.stage("Program entered main")
+
+    if not console.open("LazyScriptEX - Native JSON Tree") then
+        logger.error_line("Could not open the console window")
+        logger.close()
+        return 1
+    end
+
+    logger.stage("Loading assets/engine_world.json")
+    console.write_line("Loading assets/engine_world.json")
+    local document = Json.load("assets/engine_world.json")
+    if not document.valid then
+        logger.error_line("JSON load failed")
+        logger.line(document.error_name())
+        console.error("JSON load failed: ")
+        console.error_line(document.error_name())
+        document.destroy()
+        logger.close()
+        console.wait()
+        console.close()
+        return 2
+    end
+
+    logger.success("JSON file loaded and parsed")
+    logger.stage("Walking root members")
+    console.write_line("")
+    console.write_line("Root members:")
+    local root_member = 0
+    while root_member < document.count(document.root) do
+        console.write("  - ")
+        console.write_line(document.key_at(document.root,root_member))
+        root_member = root_member + 1
+    end
+
+    logger.stage("Walking worlds, zones, entities, and components")
+    local worlds = document.get(document.root,"worlds")
+    local world_position = 0
+    while world_position < document.count(worlds) do
+        local world = document.at(worlds,world_position)
+        console.write_line("")
+        console.write("WORLD: ")
+        console.write_line(document.get_string(world,"name","unnamed"))
+
+        local zones = document.get(world,"zones")
+        local zone_position = 0
+        while zone_position < document.count(zones) do
+            local zone = document.at(zones,zone_position)
+            console.write("  ZONE: ")
+            console.write_line(document.get_string(zone,"name","unnamed"))
+
+            local entities = document.get(zone,"entities")
+            local entity_position = 0
+            while entity_position < document.count(entities) do
+                local entity = document.at(entities,entity_position)
+                console.write("    ENTITY: ")
+                console.write_line(document.get_string(entity,"name","unnamed"))
+
+                local components = document.get(entity,"components")
+                local component_position = 0
+                while component_position < document.count(components) do
+                    console.write("      COMPONENT: ")
+                    console.write_line(document.key_at(components,component_position))
+                    component_position = component_position + 1
+                end
+
+                entity_position = entity_position + 1
+            end
+            zone_position = zone_position + 1
+        end
+        world_position = world_position + 1
+    end
+
+    logger.stage("Serializing the complete JSON document")
+    console.write_line("")
+    console.write_line("Complete JSON document:")
+    local serialized = document.stringify()
+    console.write_line(serialized.value())
+
+    serialized.destroy()
+    document.destroy()
+    logger.success("Traversal and serialization completed")
+    logger.close()
+
+    console.write_line("")
+    console.write_line("Traversal complete. A permanent log was written to logs/LazyScriptEX.log")
+    console.wait()
+    console.close()
+    return 0
+end

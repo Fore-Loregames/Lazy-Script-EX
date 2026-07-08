@@ -1,0 +1,10 @@
+use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
+fn main()
+    local a = UI.panel()
+    if a.hidden then return 10 end
+    a.hidden = true
+    a.destroy()
+    local b = UI.panel()
+    if b.hidden then return 11 end
+    return 0
+end

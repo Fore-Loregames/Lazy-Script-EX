@@ -1,0 +1,194 @@
+use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
+use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/bindings/Text/FreeType.lsx" as FreeType
+use "@LazyScript/bindings/Text/Font.lsx" as Font
+use "@LazyScript/bindings/System/Threading.lsx" as Threading
+use "@LazyScript/bindings/Network/Sockets.lsx" as Sockets
+use "@LazyScript/bindings/Network/Http.lsx" as Http
+use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+
+const HttpServerState = {
+    ready = null,
+    stage = null,
+    stop = null,
+    port = null
+}
+
+fn local_http_server(state)
+    local server = Sockets.Socket.listen("127.0.0.1",state.port,4)
+    if not server.valid() then
+        state.stage.store(-1)
+        state.ready.set()
+        return 1
+    end
+
+    server.set_nonblocking(true)
+    state.stage.store(1)
+    state.ready.set()
+
+    local peer = Sockets.Socket.new()
+    while state.stop.load() == 0 and not peer.valid() do
+        peer.destroy()
+        peer = server.accept()
+        if not peer.valid() then system.sleep(10) end
+    end
+
+    if not peer.valid() then
+        server.close()
+        server.destroy()
+        peer.destroy()
+        return 2
+    end
+
+    peer.set_nonblocking(false)
+    state.stage.store(2)
+    local request = peer.receive(4096,0)
+    if request.length() == 0 then
+        state.stage.store(-2)
+    else
+        local response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 52\r\nConnection: close\r\n\r\nLazyScriptEX local HTTP server replied successfully."
+        if peer.send_text(response,0) == string.length(response) then
+            state.stage.store(3)
+        else
+            state.stage.store(-3)
+        end
+    end
+    request.destroy()
+    peer.shutdown(Sockets.SD_BOTH)
+    peer.close()
+    peer.destroy()
+    server.close()
+    server.destroy()
+    return 0
+end
+
+fn fatal(message)
+    Win32.MessageBoxA(0,message,"LazyScriptEX HTTP client",Win32.MB_OK + Win32.MB_ICONERROR)
+    return 1
+end
+
+fn main()
+    if not Sockets.initialize() then return fatal("WinSock2 initialization failed.") end
+
+    local ready = Threading.Event.create(true,false)
+    local stage = Threading.AtomicI32.new()
+    local stop = Threading.AtomicI32.new()
+    local state = HttpServerState.new()
+    state.ready = ready
+    state.stage = stage
+    state.stop = stop
+    state.port = "39192"
+
+    local serverThread = Threading.Thread.start(local_http_server,state)
+    if not serverThread.valid() then return fatal("The local HTTP server thread could not start.") end
+    ready.wait(5000)
+
+    local http = Http.Client.create("LazyScriptEX-NativeGameKit/0.15.17")
+    local response = Http.Response.new()
+    local requested = false
+    if http.valid() and stage.load() == 1 then
+        http.set_timeout(5000)
+        response.destroy()
+        response = http.get_port("127.0.0.1","/lsx-test",false,39192)
+        requested = true
+    end
+
+    local okay = requested and response.succeeded() and response.status == 200 and response.body_length == 52 and stage.load() == 3
+    local statusText = "LazyScriptEX local HTTP client\n\n[FAILED] The client could not complete the local request.\n\nThe test uses WinHTTP against an LSX localhost server.\nClose this window to exit."
+    if requested then
+        statusText = "LazyScriptEX local HTTP client\n\n[CLIENT -> SERVER] GET /lsx-test HTTP/1.1\n[SERVER] Request received\n\n[FAILED] The HTTP response was invalid.\nClose this window to exit."
+    end
+    if okay then
+        statusText = "LazyScriptEX local HTTP client\n\n[CLIENT -> SERVER] GET /lsx-test HTTP/1.1\n[SERVER -> CLIENT] HTTP/1.1 200 OK\n[BODY] LazyScriptEX local HTTP server replied successfully.\n\n[OK] WinHTTP request and LSX server response completed.\nClose this window to exit."
+    end
+
+    stop.store(1)
+    serverThread.join()
+    serverThread.close()
+
+    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return fatal("GLFW initialization failed.") end
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
+    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
+    local window = GLFW.glfwCreateWindow(1080,560,"20 - Local HTTP client and server",0,0)
+    if window == 0 then return fatal("The HTTP client window could not be created.") end
+    GLFW.glfwMakeContextCurrent(window)
+    GLFW.glfwSwapInterval(1)
+    if GL.lsxLoadOpenGL() < 1 then return fatal("OpenGL initialization failed.") end
+    if not FreeType.ready() then return fatal("FreeType initialization failed.") end
+
+    local face = FreeType.load("C:/Windows/Fonts/segoeui.ttf",36)
+    local atlas = Font.create_ascii_atlas(face)
+    local text = Font.build_text(face,atlas,statusText,42,34,1)
+    local atlasTexture = Font.upload_atlas(atlas)
+    if not face.valid() or not atlas.valid() or not text.valid() or not atlasTexture.valid() then
+        return fatal("The HTTP client text view could not be created.")
+    end
+
+    local vertexShader = `#version 460 core
+layout(location=0) in vec2 position;
+layout(location=1) in vec2 inputUV;
+uniform vec2 viewport;
+out vec2 uv;
+void main(){uv=inputUV;vec2 ndc=(position/viewport)*vec2(2.0,-2.0)+vec2(-1.0,1.0);gl_Position=vec4(ndc,0.0,1.0);}`
+    local fragmentShader = `#version 460 core
+in vec2 uv;
+out vec4 color;
+uniform sampler2D fontAtlas;
+void main(){float d=texture(fontAtlas,uv).r;float w=max(fwidth(d),0.002);float a=smoothstep(0.5-w,0.5+w,d);color=vec4(0.90,0.95,1.0,a);}`
+    local program = GL.lsxCreateProgram(vertexShader,fragmentShader)
+    if program == 0 then return fatal("The HTTP client text shader failed.") end
+
+    local vao = GL.createVertexArray()
+    local vbo = GL.createBuffer()
+    GL.glBindVertexArray(vao)
+    GL.glBindBuffer(GL.GL_ARRAY_BUFFER,vbo)
+    GL.glBufferData(GL.GL_ARRAY_BUFFER,text.vertices.byte_length(),text.vertices,GL.GL_STATIC_DRAW)
+    GL.glVertexAttribPointer(0,2,GL.GL_FLOAT,0,16,0)
+    GL.glEnableVertexAttribArray(0)
+    GL.glVertexAttribPointer(1,2,GL.GL_FLOAT,0,16,8)
+    GL.glEnableVertexAttribArray(1)
+    GL.glEnable(GL.GL_BLEND)
+    GL.glBlendFunc(GL.GL_SRC_ALPHA,GL.GL_ONE_MINUS_SRC_ALPHA)
+    local viewportLocation = GL.glGetUniformLocation(program,"viewport")
+    local atlasLocation = GL.glGetUniformLocation(program,"fontAtlas")
+    local framebuffer = GLFW.FramebufferSize.new()
+
+    while GLFW.glfwWindowShouldClose(window) == 0 do
+        framebuffer.refresh(window)
+        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
+        GL.glClearColor(0.025,0.03,0.05,1)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        GL.glUseProgram(program)
+        GL.glUniform2f(viewportLocation,framebuffer.width,framebuffer.height)
+        GL.glUniform1i(atlasLocation,0)
+        atlasTexture.bind(0)
+        GL.glBindVertexArray(vao)
+        GL.glDrawArrays(GL.GL_TRIANGLES,0,text.vertices.length() / 4)
+        GLFW.glfwSwapBuffers(window)
+        GLFW.glfwPollEvents()
+    end
+
+    framebuffer.destroy()
+    atlasTexture.destroy()
+    text.destroy()
+    atlas.destroy()
+    face.destroy()
+    GL.deleteBuffer(vbo)
+    GL.deleteVertexArray(vao)
+    GL.glDeleteProgram(program)
+    GLFW.glfwDestroyWindow(window)
+    GLFW.glfwTerminate()
+    GLFW.lsxUnloadLibraries()
+    response.close()
+    response.destroy()
+    http.close()
+    http.destroy()
+    state.destroy()
+    stop.destroy()
+    stage.destroy()
+    ready.close()
+    ready.destroy()
+    Sockets.cleanup()
+    return 0
+end

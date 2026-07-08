@@ -1,0 +1,268 @@
+{
+  "name": "lazyscriptex-native-gamekit",
+  "displayName": "LazyScriptEX Native GameKit",
+  "description": "Native LazyScriptEX tooling with beginner-friendly API hovers, exact compiler ranges, project diagnostics, LSHTML/LSCSS support, inferred LSX syntax, and O6 native compilation.",
+  "version": "0.18.1",
+  "publisher": "nissyokugames",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "LazyScriptEX",
+    "lsx",
+    "game development",
+    "native",
+    "threading",
+    "sockets",
+    "HTTP",
+    "GLFW",
+    "OpenGL",
+    "OpenAL",
+    "JSON",
+    "file I/O",
+    "logging",
+    "images",
+    "textures",
+    "SDF fonts",
+    "GLM",
+    "vector math",
+    "matrix math",
+    "quaternions",
+    "cameras",
+    "LazyUI",
+    "LSHTML",
+    "LSCSS",
+    "retained UI",
+    "canvas",
+    "game UI",
+    "editor UI",
+    "declarative canvas"
+  ],
+  "activationEvents": [
+    "onLanguage:lazyscriptex",
+    "workspaceContains:**/*.lsx",
+    "onCommand:lazyscriptex.refreshIndex"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "lazyscriptex",
+        "aliases": [
+          "LazyScriptEX",
+          "LSX"
+        ],
+        "extensions": [
+          ".lsx"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lazyscriptex",
+        "scopeName": "source.lazyscriptex",
+        "path": "./syntaxes/lazyscriptex.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "lazyscriptex",
+        "path": "./snippets/lazyscriptex.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "lazyscriptex.buildProject",
+        "title": "LazyScriptEX: Build Project",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "lazyscriptex.runProject",
+        "title": "LazyScriptEX: Build and Run Project",
+        "icon": "$(play)"
+      },
+      {
+        "command": "lazyscriptex.checkCurrent",
+        "title": "LazyScriptEX: Check Current File",
+        "icon": "$(check)"
+      },
+      {
+        "command": "lazyscriptex.refreshIndex",
+        "title": "LazyScriptEX: Refresh Recursive Index",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "lazyscriptex.openApi",
+        "title": "LazyScriptEX: Open Offline API",
+        "icon": "$(book)"
+      },
+      {
+        "command": "lazyscriptex.createProject",
+        "title": "LazyScriptEX: Create Project from Template",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "lazyscriptex.showOutput",
+        "title": "LazyScriptEX: Show Output",
+        "icon": "$(output)"
+      },
+      {
+        "command": "lazyscriptex.explainSymbol",
+        "title": "LazyScriptEX: Explain Symbol Under Cursor",
+        "icon": "$(question)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "lazyscriptex.runProject",
+          "when": "editorLangId == lazyscriptex",
+          "group": "navigation@1"
+        },
+        {
+          "command": "lazyscriptex.buildProject",
+          "when": "editorLangId == lazyscriptex",
+          "group": "navigation@2"
+        },
+        {
+          "command": "lazyscriptex.checkCurrent",
+          "when": "editorLangId == lazyscriptex",
+          "group": "navigation@3"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "lazyscriptex.buildProject",
+          "when": "editorLangId == lazyscriptex",
+          "group": "navigation"
+        },
+        {
+          "command": "lazyscriptex.checkCurrent",
+          "when": "editorLangId == lazyscriptex",
+          "group": "navigation@2"
+        },
+        {
+          "command": "lazyscriptex.openApi",
+          "when": "editorLangId == lazyscriptex",
+          "group": "navigation@3"
+        },
+        {
+          "command": "lazyscriptex.explainSymbol",
+          "when": "editorLangId == lazyscriptex",
+          "group": "navigation@4"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "lazyscriptex.buildProject"
+        },
+        {
+          "command": "lazyscriptex.runProject"
+        },
+        {
+          "command": "lazyscriptex.checkCurrent"
+        },
+        {
+          "command": "lazyscriptex.refreshIndex"
+        },
+        {
+          "command": "lazyscriptex.openApi"
+        },
+        {
+          "command": "lazyscriptex.createProject"
+        },
+        {
+          "command": "lazyscriptex.explainSymbol"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "lazyscriptex.buildProject",
+        "key": "f6",
+        "when": "editorLangId == lazyscriptex"
+      },
+      {
+        "command": "lazyscriptex.runProject",
+        "key": "ctrl+f6",
+        "when": "editorLangId == lazyscriptex"
+      },
+      {
+        "command": "lazyscriptex.checkCurrent",
+        "key": "ctrl+shift+f6",
+        "when": "editorLangId == lazyscriptex"
+      },
+      {
+        "command": "lazyscriptex.refreshIndex",
+        "key": "ctrl+alt+r",
+        "when": "editorLangId == lazyscriptex"
+      }
+    ],
+    "configuration": {
+      "title": "LazyScriptEX",
+      "properties": {
+        "lazyscriptex.compilerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional absolute compiler path. Empty auto-detects LazyScript/compiler/lazyscriptex.js."
+        },
+        "lazyscriptex.checkOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run a full project compiler check when an .lsx file is saved."
+        },
+        "lazyscriptex.recursiveIndex": {
+          "type": "boolean",
+          "default": true,
+          "description": "Index every .lsx file recursively in every workspace folder."
+        },
+        "lazyscriptex.exclude": {
+          "type": "string",
+          "default": "**/{build,node_modules,.git,.cache}/**",
+          "description": "Glob excluded from recursive indexing."
+        },
+        "lazyscriptex.apiPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to the offline API index.html."
+        },
+        "lazyscriptex.lazyScriptRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Optional absolute path to LazyScript or to the toolkit root. Use this when a project is opened separately from the toolkit."
+        },
+        "lazyscriptex.checkOnType": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run a debounced project compiler check while editing so errors appear before build."
+        },
+        "lazyscriptex.checkDelay": {
+          "type": "number",
+          "default": 700,
+          "minimum": 250,
+          "maximum": 5000,
+          "description": "Milliseconds to wait after typing before checking the LSX project."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --check extension.js && node test_extension.js"
+  },
+  "files": [
+    "extension.js",
+    "language-configuration.json",
+    "syntaxes/**",
+    "snippets/**",
+    "compiler/**",
+    "README.md",
+    "LICENSE",
+    "api/**"
+  ]
+}

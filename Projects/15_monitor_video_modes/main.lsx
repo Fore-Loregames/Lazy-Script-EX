@@ -1,0 +1,60 @@
+use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
+use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+
+fn fail(message)
+    Win32.MessageBoxA(0,message,"LazyScriptEX Native GameKit",Win32.MB_OK+Win32.MB_ICONERROR)
+    return 1
+end
+
+fn main()
+    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return fail("GLFW failed.") end
+
+    local monitors = GLFW.MonitorList.new()
+    local work = GLFW.MonitorWorkArea.new()
+    local physical = GLFW.MonitorPhysicalSize.new()
+    local scale = GLFW.ContentScale.new()
+    local modes = GLFW.VideoModeList.new()
+    local mode = GLFW.VideoMode.new()
+
+    monitors.refresh()
+    local monitor = GLFW.glfwGetPrimaryMonitor()
+    if monitor ~= 0 then
+        work.refresh(monitor)
+        physical.refresh(monitor)
+        scale.refresh_monitor(monitor)
+        modes.refresh(monitor)
+        if modes.count > 0 then mode.read(modes.items, modes.count - 1) end
+    end
+
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
+    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
+    local window = GLFW.glfwCreateWindow(900,600,"15 - Monitor and video mode typed API",0,0)
+    if window == 0 then return fail("Window failed.") end
+    GLFW.glfwMakeContextCurrent(window)
+    GL.lsxLoadOpenGL()
+    GLFW.glfwSetWindowTitle(window, "15 - Monitor and video mode typed API")
+
+    local framebuffer = GLFW.FramebufferSize.new()
+    while GLFW.glfwWindowShouldClose(window) == 0 do
+        framebuffer.refresh(window)
+        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
+        GL.glClearColor(scale.x * 0.08, scale.y * 0.08, 0.16, 1)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        GLFW.glfwSwapBuffers(window)
+        GLFW.glfwPollEvents()
+    end
+
+    framebuffer.destroy()
+    mode.destroy()
+    modes.destroy()
+    scale.destroy()
+    physical.destroy()
+    work.destroy()
+    monitors.destroy()
+    GLFW.glfwDestroyWindow(window)
+    GLFW.glfwTerminate()
+    GLFW.lsxUnloadLibraries()
+    return 0
+end

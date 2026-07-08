@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/19_tcp_loopback.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

@@ -1,0 +1,11 @@
+{
+  "entry": "main.lsx",
+  "output": "build/00_glfw_window.exe",
+  "subsystem": "windows",
+  "optimization": 6,
+  "runtimeFiles": [
+    "@LazyScript/native/LSXGameKit.dll",
+    "@LazyScript/runtime/glfw3.dll",
+    "@LazyScript/runtime/OpenAL32.dll"
+  ]
+}

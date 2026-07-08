@@ -1,0 +1,66 @@
+use "../Platform/Win32.lsx" as Win32
+use "OpenAL.lsx" as AL
+
+export const WavPCM = {
+    bytes = 0,
+    data = 0,
+    data_size = 0,
+    sample_rate = 0,
+    format = 0,
+    error = "not loaded",
+
+    release = fn()
+        if self.bytes ~= 0 then memory.free(self.bytes) end
+        self.bytes = 0 self.data = 0 self.data_size = 0 self.sample_rate = 0 self.format = 0
+    end
+}
+
+fn has_id(data, offset, a, b, c, d)
+    return memory.read_u8(data, offset) == a and memory.read_u8(data, offset + 1) == b and memory.read_u8(data, offset + 2) == c and memory.read_u8(data, offset + 3) == d
+end
+
+export fn load(path) -> WavPCM
+    local wav = WavPCM.new()
+    local file = Win32.CreateFileA(path, Win32.GENERIC_READ, Win32.FILE_SHARE_READ, 0, Win32.OPEN_EXISTING, Win32.FILE_ATTRIBUTE_NORMAL, 0)
+    if file == 0 or file == -1 then wav.error = "could not open WAV" return wav end
+    local size = Win32.GetFileSize(file, 0)
+    if size < 44 then Win32.CloseHandle(file) wav.error = "WAV is too small" return wav end
+    wav.bytes = memory.alloc(size)
+    local read_out = memory.alloc(4)
+    if wav.bytes == 0 or read_out == 0 then
+        if read_out ~= 0 then memory.free(read_out) end
+        if wav.bytes ~= 0 then memory.free(wav.bytes) wav.bytes = 0 end
+        Win32.CloseHandle(file) wav.error = "allocation failed" return wav
+    end
+    local ok = Win32.ReadFile(file, wav.bytes, size, read_out, 0)
+    Win32.CloseHandle(file)
+    local read_size = memory.read_u32(read_out, 0)
+    memory.free(read_out)
+    if ok == 0 or read_size ~= size then wav.release() wav.error = "WAV read failed" return wav end
+    if not has_id(wav.bytes, 0, 82, 73, 70, 70) or not has_id(wav.bytes, 8, 87, 65, 86, 69) then wav.release() wav.error = "not a RIFF/WAVE file" return wav end
+
+    local channels = 0 local bits = 0 local pcm = 0 local offset = 12
+    while offset + 8 <= size do
+        local chunk_size = memory.read_u32(wav.bytes, offset + 4)
+        if has_id(wav.bytes, offset, 102, 109, 116, 32) and chunk_size >= 16 then
+            pcm = memory.read_u16(wav.bytes, offset + 8)
+            channels = memory.read_u16(wav.bytes, offset + 10)
+            wav.sample_rate = memory.read_u32(wav.bytes, offset + 12)
+            bits = memory.read_u16(wav.bytes, offset + 22)
+        elseif has_id(wav.bytes, offset, 100, 97, 116, 97) then
+            wav.data = memory.ptr(wav.bytes, offset + 8)
+            wav.data_size = chunk_size
+        end
+        offset = offset + 8 + chunk_size
+        if chunk_size % 2 ~= 0 then offset = offset + 1 end
+    end
+
+    if pcm ~= 1 or wav.data == 0 or wav.sample_rate < 1 then wav.release() wav.error = "only uncompressed PCM WAV is supported" return wav end
+    if channels == 1 and bits == 8 then wav.format = AL.AL_FORMAT_MONO8
+    elseif channels == 1 and bits == 16 then wav.format = AL.AL_FORMAT_MONO16
+    elseif channels == 2 and bits == 8 then wav.format = AL.AL_FORMAT_STEREO8
+    elseif channels == 2 and bits == 16 then wav.format = AL.AL_FORMAT_STEREO16
+    else wav.release() wav.error = "unsupported channel/bit-depth combination" return wav end
+    wav.error = "OK"
+    return wav
+end

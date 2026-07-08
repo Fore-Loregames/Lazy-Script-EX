@@ -1,0 +1,24 @@
+-- Raw WinSock2 imports. Kept in a separate namespace so high-level Socket
+-- methods such as connect(), listen(), send(), and shutdown() never shadow the
+-- native functions they call.
+
+export extern "WS2_32.dll" fn WSAStartup(version:u16, data:ptr) -> i32
+export extern "WS2_32.dll" fn WSACleanup() -> i32
+export extern "WS2_32.dll" fn WSAGetLastError() -> i32
+export extern "WS2_32.dll" fn socket(family:i32, socketType:i32, protocol:i32) -> handle
+export extern "WS2_32.dll" fn closesocket(value:handle) -> i32
+export extern "WS2_32.dll" fn shutdown(value:handle, how:i32) -> i32
+export extern "WS2_32.dll" fn connect(value:handle, address:ptr, addressLength:i32) -> i32
+export extern "WS2_32.dll" fn bind(value:handle, address:ptr, addressLength:i32) -> i32
+export extern "WS2_32.dll" fn listen(value:handle, backlog:i32) -> i32
+export extern "WS2_32.dll" fn accept(value:handle, address:ptr, addressLength:ptr) -> handle
+export extern "WS2_32.dll" fn send(value:handle, data:ptr, length:i32, flags:i32) -> i32
+export extern "WS2_32.dll" fn recv(value:handle, data:ptr, length:i32, flags:i32) -> i32
+export extern "WS2_32.dll" fn sendto(value:handle, data:ptr, length:i32, flags:i32, address:ptr, addressLength:i32) -> i32
+export extern "WS2_32.dll" fn recvfrom(value:handle, data:ptr, length:i32, flags:i32, address:ptr, addressLength:ptr) -> i32
+export extern "WS2_32.dll" fn ioctlsocket(value:handle, command:u32, argument:ptr) -> i32
+export extern "WS2_32.dll" fn setsockopt(value:handle, level:i32, option:i32, optionValue:ptr, optionLength:i32) -> i32
+export extern "WS2_32.dll" fn getaddrinfo(node:string, service:string, hints:ptr, result:ptr) -> i32
+export extern "WS2_32.dll" fn freeaddrinfo(result:ptr) -> void
+export extern "WS2_32.dll" fn getnameinfo(address:ptr, addressLength:i32, host:ptr, hostLength:u32, service:ptr, serviceLength:u32, flags:i32) -> i32
+export extern "WS2_32.dll" fn WSAPoll(descriptors:ptr, count:u32, timeout:i32) -> i32

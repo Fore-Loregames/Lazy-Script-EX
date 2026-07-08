@@ -1,0 +1,22 @@
+{
+  "generatedAt": "2026-07-07T00:00:00.000Z",
+  "glfwFunctions": 124,
+  "glfwConstants": 328,
+  "openGLFunctions": 2541,
+  "openGLConstants": 5244,
+  "openALFunctions": 126,
+  "nativeThreading": "KERNEL32 threads/synchronization plus compiler-emitted x64 lock-prefixed atomics, TLS, affinity",
+  "nativeSockets": "Namespaced raw WinSock2 imports plus typed TCP, UDP, DNS, poll, and nonblocking socket objects",
+  "nativeHttp": "WinHTTP HTTP/HTTPS client",
+  "nativeFileSystem": "KERNEL32 UTF-8 file and directory operations with typed LSX byte/text results",
+  "nativeJson": "LSX-native JSON parser, DOM, builder, serializer, and file loading/saving",
+  "nativeLogging": "Thread-safe flushed text logs plus compiler-generated lifecycle/crash logs",
+  "nativeImages": "Direct stb_image C API through Graphics/STBImage.lsx; Texture2D allocates an annotation-free packed u8 buffer, copies decoded RGBA bytes once, uploads through the same OpenGL path as example 04, preserves row order by default, and exposes explicit flipped loaders for bottom-left UV layouts",
+  "nativeSdfFonts": "Direct FreeType C API declarations plus a thin glyph-slot bridge; FreeType performs font loading, kerning, rasterization, and SDF rendering, while Font.lsx stores atlas pixels in an annotation-free packed u8 buffer",
+  "nativeTextureUpload": "Standard OpenGL glTexImage2D for RGBA byte-buffer uploads; packed Windows x64 helper retained for FreeType single-channel atlas uploads",
+  "nativeGLM": "GLM 1.0.2 wrapped behind LSXMath.dll with LSX-first Vec2/Vec3/Vec4, Mat2/Mat3/Mat4, quaternion, dual-quaternion, transform, projection, decomposition, camera, and OpenGL uniform APIs",
+  "nativeCameraMath": "Typed perspective/orthographic camera wrapper with RH/LH and NO/ZO projection choices; native pointers remain confined to GLMRaw.lsx",
+  "nativeLazyUI": "Inline LSHTML/LSCSS declarations lower to retained LSX element functions; LSCSS supports direct {var} expressions. LazyUI includes real UTF-8 text inputs and multiline textareas, caret/selection/clipboard editing, password masking, checkboxes, radios, switches, ranges, color values, mouse-wheel and draggable scrollbars, editor/game controls, events, flex/grid/absolute layout, and declarative canvas elements. Future LSHTMLRunner/ECS attachment metadata is present without exposing pointers in user LSX.",
+  "lazyUIRenderer": "OpenGL 4.6 retained UI renderer using ordinary flat LSX instance tables. Panels, control parts, visible scrollbars, SDF glyphs, and images remain batched; boxes and glyphs use four-corner GL_TRIANGLE_STRIP instancing, images use texture-grouped base-instance draws, and grow-only GPU buffers update through glBufferSubData. Analytical rounded corners, borders, outlines, shadows, CSS gradients, clipping, and transparent retained submission remain supported.",
+  "lazyUICanvas": "Declarative LSHTML canvas elements for rectangles, circles, ellipses, lines, triangles, polygons, polylines, paths, text, and images. Fill, stroke, borders, radii, shadows, opacity, transforms, and gradients come from LSCSS; the low-level retained CanvasContext remains a compatibility backend."
+}

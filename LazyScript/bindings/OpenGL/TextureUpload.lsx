@@ -1,0 +1,77 @@
+use "../GLFW/GLFW.lsx" as GLFW
+use "OpenGL46.lsx" as GL
+
+-- Exact Windows x64 ABI call for glTexImage2D. The nine C arguments are packed
+-- into one fixed-layout object before crossing into the native function.
+
+export const ERROR_MISSING_PROC = 0x7FFFFFFF
+
+const TexImage2DArgs = {
+    target:u32 = 0,
+    level:i32 = 0,
+    internal_format:i32 = 0,
+    width:i32 = 0,
+    height:i32 = 0,
+    border:i32 = 0,
+    format:u32 = 0,
+    pixel_type:u32 = 0,
+    pixels:ptr = null
+}
+
+extern "LSXGLABI.dll" fn lsxGlTexImage2DCall(functionPointer:ptr, arguments:ptr) -> i32
+
+fn submit(arguments:TexImage2DArgs) -> u32
+    local procedure = GLFW.glfwGetProcAddress("glTexImage2D")
+    if procedure == 0 then
+        arguments.destroy()
+        return ERROR_MISSING_PROC
+    end
+    while GL.glGetError() ~= GL.GL_NO_ERROR do end
+    local called = lsxGlTexImage2DCall(procedure,arguments)
+    local errorCode = GL.glGetError()
+    arguments.destroy()
+    if called == 0 then return ERROR_MISSING_PROC end
+    return errorCode
+end
+
+export fn rgba8(width:i32, height:i32, pixels:ptr, srgb:bool) -> u32
+    local arguments = TexImage2DArgs.new()
+    arguments.target = GL.GL_TEXTURE_2D
+    arguments.level = 0
+    arguments.internal_format = GL.GL_RGBA8
+    if srgb then arguments.internal_format = GL.GL_SRGB8_ALPHA8 end
+    arguments.width = width
+    arguments.height = height
+    arguments.border = 0
+    arguments.format = GL.GL_RGBA
+    arguments.pixel_type = GL.GL_UNSIGNED_BYTE
+    arguments.pixels = pixels
+    return submit(arguments)
+end
+
+export fn r8(width:i32, height:i32, pixels:ptr) -> u32
+    local arguments = TexImage2DArgs.new()
+    arguments.target = GL.GL_TEXTURE_2D
+    arguments.level = 0
+    -- RGBA8 storage with a one-channel source is valid in core OpenGL and
+    -- avoids the driver-specific R8 rejection seen on the target machine.
+    arguments.internal_format = GL.GL_RGBA8
+    arguments.width = width
+    arguments.height = height
+    arguments.border = 0
+    arguments.format = GL.GL_RED
+    arguments.pixel_type = GL.GL_UNSIGNED_BYTE
+    arguments.pixels = pixels
+    return submit(arguments)
+end
+
+export fn error_text(errorCode:u32) -> string
+    if errorCode == GL.GL_NO_ERROR then return "No OpenGL error" end
+    if errorCode == GL.GL_INVALID_ENUM then return "OpenGL texture upload failed: GL_INVALID_ENUM" end
+    if errorCode == GL.GL_INVALID_VALUE then return "OpenGL texture upload failed: GL_INVALID_VALUE" end
+    if errorCode == GL.GL_INVALID_OPERATION then return "OpenGL texture upload failed: GL_INVALID_OPERATION" end
+    if errorCode == GL.GL_INVALID_FRAMEBUFFER_OPERATION then return "OpenGL texture upload failed: GL_INVALID_FRAMEBUFFER_OPERATION" end
+    if errorCode == GL.GL_OUT_OF_MEMORY then return "OpenGL texture upload failed: GL_OUT_OF_MEMORY" end
+    if errorCode == ERROR_MISSING_PROC then return "OpenGL texture upload failed: glTexImage2D was not available from the current context" end
+    return "OpenGL texture upload failed: unknown error"
+end

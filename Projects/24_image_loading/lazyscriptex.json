@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/24_image_loading.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

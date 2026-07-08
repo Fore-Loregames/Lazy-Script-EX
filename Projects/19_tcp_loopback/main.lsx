@@ -1,0 +1,219 @@
+use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
+use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/bindings/Text/FreeType.lsx" as FreeType
+use "@LazyScript/bindings/Text/Font.lsx" as Font
+use "@LazyScript/bindings/System/Threading.lsx" as Threading
+use "@LazyScript/bindings/Network/Sockets.lsx" as Sockets
+use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+
+const ServerState = {
+    ready = null,
+    stage = null,
+    stop = null,
+    port = null,
+    request_length = 0
+}
+
+fn server_main(state)
+    local server = Sockets.Socket.listen("127.0.0.1",state.port,8)
+    if not server.valid() then
+        state.stage.store(-1)
+        state.ready.set()
+        return 1
+    end
+
+    server.set_nonblocking(true)
+    state.stage.store(1)
+    state.ready.set()
+
+    local peer = Sockets.Socket.new()
+    while state.stop.load() == 0 and not peer.valid() do
+        peer.destroy()
+        peer = server.accept()
+        if not peer.valid() then system.sleep(10) end
+    end
+
+    if not peer.valid() then
+        server.close()
+        peer.destroy()
+        return 2
+    end
+
+    peer.set_nonblocking(false)
+    state.stage.store(2)
+    local request = peer.receive_exact(state.request_length,0)
+    if request.length() ~= state.request_length then
+        state.stage.store(-2)
+    elseif peer.send_text("SERVER ACK: HELLO LSX",0) ~= string.length("SERVER ACK: HELLO LSX") then
+        state.stage.store(-3)
+    else
+        state.stage.store(3)
+    end
+    request.destroy()
+
+    while state.stop.load() == 0 do system.sleep(10) end
+
+    peer.shutdown(Sockets.SD_BOTH)
+    peer.close()
+    peer.destroy()
+    server.close()
+    server.destroy()
+    return 0
+end
+
+fn fatal(message)
+    Win32.MessageBoxA(0,message,"LazyScriptEX TCP client",Win32.MB_OK + Win32.MB_ICONERROR)
+    return 1
+end
+
+fn main()
+    if not Sockets.initialize() then return fatal("WinSock2 initialization failed.") end
+
+    local ready = Threading.Event.create(true,false)
+    local stage = Threading.AtomicI32.new()
+    local stop = Threading.AtomicI32.new()
+    local state = ServerState.new()
+    state.ready = ready
+    state.stage = stage
+    state.stop = stop
+    state.port = "39191"
+    state.request_length = string.length("CLIENT HELLO LAZYSCRIPTEX")
+
+    local serverThread = Threading.Thread.start(server_main,state)
+    if not serverThread.valid() then
+        state.destroy()
+        stop.destroy()
+        stage.destroy()
+        ready.close()
+        ready.destroy()
+        Sockets.cleanup()
+        return fatal("The TCP server thread could not start.")
+    end
+
+    ready.wait(5000)
+    local client = Sockets.Socket.connect("127.0.0.1",state.port)
+    local connected = client.valid()
+    local communicated = false
+    if connected then
+        client.set_no_delay(true)
+        local sent = client.send_text("CLIENT HELLO LAZYSCRIPTEX",0)
+        if sent == state.request_length then
+            local reply = client.receive_exact(string.length("SERVER ACK: HELLO LSX"),0)
+            communicated = reply.length() == string.length("SERVER ACK: HELLO LSX")
+            reply.destroy()
+        end
+    end
+
+    local statusText = "LazyScriptEX TCP client\n\n[FAILED] The local client could not connect to the server.\n\nClose this window to stop the test."
+    if connected then
+        statusText = "LazyScriptEX TCP client\n\n[SERVER] Listening on 127.0.0.1:39191\n[CLIENT] Connected to the server\n[CLIENT -> SERVER] CLIENT HELLO LAZYSCRIPTEX\n\n[FAILED] The reply was not received.\n\nThe connection remains open until this window closes."
+    end
+    if connected and communicated and stage.load() == 3 then
+        statusText = "LazyScriptEX TCP client\n\n[SERVER] Listening on 127.0.0.1:39191\n[CLIENT] Connected to the server\n[CLIENT -> SERVER] CLIENT HELLO LAZYSCRIPTEX\n[SERVER -> CLIENT] SERVER ACK: HELLO LSX\n\n[OK] Connection is open and both sides communicated.\nClose this window to disconnect both sides."
+    end
+
+    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then
+        stop.store(1)
+        if connected then client.close() end
+        serverThread.join()
+        serverThread.close()
+        client.destroy()
+        state.destroy()
+        stop.destroy()
+        stage.destroy()
+        ready.close()
+        ready.destroy()
+        Sockets.cleanup()
+        return fatal("GLFW initialization failed.")
+    end
+
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
+    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
+    local window = GLFW.glfwCreateWindow(1080,620,"19 - TCP server and client",0,0)
+    if window == 0 then return fatal("The TCP client window could not be created.") end
+    GLFW.glfwMakeContextCurrent(window)
+    GLFW.glfwSwapInterval(1)
+    if GL.lsxLoadOpenGL() < 1 then return fatal("OpenGL initialization failed.") end
+    if not FreeType.ready() then return fatal("FreeType initialization failed.") end
+
+    local face = FreeType.load("C:/Windows/Fonts/segoeui.ttf",38)
+    local atlas = Font.create_ascii_atlas(face)
+    local text = Font.build_text(face,atlas,statusText,42,36,1)
+    local atlasTexture = Font.upload_atlas(atlas)
+    if not face.valid() or not atlas.valid() or not text.valid() or not atlasTexture.valid() then
+        return fatal("The TCP client text view could not be created.")
+    end
+
+    local vertexShader = `#version 460 core
+layout(location=0) in vec2 position;
+layout(location=1) in vec2 inputUV;
+uniform vec2 viewport;
+out vec2 uv;
+void main(){uv=inputUV;vec2 ndc=(position/viewport)*vec2(2.0,-2.0)+vec2(-1.0,1.0);gl_Position=vec4(ndc,0.0,1.0);}`
+    local fragmentShader = `#version 460 core
+in vec2 uv;
+out vec4 color;
+uniform sampler2D fontAtlas;
+void main(){float d=texture(fontAtlas,uv).r;float w=max(fwidth(d),0.002);float a=smoothstep(0.5-w,0.5+w,d);color=vec4(0.90,0.95,1.0,a);}`
+    local program = GL.lsxCreateProgram(vertexShader,fragmentShader)
+    if program == 0 then return fatal("The TCP client text shader failed.") end
+
+    local vao = GL.createVertexArray()
+    local vbo = GL.createBuffer()
+    GL.glBindVertexArray(vao)
+    GL.glBindBuffer(GL.GL_ARRAY_BUFFER,vbo)
+    GL.glBufferData(GL.GL_ARRAY_BUFFER,text.vertices.byte_length(),text.vertices,GL.GL_STATIC_DRAW)
+    GL.glVertexAttribPointer(0,2,GL.GL_FLOAT,0,16,0)
+    GL.glEnableVertexAttribArray(0)
+    GL.glVertexAttribPointer(1,2,GL.GL_FLOAT,0,16,8)
+    GL.glEnableVertexAttribArray(1)
+    GL.glEnable(GL.GL_BLEND)
+    GL.glBlendFunc(GL.GL_SRC_ALPHA,GL.GL_ONE_MINUS_SRC_ALPHA)
+    local viewportLocation = GL.glGetUniformLocation(program,"viewport")
+    local atlasLocation = GL.glGetUniformLocation(program,"fontAtlas")
+    local framebuffer = GLFW.FramebufferSize.new()
+
+    while GLFW.glfwWindowShouldClose(window) == 0 do
+        framebuffer.refresh(window)
+        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
+        GL.glClearColor(0.025,0.03,0.05,1)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        GL.glUseProgram(program)
+        GL.glUniform2f(viewportLocation,framebuffer.width,framebuffer.height)
+        GL.glUniform1i(atlasLocation,0)
+        atlasTexture.bind(0)
+        GL.glBindVertexArray(vao)
+        GL.glDrawArrays(GL.GL_TRIANGLES,0,text.vertices.length() / 4)
+        GLFW.glfwSwapBuffers(window)
+        GLFW.glfwPollEvents()
+    end
+
+    stop.store(1)
+    if client.valid() then
+        client.shutdown(Sockets.SD_BOTH)
+        client.close()
+    end
+    serverThread.join()
+    serverThread.close()
+
+    framebuffer.destroy()
+    atlasTexture.destroy()
+    text.destroy()
+    atlas.destroy()
+    face.destroy()
+    GL.deleteBuffer(vbo)
+    GL.deleteVertexArray(vao)
+    GL.glDeleteProgram(program)
+    GLFW.glfwDestroyWindow(window)
+    GLFW.glfwTerminate()
+    GLFW.lsxUnloadLibraries()
+    client.destroy()
+    state.destroy()
+    stop.destroy()
+    stage.destroy()
+    ready.close()
+    ready.destroy()
+    Sockets.cleanup()
+    return 0
+end

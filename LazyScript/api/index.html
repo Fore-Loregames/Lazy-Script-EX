@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>LazyScriptEX Guide and API</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">LSX</div>
+        <div>
+          <strong>LazyScriptEX</strong>
+          <span>Guide and complete API</span>
+        </div>
+      </div>
+
+      <div class="sidebar-tabs" role="tablist" aria-label="Documentation navigation">
+        <button class="sidebar-tab active" id="guide-tab" data-sidebar-pane="guide" role="tab" aria-selected="true">Guide</button>
+        <button class="sidebar-tab" id="api-tab" data-sidebar-pane="api" role="tab" aria-selected="false">API index</button>
+      </div>
+
+      <div class="sidebar-pane active" id="guide-nav-pane" data-sidebar-pane-content="guide" role="tabpanel" aria-labelledby="guide-tab">
+        <nav class="side-nav guide-tree" aria-label="Guide sections">
+          <div class="guide-nav-group">
+            <span class="guide-nav-label">Install and start</span>
+            <a href="#setup" class="nav-link active">Required setup</a>
+            <a href="#first-project" class="nav-link nav-sub">Create a project</a>
+            <a href="#first-window" class="nav-link nav-sub">Create a window</a>
+          </div>
+          <div class="guide-nav-group">
+            <span class="guide-nav-label">Learn LSX</span>
+            <a href="#language-basics" class="nav-link">Language overview</a>
+            <a href="#values" class="nav-link nav-sub">Values and variables</a>
+            <a href="#conditions" class="nav-link nav-sub">If, elseif, and else</a>
+            <a href="#loops" class="nav-link nav-sub">While and for loops</a>
+            <a href="#functions" class="nav-link nav-sub">Functions and return</a>
+            <a href="#tables" class="nav-link nav-sub">Tables and buffers</a>
+            <a href="#objects" class="nav-link nav-sub">Objects and methods</a>
+            <a href="#modules" class="nav-link nav-sub">Modules and imports</a>
+          </div>
+          <div class="guide-nav-group">
+            <span class="guide-nav-label">Build interfaces</span>
+            <a href="#ui-basics" class="nav-link">LSHTML and LSCSS</a>
+            <a href="#live-examples" class="nav-link nav-sub">Live examples</a>
+            <a href="#scrolling" class="nav-link nav-sub">Scrolling and scrollbars</a>
+            <a href="#full-app" class="nav-link nav-sub">Complete UI application</a>
+            <a href="#elements" class="nav-link nav-sub">Element cheat sheet</a>
+          </div>
+          <div class="guide-nav-group">
+            <span class="guide-nav-label">Look up anything</span>
+            <a href="#api-reference" class="nav-link" data-open-api-index="true">Complete API reference</a>
+          </div>
+        </nav>
+
+        <div class="sidebar-note">
+          <strong>Beginner rule</strong>
+          <p>Write ordinary variables and functions. Let LSX infer the types.</p>
+        </div>
+      </div>
+
+      <div class="sidebar-pane" id="api-nav-pane" data-sidebar-pane-content="api" role="tabpanel" aria-labelledby="api-tab" hidden>
+        <div class="api-nav-head">
+          <label for="api-nav-search">Find any API</label>
+          <input id="api-nav-search" type="search" placeholder="Try: Vec3, quaternion, texture..." autocomplete="off">
+          <div class="api-nav-count" id="api-nav-count"></div>
+        </div>
+        <nav class="api-nav-tree" id="api-nav-tree" aria-label="Complete API categories"></nav>
+      </div>
+    </aside>
+
+    <div class="page">
+      <header class="topbar">
+        <button class="icon-button menu-button" id="menu-button" aria-label="Open navigation">Menu</button>
+        <div class="topbar-search">
+          <label for="site-search">Search this guide</label>
+          <input id="site-search" type="search" placeholder="Try: scrollbar, button, input, texture..." autocomplete="off">
+          <div class="search-results" id="site-search-results" hidden></div>
+        </div>
+        <a class="top-link" href="#api-reference">API reference</a>
+      </header>
+
+      <main>
+        <section class="doc-section setup-section" id="setup" data-search="setup install runtime vscode extension startup setup-runtime build all examples windows warning first steps">
+          <div class="section-heading">
+            <span class="step-number">00</span>
+            <div>
+              <span class="eyebrow">Do this before writing code</span>
+              <h1>Set up LazyScriptEX in two required steps.</h1>
+              <p>The third step is optional, but it rebuilds every example on your own computer so Windows treats the executables as locally created files.</p>
+            </div>
+          </div>
+
+          <div class="setup-grid">
+            <article class="setup-card required">
+              <span class="setup-badge">Required · Step 1</span>
+              <h2>Download the runtime libraries</h2>
+              <p>From the toolkit root, run <code>setup-runtime.bat</code>. It launches the PowerShell setup script and downloads the native libraries used by windows, graphics, audio, fonts, images, and the other wrapped systems.</p>
+              <div class="file-location"><span>Toolkit root</span><code>setup-runtime.bat</code></div>
+              <a class="button primary file-action" href="../../setup-runtime.bat">Open setup-runtime.bat</a>
+              <div class="setup-result"><strong>You are done when:</strong> the script finishes successfully and the runtime/native DLL files are present.</div>
+            </article>
+
+            <article class="setup-card required">
+              <span class="setup-badge">Required · Step 2</span>
+              <h2>Install the VS Code extension</h2>
+              <p>Run <code>INSTALL_VSCODE_EXTENSION.bat</code>, restart VS Code, then open the entire LazyScriptEX toolkit folder. Opening only one project prevents the extension from finding every <code>@LazyScript</code> import.</p>
+              <div class="file-location"><span>Toolkit root</span><code>INSTALL_VSCODE_EXTENSION.bat</code></div>
+              <a class="button primary file-action" href="../../INSTALL_VSCODE_EXTENSION.bat">Open VS Code installer</a>
+              <div class="setup-result"><strong>You are done when:</strong> LSX files have highlighting, completion, hover help, and compiler errors in the Problems panel.</div>
+            </article>
+
+            <article class="setup-card optional">
+              <span class="setup-badge">Optional · Step 3</span>
+              <h2>Rebuild every bundled example</h2>
+              <p>Run <code>build-all.bat</code> to compile all example executables on your own machine. This is useful when Windows warns about the prebuilt downloaded executables. You only need to do it once unless the compiler or examples change.</p>
+              <div class="file-location"><span>Toolkit root</span><code>build-all.bat</code></div>
+              <a class="button secondary file-action" href="../../build-all.bat">Open build-all.bat</a>
+              <div class="setup-result"><strong>What it does:</strong> runs the <code>build.bat</code> inside every folder under <code>Projects</code>.</div>
+            </article>
+          </div>
+
+          <div class="callout warning">
+            <strong>Keep the folder structure together.</strong>
+            <p>Projects locate <code>LazyScript/compiler</code>, bindings, runtime files, and native libraries by walking up the workspace tree. Do not copy only <code>main.lsx</code> into an unrelated folder and expect the imports to resolve.</p>
+          </div>
+        </section>
+
+        <section class="hero doc-section" id="first-project" data-search="first project new-project bat folder main lsx config build run executable project template">
+          <div class="hero-copy">
+            <span class="eyebrow">Your first project</span>
+            <h2>Create a working project before changing any code.</h2>
+            <p class="hero-lead">Use the included template so the compiler configuration, build script, runtime lookup, and output folder are already correct.</p>
+            <div class="hero-actions">
+              <a class="button primary" href="../../new-project.bat">Open new-project.bat</a>
+              <a class="button secondary" href="#first-window">See the complete window</a>
+            </div>
+          </div>
+          <div class="code-card compact">
+            <div class="code-card-head"><span>Command Prompt from the toolkit root</span><button class="copy-button" data-copy-target="new-project-command">Copy</button></div>
+            <pre id="new-project-command"><code>new-project.bat MyFirstGame</code></pre>
+          </div>
+
+          <div class="project-layout">
+            <article><code>Projects/MyFirstGame/main.lsx</code><strong>Your game code</strong><p><code>main()</code> is where the executable begins.</p></article>
+            <article><code>Projects/MyFirstGame/lazyscriptex.json</code><strong>Build settings</strong><p>Chooses the entry file, output EXE, subsystem, optimization, and optional runtime files.</p></article>
+            <article><code>Projects/MyFirstGame/build.bat</code><strong>Build shortcut</strong><p>Finds the compiler and builds the project using its JSON configuration.</p></article>
+            <article><code>Projects/MyFirstGame/build/</code><strong>Compiled output</strong><p>Your EXE and copied runtime files appear here after a successful build.</p></article>
+          </div>
+
+          <div class="run-steps">
+            <article><b>1</b><div><h3>Open the toolkit root in VS Code</h3><p>Use <strong>File → Open Folder</strong> and select the folder containing <code>LazyScript</code> and <code>Projects</code>.</p></div></article>
+            <article><b>2</b><div><h3>Edit <code>Projects/MyFirstGame/main.lsx</code></h3><p>The template already contains a complete native window.</p></div></article>
+            <article><b>3</b><div><h3>Run <code>Projects/MyFirstGame/build.bat</code></h3><p>Fix any errors shown by the terminal or VS Code Problems panel.</p></div></article>
+            <article><b>4</b><div><h3>Run <code>Projects/MyFirstGame/build/MyFirstGame.exe</code></h3><p>The executable starts directly as native Windows x64 code.</p></div></article>
+          </div>
+        </section>
+
+        <section class="doc-section" id="first-window" data-search="create window glfw opengl main loop frame buffer clear close cleanup complete code first game window">
+          <div class="section-heading">
+            <span class="step-number">01</span>
+            <div>
+              <span class="eyebrow">Create a native window</span>
+              <h2>This is the smallest complete window program.</h2>
+              <p>Nothing is left as a placeholder. It loads the runtime, initializes GLFW, creates an OpenGL 4.6 window, runs a frame loop, handles resizing, and releases every owned resource.</p>
+            </div>
+          </div>
+
+          <div class="window-guide-layout">
+            <div class="code-card tall">
+              <div class="code-card-head"><span>main.lsx</span><button class="copy-button" data-copy-target="first-window-code">Copy complete file</button></div>
+              <pre id="first-window-code"><code>use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
+use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+
+fn fail(message)
+    Win32.MessageBoxA(0, message, "My First LSX Window", Win32.MB_OK + Win32.MB_ICONERROR)
+    return 1
+end
+
+fn main()
+    if GLFW.lsxLoadLibraries() &lt; 1 then
+        return fail("Runtime libraries are missing. Run setup-runtime.bat.")
+    end
+
+    if GLFW.glfwInit() == 0 then
+        return fail("GLFW could not start.")
+    end
+
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR, 4)
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR, 6)
+    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE, GLFW.GLFW_OPENGL_CORE_PROFILE)
+    GLFW.glfwWindowHint(GLFW.GLFW_RESIZABLE, GLFW.GLFW_TRUE)
+
+    local window = GLFW.glfwCreateWindow(1280, 720, "My First LSX Window", 0, 0)
+    if window == 0 then
+        GLFW.glfwTerminate()
+        GLFW.lsxUnloadLibraries()
+        return fail("The window could not be created.")
+    end
+
+    GLFW.glfwMakeContextCurrent(window)
+    GLFW.glfwSwapInterval(1)
+
+    if GL.lsxLoadOpenGL() &lt; 1 then
+        GLFW.glfwDestroyWindow(window)
+        GLFW.glfwTerminate()
+        GLFW.lsxUnloadLibraries()
+        return fail("OpenGL functions could not be loaded.")
+    end
+
+    local framebuffer = GLFW.FramebufferSize.new()
+
+    while GLFW.glfwWindowShouldClose(window) == 0 do
+        framebuffer.refresh(window)
+        GL.glViewport(0, 0, framebuffer.width, framebuffer.height)
+        GL.glClearColor(0.03, 0.05, 0.09, 1.0)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+
+        GLFW.glfwSwapBuffers(window)
+        GLFW.glfwPollEvents()
+    end
+
+    framebuffer.destroy()
+    GLFW.glfwDestroyWindow(window)
+    GLFW.glfwTerminate()
+    GLFW.lsxUnloadLibraries()
+    return 0
+end</code></pre>
+            </div>
+            <div class="window-anatomy">
+              <article><b>1</b><div><h3>Load the libraries</h3><p><code>GLFW.lsxLoadLibraries()</code> loads the DLLs installed by <code>setup-runtime.bat</code>. <code>glfwInit()</code> starts the windowing system.</p></div></article>
+              <article><b>2</b><div><h3>Choose the OpenGL version</h3><p>The window hints request an OpenGL 4.6 core context and allow the window to be resized.</p></div></article>
+              <article><b>3</b><div><h3>Create the window</h3><p><code>glfwCreateWindow(width, height, title, monitor, shared)</code> returns the native window handle. A result of <code>0</code> means creation failed.</p></div></article>
+              <article><b>4</b><div><h3>Make the context current</h3><p>OpenGL calls affect the window whose context is current. <code>glfwSwapInterval(1)</code> enables normal VSync.</p></div></article>
+              <article><b>5</b><div><h3>Run the game loop</h3><p>The loop continues until the user closes the window. Each frame refreshes the framebuffer size, clears the screen, presents the frame, and processes Windows events.</p></div></article>
+              <article><b>6</b><div><h3>Clean up in reverse order</h3><p>Destroy owned helper objects, destroy the window, terminate GLFW, and unload the libraries.</p></div></article>
+            </div>
+          </div>
+
+          <div class="config-guide">
+            <div>
+              <h3>The matching <code>lazyscriptex.json</code></h3>
+              <p>The template already contains this file. Change the output name when you rename your project.</p>
+            </div>
+            <div class="code-card compact">
+              <div class="code-card-head"><span>lazyscriptex.json</span><button class="copy-button" data-copy-target="first-config-code">Copy</button></div>
+              <pre id="first-config-code"><code>{
+  "entry": "main.lsx",
+  "output": "build/MyFirstGame.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}</code></pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="doc-section language-section" id="language-basics" data-search="language beginner values variables if elseif else while for loop functions tables objects modules imports use">
+          <div class="section-heading">
+            <span class="step-number">02</span>
+            <div>
+              <span class="eyebrow">The LSX language</span>
+              <h2>Learn the pieces you will use in nearly every game script.</h2>
+              <p>The examples below use the actual inference-only syntax used by the bundled projects. The API index now groups these under meaningful sections such as <strong>Control flow</strong>, <strong>Tables</strong>, <strong>Objects</strong>, and <strong>Modules</strong>.</p>
+            </div>
+          </div>
+
+          <article class="lesson-block" id="values" data-search="local const values numbers strings booleans null assignment inference">
+            <div class="lesson-copy"><span class="lesson-number">2.1</span><h3>Values and variables</h3><p>Use <code>local</code> for a value owned by the current function. Use <code>const</code> for a reusable object definition or module-level constant. LSX infers the representation from the assigned value and how it is used.</p></div>
+            <div class="code-card"><div class="code-card-head"><span>Common values</span><button class="copy-button" data-copy-target="values-code">Copy</button></div><pre id="values-code"><code>local lives = 3
+local speed = 6.5
+local player_name = "Ari"
+local is_running = true
+local selected_enemy = null
+
+lives = lives - 1
+is_running = lives &gt; 0</code></pre></div>
+            <div class="plain-language"><strong>Read it as:</strong> “Create five local values, then reduce the lives and set <code>is_running</code> from the comparison.”</div>
+          </article>
+
+          <article class="lesson-block" id="conditions" data-search="if elseif else then end comparisons and or not condition branch">
+            <div class="lesson-copy"><span class="lesson-number">2.2</span><h3>If, elseif, and else</h3><p>Use a condition when only one branch should run. Conditions can compare numbers, strings, booleans, object references, and <code>null</code>.</p></div>
+            <div class="code-card"><div class="code-card-head"><span>Choose one branch</span><button class="copy-button" data-copy-target="conditions-code">Copy</button></div><pre id="conditions-code"><code>if health &lt;= 0 then
+    console.write_line("The player was defeated.")
+elseif health &lt; 30 then
+    console.write_line("The player is badly hurt.")
+else
+    console.write_line("The player is ready.")
+end</code></pre></div>
+            <div class="usage-notes"><div><code>==</code><span>equal</span></div><div><code>~=</code><span>not equal</span></div><div><code>&lt; &lt;= &gt; &gt;=</code><span>number comparisons</span></div><div><code>and / or / not</code><span>combine conditions</span></div></div>
+          </article>
+
+          <article class="lesson-block" id="loops" data-search="while for in loop break table iteration repeated update game loop">
+            <div class="lesson-copy"><span class="lesson-number">2.3</span><h3>While loops and for-in loops</h3><p>Use <code>while</code> when a condition decides how long the loop runs. Use <code>for item in table</code> for a growable table created with <code>{}</code> and filled with <code>push()</code>.</p></div>
+            <div class="two-code-grid">
+              <div class="code-card"><div class="code-card-head"><span>Count with while</span><button class="copy-button" data-copy-target="while-code">Copy</button></div><pre id="while-code"><code>local index = 0
+local total = 0
+while index &lt; 5 do
+    total = total + index
+    index = index + 1
+end</code></pre></div>
+              <div class="code-card"><div class="code-card-head"><span>Read every table item</span><button class="copy-button" data-copy-target="for-code">Copy</button></div><pre id="for-code"><code>local scores = {}
+scores.push(10)
+scores.push(20)
+scores.push(30)
+
+local total = 0
+for score in scores do
+    total = total + score
+end
+
+scores.destroy()</code></pre></div>
+            </div>
+            <div class="callout info"><strong>Important table distinction:</strong><p><code>{10, 20, 30}</code> is a fixed positional native value. A growable table starts as <code>{}</code> and learns its element layout from <code>push()</code>, indexed assignment, or another use. Use the growable form for <code>for ... in</code>.</p></div>
+          </article>
+
+          <article class="lesson-block" id="functions" data-search="fn function parameters return call reusable code main">
+            <div class="lesson-copy"><span class="lesson-number">2.4</span><h3>Functions and return values</h3><p>A function begins with <code>fn</code> and ends with <code>end</code>. Parameter and return types are inferred from the calls and expressions. <code>main()</code> is the entry point of an executable.</p></div>
+            <div class="code-card"><div class="code-card-head"><span>Reusable function</span><button class="copy-button" data-copy-target="function-code">Copy</button></div><pre id="function-code"><code>fn clamp_health(health)
+    if health &lt; 0 then return 0 end
+    if health &gt; 100 then return 100 end
+    return health
+end
+
+fn main()
+    local health = clamp_health(135)
+    if health == 100 then
+        console.write_line("Health was clamped to 100.")
+    end
+    return 0
+end</code></pre></div>
+            <div class="plain-language"><strong>Why return <code>0</code> from main?</strong> It tells Windows that the program ended successfully. Non-zero values normally represent a failure.</div>
+          </article>
+
+          <article class="lesson-block table-lesson" id="tables" data-search="tables list collection packed literal vertices indices inventory entities push get length remove clear destroy data byte length buffer">
+            <div class="lesson-copy"><span class="lesson-number">2.5</span><h3>Tables: objects, lists, and native buffers</h3><p>LSX uses braces for several related jobs. Calling everything a “collection” or “packed literal” hides the useful distinction, so the guide and API now call them <strong>tables</strong> and explain which form fits the task.</p></div>
+            <div class="table-use-grid">
+              <article><span class="table-kind">Object table</span><h4>Named fields that describe one thing</h4><pre><code>const Player = {
+    name = "Hero"
+    health = 100
+}
+
+local player = Player.new()
+player.health = 75
+player.destroy()</code></pre><p>Use for players, components, settings, resources, events, and structured state.</p></article>
+              <article><span class="table-kind">Growable table</span><h4>A list that changes at runtime</h4><pre><code>local enemies = {}
+enemies.push(first_enemy)
+enemies.push(second_enemy)
+
+local count = enemies.length()
+local first = enemies.get(0)
+enemies.remove(0)
+enemies.destroy()</code></pre><p>Use for inventories, entities, UI rows, queued jobs, loaded assets, and other changing lists.</p></article>
+              <article><span class="table-kind">Fixed positional table</span><h4>A small native value with positions</h4><pre><code>local position = {10.0, 20.0, 30.0}
+position.x = position.x + 1.0
+local component_count = position.length()
+position.destroy()</code></pre><p>Use for compact vectors, colors, and small fixed groups of values. <code>x/y/z/w</code> and <code>r/g/b/a</code> alias the first positions.</p></article>
+              <article><span class="table-kind">Flat numeric buffer</span><h4>Contiguous data for native APIs</h4><pre><code>local vertices = {
+    -1.0, -1.0, 0.0,
+     1.0, -1.0, 0.0,
+     0.0,  1.0, 0.0
+}
+
+GL.glBufferData(
+    GL.GL_ARRAY_BUFFER,
+    vertices.byte_length(),
+    vertices,
+    GL.GL_STATIC_DRAW
+)
+vertices.destroy()</code></pre><p>Use for mesh vertices, indices, pixels, audio samples, uniform data, and other native buffers. The compiler passes the contiguous storage directly.</p></article>
+            </div>
+            <div class="method-reference">
+              <h4>Everyday growable-table operations</h4>
+              <div><code>push(value)</code><span>Add a value and return its index.</span></div>
+              <div><code>get(index)</code><span>Read the value at a zero-based index.</span></div>
+              <div><code>length()</code><span>Return the number of stored values.</span></div>
+              <div><code>is_empty()</code><span>Return true when the table contains no values.</span></div>
+              <div><code>remove(index)</code><span>Remove one value while keeping the remaining order.</span></div>
+              <div><code>remove_fast(index)</code><span>Remove quickly by moving the final value into the removed slot; order can change.</span></div>
+              <div><code>clear()</code><span>Remove all values but keep allocated capacity for reuse.</span></div>
+              <div><code>destroy()</code><span>Release the table's owned storage when the table is no longer needed.</span></div>
+            </div>
+          </article>
+
+          <article class="lesson-block" id="objects" data-search="object new fields methods self dot access destroy clone base inheritance">
+            <div class="lesson-copy"><span class="lesson-number">2.6</span><h3>Objects, fields, and methods</h3><p>Define an object with named fields and function fields, create an instance with <code>.new()</code>, and use dot access everywhere. Methods receive the current object as <code>self</code>.</p></div>
+            <div class="code-card"><div class="code-card-head"><span>Object with behavior</span><button class="copy-button" data-copy-target="object-code">Copy</button></div><pre id="object-code"><code>const Player = {
+    name = "Hero"
+    health = 100
+
+    take_damage = fn(amount)
+        self.health = self.health - amount
+        if self.health &lt; 0 then self.health = 0 end
+    end
+}
+
+local player = Player.new()
+player.take_damage(25)
+if player.health == 75 then
+    console.write_line("Damage was applied.")
+end
+player.destroy()</code></pre></div>
+            <div class="plain-language"><strong>Ownership rule:</strong> when your code creates an owned object with <code>.new()</code>, keep it while needed and call <code>.destroy()</code> when finished unless the API entry says another object owns it.</div>
+          </article>
+
+          <article class="lesson-block" id="modules" data-search="module use import alias LazyScript bindings file split code export">
+            <div class="lesson-copy"><span class="lesson-number">2.7</span><h3>Modules and imports</h3><p><code>use</code> loads another LSX module and gives it a short alias. <code>@LazyScript</code> starts at the toolkit's <code>LazyScript</code> folder, which is why the whole toolkit root should be opened in VS Code.</p></div>
+            <div class="code-card"><div class="code-card-head"><span>Import wrapped systems</span><button class="copy-button" data-copy-target="module-code">Copy</button></div><pre id="module-code"><code>use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
+use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/bindings/Math/GLM.lsx" as GLM
+
+fn main()
+    local direction = GLM.vec3(0.0, 0.0, -1.0)
+    local forward_z = direction.z
+    direction.destroy()
+    return 0
+end</code></pre></div>
+            <div class="callout good"><strong>Read the alias literally.</strong><p><code>GLFW.glfwInit()</code> means “call <code>glfwInit</code> from the module imported as <code>GLFW</code>.” <code>GLM.vec3()</code> means “create a Vec3 using the GLM wrapper.”</p></div>
+          </article>
+        </section>
+
+        <section class="doc-section" id="ui-basics" data-search="lshtml lscss lazyui markup css styles bindings props event context retained ui no dom">
+          <div class="section-heading">
+            <span class="step-number">03</span>
+            <div>
+              <span class="eyebrow">LSHTML and LSCSS</span>
+              <h2>Structure, appearance, and behavior stay easy to recognize.</h2>
+              <p>LSHTML describes the retained element tree. LSCSS describes its appearance. LSX functions handle clicks, input, and runtime updates.</p>
+            </div>
+          </div>
+
+          <div class="three-part">
+            <article>
+              <span class="part-label">LSHTML</span>
+              <h3>What exists</h3>
+              <p>Panels, rows, buttons, inputs, images, lists, canvases, and editor or game-specific elements.</p>
+            </article>
+            <article>
+              <span class="part-label">LSCSS</span>
+              <h3>How it looks</h3>
+              <p>Size, spacing, flex or grid layout, colors, gradients, borders, shadows, clipping, and state styles.</p>
+            </article>
+            <article>
+              <span class="part-label">LSX</span>
+              <h3>What it does</h3>
+              <p>Event functions update props and retained elements directly. No browser DOM or virtual-DOM diff is involved.</p>
+            </article>
+          </div>
+
+          <div class="syntax-map">
+            <div class="syntax-code">
+              <pre><code>lscss .welcome-card = {
+    padding = "18px"
+    gap = "10px"
+    background = "#182235"
+    border = "1px #354865"
+    border_radius = "12px"
+}
+
+lshtml welcome_view(props) = {(
+    &lt;panel class="welcome-card"&gt;
+        &lt;h2&gt;{props.title}&lt;/h2&gt;
+        &lt;span&gt;{props.message}&lt;/span&gt;
+        &lt;button onclick={continue_clicked} context={props}&gt;
+            Continue
+        &lt;/button&gt;
+    &lt;/panel&gt;
+)}</code></pre>
+            </div>
+            <div class="syntax-notes">
+              <div><b>1</b><span><code>.welcome-card</code> styles every element with that class.</span></div>
+              <div><b>2</b><span><code>{props.title}</code> inserts an LSX value into the retained UI.</span></div>
+              <div><b>3</b><span><code>onclick</code> names the LSX function that handles the click.</span></div>
+              <div><b>4</b><span><code>context={props}</code> gives that function the same state object.</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="doc-section" id="live-examples" data-search="live examples lshtml lscss interactive preview html css javascript button form tabs hud scroll">
+          <div class="section-heading">
+            <span class="step-number">04</span>
+            <div>
+              <span class="eyebrow">Live LSHTML examples</span>
+              <h2>Read the LSX source and use the preview beside it.</h2>
+              <p>The previews use ordinary browser HTML, CSS, and JavaScript to show the intended visual result. Every example opens on a complete, compiler-checked <code>main.lsx</code>. The remaining tabs explain the LSHTML, LSCSS, and LSX pieces from that runnable file.</p>
+            </div>
+          </div>
+
+          <div id="examples-root"></div>
+        </section>
+
+        <section class="doc-section" id="full-app" data-search="complete full app glfw opengl lazyui renderer window main loop input document compile copy">
+          <div class="section-heading">
+            <span class="step-number">05</span>
+            <div>
+              <span class="eyebrow">Complete application</span>
+              <h2>A full window, renderer, input connection, and retained UI.</h2>
+              <p>This example is intentionally small, but it includes everything needed to open a real native LazyUI window and interact with it.</p>
+            </div>
+          </div>
+
+          <div class="full-app-layout">
+            <div class="full-app-steps">
+              <article><b>1</b><div><h3>Import the systems</h3><p>GLFW creates the window, OpenGL clears it, LazyUI owns the retained tree, and the UI renderer draws it.</p></div></article>
+              <article><b>2</b><div><h3>Create props and the UI</h3><p>The state object is ordinary LSX. The LSHTML function builds the tree once.</p></div></article>
+              <article><b>3</b><div><h3>Connect input</h3><p>Keyboard, text, wheel, pointer position, and mouse button changes are forwarded to the document.</p></div></article>
+              <article><b>4</b><div><h3>Render each frame</h3><p>Resize the document, submit the retained root, flush the renderer, and poll events.</p></div></article>
+            </div>
+            <div class="code-card tall">
+              <div class="code-card-head">
+                <span>main.lsx</span>
+                <button class="copy-button" data-copy-target="full-app-code">Copy complete file</button>
+              </div>
+              <pre id="full-app-code"><code></code></pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="doc-section" id="elements" data-search="elements tags cheat sheet panel row column button input textarea checkbox toggle range select img canvas editor game hud">
+          <div class="section-heading">
+            <span class="step-number">06</span>
+            <div>
+              <span class="eyebrow">Element cheat sheet</span>
+              <h2>Choose the element that matches the job.</h2>
+              <p>Kebab-case tags map to normal underscore-named LazyUI functions internally, so <code>&lt;scene-view&gt;</code> maps to <code>UI.scene_view()</code>.</p>
+            </div>
+          </div>
+          <div class="element-grid" id="element-grid"></div>
+        </section>
+
+        <section class="doc-section advanced-section" id="api-reference" data-search="api reference advanced functions constants methods modules raw native signature bindings search">
+          <div class="section-heading">
+            <span class="step-number">07</span>
+            <div>
+              <span class="eyebrow">Complete API reference</span>
+              <h2>Every API entry includes a real LSX code example.</h2>
+              <p>Choose a category from the sidebar, read the plain-English explanation, then copy the code block. Even constants, fields, and one-line methods include a focused usage example. Exact native declarations stay hidden unless you choose to show them.</p>
+            </div>
+          </div>
+
+          <div class="api-summary" id="api-summary"></div>
+
+          <div class="api-toolbar">
+            <div class="field wide">
+              <label for="api-search">Search APIs</label>
+              <input id="api-search" type="search" placeholder="Example: create window, texture, JSON, camera...">
+            </div>
+            <div class="field">
+              <label for="api-module">Module</label>
+              <select id="api-module"><option value="">All modules</option></select>
+            </div>
+            <div class="field">
+              <label for="api-kind">Entry type</label>
+              <select id="api-kind"><option value="">All entry types</option></select>
+            </div>
+            <label class="signature-toggle"><input id="show-signatures" type="checkbox"> Show native signatures</label>
+          </div>
+
+          <div class="api-help">
+            <strong>Use the API index in the left sidebar.</strong>
+            <span>Open a category, choose a module, then select an object or feature group. For example, <code>Math and cameras → GLM → Mat2</code> shows each matrix operation with an explanation, an LSX code block, and a copy button.</span>
+          </div>
+
+          <div class="api-current-filter" id="api-current-filter" hidden>
+            <div>
+              <span>Showing</span>
+              <strong id="api-current-filter-label"></strong>
+            </div>
+            <button id="api-clear-nav-filter" type="button">Clear sidebar filter</button>
+          </div>
+
+          <section class="api-module-guide" id="api-module-guide" hidden aria-live="polite"></section>
+          <div class="api-results" id="api-results"></div>
+          <div class="api-pager">
+            <button class="button secondary" id="api-prev">Previous</button>
+            <span id="api-page-label"></span>
+            <button class="button secondary" id="api-next">Next</button>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <strong>LazyScriptEX offline documentation</strong>
+        <span>Examples use inferred LSX syntax, dot member access, and compiler-managed references.</span>
+      </footer>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="api-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,48 @@
+use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
+use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+
+fn fail(message)
+    Win32.MessageBoxA(0, message, "LazyScriptEX Native GameKit", Win32.MB_OK + Win32.MB_ICONERROR)
+    return 1
+end
+
+fn main()
+    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return fail("GLFW failed.") end
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
+    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
+    local window = GLFW.glfwCreateWindow(900,600,"11 - Gamepad polling",0,0)
+    if window == 0 then return fail("Window failed.") end
+    GLFW.glfwMakeContextCurrent(window)
+    GL.lsxLoadOpenGL()
+
+    -- Allocated once, reused every frame, released once.
+    local gamepad = GLFW.GamepadState.new()
+    gamepad.initialize()
+    local framebuffer = GLFW.FramebufferSize.new()
+    while GLFW.glfwWindowShouldClose(window) == 0 do
+        local r = 0.08
+        local g = 0.08
+        local b = 0.12
+        if GLFW.glfwJoystickIsGamepad(GLFW.GLFW_JOYSTICK_1) ~= 0 and gamepad.refresh(GLFW.GLFW_JOYSTICK_1) then
+            r = (gamepad.axis(GLFW.GLFW_GAMEPAD_AXIS_LEFT_X) + 1.0) * 0.5
+            g = (gamepad.axis(GLFW.GLFW_GAMEPAD_AXIS_LEFT_Y) + 1.0) * 0.5
+            b = 0.4
+        end
+        framebuffer.refresh(window)
+        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
+        GL.glClearColor(r,g,b,1)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        GLFW.glfwSwapBuffers(window)
+        GLFW.glfwPollEvents()
+    end
+
+    framebuffer.destroy()
+    gamepad.release()
+    gamepad.destroy()
+    GLFW.glfwDestroyWindow(window)
+    GLFW.glfwTerminate()
+    GLFW.lsxUnloadLibraries()
+    return 0
+end

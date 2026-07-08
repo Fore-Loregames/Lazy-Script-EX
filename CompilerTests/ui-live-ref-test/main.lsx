@@ -1,0 +1,25 @@
+use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
+
+fn main()
+    local root = UI.panel()
+    root.children.reserve(2)
+    local canvas = UI.canvas()
+    canvas.set_id("canvas")
+    canvas.children.reserve(3)
+    canvas = root.add(canvas)
+    local l0 = UI.canvas_line() l0.set_id("l0") l0.hidden = true l0 = canvas.add(l0)
+    local l1 = UI.canvas_line() l1.set_id("l1") l1.hidden = true l1 = canvas.add(l1)
+    local l2 = UI.canvas_line() l2.set_id("l2") l2.hidden = true l2 = canvas.add(l2)
+    local a = UI.panel()
+    a.set_id("a")
+    if a.hidden then return 19 end
+    a.children.reserve(1)
+    a = root.add(a)
+    if a.hidden then return 20 end
+    local ta = UI.title_bar() ta.set_id("ta") ta = a.add(ta)
+    if a.hidden then return 21 end
+    local found = root.find_id(UI.hash("a"))
+    if found == null then return 10 end
+    if found.hidden then return 11 end
+    return 0
+end

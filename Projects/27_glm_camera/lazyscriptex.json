@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/27_glm_camera.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

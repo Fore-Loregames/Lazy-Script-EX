@@ -1,0 +1,115 @@
+-- Direct stb_image binding. Decoded pixels remain owned by stb_image until
+-- destroy() is called. Use Graphics/Texture2D.lsx for the engine-facing OpenGL
+-- upload path; it copies the RGBA bytes once into an inferred packed u8 collection and uploads them
+-- through the same glTexImage2D binding used by the procedural texture example.
+
+export const STBI_DEFAULT = 0
+export const STBI_GREY = 1
+export const STBI_GREY_ALPHA = 2
+export const STBI_RGB = 3
+export const STBI_RGBA = 4
+
+export extern "stb_image.dll" fn stbi_load(path:string, widthOut:ptr, heightOut:ptr, channelsOut:ptr, desiredChannels:i32) -> ptr
+export extern "stb_image.dll" fn stbi_load_from_memory(data:ptr, length:i32, widthOut:ptr, heightOut:ptr, channelsOut:ptr, desiredChannels:i32) -> ptr
+export extern "stb_image.dll" fn stbi_info(path:string, widthOut:ptr, heightOut:ptr, channelsOut:ptr) -> i32
+export extern "stb_image.dll" fn stbi_info_from_memory(data:ptr, length:i32, widthOut:ptr, heightOut:ptr, channelsOut:ptr) -> i32
+export extern "stb_image.dll" fn stbi_is_16_bit(path:string) -> i32
+export extern "stb_image.dll" fn stbi_is_hdr(path:string) -> i32
+export extern "stb_image.dll" fn stbi_failure_reason() -> string
+export extern "stb_image.dll" fn stbi_image_free(data:ptr) -> void
+export extern "stb_image.dll" fn stbi_set_flip_vertically_on_load(enabled:i32) -> void
+export extern "stb_image.dll" fn stbi_set_flip_vertically_on_load_thread(enabled:i32) -> void
+
+const ImageInfo = {
+    width:i32 = 0,
+    height:i32 = 0,
+    source_channels:i32 = 0
+}
+
+export const Image = {
+    data:ptr = null,
+    width:i32 = 0,
+    height:i32 = 0,
+    channels:i32 = 0,
+    source_channels:i32 = 0,
+    bytes:i64 = 0,
+    error_message:string = null,
+
+    pixels = fn() -> ptr
+        return self.data
+    end,
+
+    rgba32 = fn(index:i64) -> u32
+        if self.data == 0 or self.channels ~= STBI_RGBA then return 0 end
+        if index < 0 or index >= self.width * self.height then return 0 end
+        return memory.read_u32(self.data,index * 4)
+    end,
+
+    valid = fn() -> bool
+        return self.data ~= 0 and self.width > 0 and self.height > 0 and self.channels > 0
+    end,
+
+    error = fn() -> string
+        if self.error_message ~= null then return self.error_message end
+        if self.valid() then return "No stb_image error" end
+        local message = stbi_failure_reason()
+        if message ~= null then return message end
+        return "stb_image could not decode the image"
+    end,
+
+    destroy = fn()
+        if self.data ~= 0 then stbi_image_free(self.data) self.data = null end
+        self.width = 0
+        self.height = 0
+        self.channels = 0
+        self.source_channels = 0
+        self.bytes = 0
+        self.error_message = null
+    end
+}
+
+export fn load(path:string) -> Image
+    return load_ex(path,STBI_RGBA,false)
+end
+
+export fn load_flipped(path:string) -> Image
+    return load_ex(path,STBI_RGBA,true)
+end
+
+export fn load_ex(path:string, desiredChannels:i32, flipY:bool) -> Image
+    local result = Image.new()
+    local info = ImageInfo.new()
+    stbi_set_flip_vertically_on_load_thread(flipY)
+    result.data = stbi_load(path,info,memory.ptr(info,4),memory.ptr(info,8),desiredChannels)
+    result.width = info.width
+    result.height = info.height
+    result.source_channels = info.source_channels
+    result.channels = desiredChannels
+    if result.channels == STBI_DEFAULT then result.channels = info.source_channels end
+    if result.data ~= 0 then
+        result.bytes = result.width * result.height * result.channels
+    else
+        result.error_message = stbi_failure_reason()
+    end
+    info.destroy()
+    return result
+end
+
+export fn load_memory(data:ptr, length:i32, desiredChannels:i32, flipY:bool) -> Image
+    local result = Image.new()
+    local info = ImageInfo.new()
+    stbi_set_flip_vertically_on_load_thread(flipY)
+    result.data = stbi_load_from_memory(data,length,info,memory.ptr(info,4),memory.ptr(info,8),desiredChannels)
+    result.width = info.width
+    result.height = info.height
+    result.source_channels = info.source_channels
+    result.channels = desiredChannels
+    if result.channels == STBI_DEFAULT then result.channels = info.source_channels end
+    if result.data ~= 0 then
+        result.bytes = result.width * result.height * result.channels
+    else
+        result.error_message = stbi_failure_reason()
+    end
+    info.destroy()
+    return result
+end

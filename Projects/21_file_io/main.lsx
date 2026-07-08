@@ -1,0 +1,82 @@
+use "@LazyScript/bindings/System/File.lsx" as File
+use "@LazyScript/bindings/System/Log.lsx" as Log
+
+fn main()
+    local logger = Log.open_default()
+    logger.stage("File I/O example entered main")
+
+    if not console.open("LazyScriptEX - Native File I/O") then
+        logger.error_line("Could not open the console window")
+        logger.close()
+        return 1
+    end
+
+    local test_path = "logs/file_io_test.txt"
+    console.write_line("Writing logs/file_io_test.txt")
+    logger.stage("Calling File.write_text")
+    local written = File.write_text(test_path,"LazyScriptEX native file I/O")
+    if not written.ok then
+        logger.error_line("File.write_text failed")
+        console.error_line("File.write_text failed. Check logs/LazyScriptEX.log and LazyScriptEX-runtime.log.")
+        written.destroy()
+        logger.close()
+        console.wait()
+        console.close()
+        return 2
+    end
+    logger.success("File.write_text completed")
+    written.destroy()
+
+    logger.stage("Calling File.append_text")
+    local appended = File.append_text(test_path,"\r\nSecond line written through LSX.")
+    if not appended.ok then
+        logger.error_line("File.append_text failed")
+        console.error_line("File.append_text failed. Check logs/LazyScriptEX.log.")
+        appended.destroy()
+        logger.close()
+        console.wait()
+        console.close()
+        return 3
+    end
+    logger.success("File.append_text completed")
+    appended.destroy()
+
+    logger.stage("Calling File.read_text")
+    local loaded = File.read_text(test_path)
+    if not loaded.ok then
+        logger.error_line("File.read_text failed")
+        console.error_line("File.read_text failed. Check logs/LazyScriptEX.log.")
+        loaded.destroy()
+        logger.close()
+        console.wait()
+        console.close()
+        return 4
+    end
+    logger.success("File.read_text completed")
+
+    console.write_line("")
+    console.write_line("File contents:")
+    console.write_line(loaded.text())
+
+    local matches = string.equals(loaded.text(),"LazyScriptEX native file I/O\r\nSecond line written through LSX.")
+    loaded.destroy()
+
+    if not matches then
+        logger.error_line("Read text did not match the written text")
+        console.error_line("The read-back text did not match the written text.")
+        logger.close()
+        console.wait()
+        console.close()
+        return 5
+    end
+
+    logger.success("File contents matched")
+    console.write_line("")
+    console.write_line("File I/O completed successfully.")
+    console.write_line("The test file and permanent logs remain in the build/logs folder.")
+    logger.success("File I/O example completed normally")
+    logger.close()
+    console.wait()
+    console.close()
+    return 0
+end

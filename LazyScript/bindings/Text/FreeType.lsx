@@ -1,0 +1,149 @@
+-- Small safe wrapper around the real FreeType API. LSXFreeType.dll only
+-- exposes glyph-slot fields that are awkward to read through a raw C pointer;
+-- all rasterization and SDF work is performed by libfreetype.dll.
+
+export const RENDER_NORMAL = 0
+export const RENDER_LIGHT = 1
+export const RENDER_MONO = 2
+export const RENDER_LCD = 3
+export const RENDER_LCD_V = 4
+export const RENDER_SDF = 5
+
+extern "LSXFreeType.dll" fn _lsxFTReady() -> i32
+extern "LSXFreeType.dll" fn _lsxFTVersionMajor() -> i32
+extern "LSXFreeType.dll" fn _lsxFTVersionMinor() -> i32
+extern "LSXFreeType.dll" fn _lsxFTVersionPatch() -> i32
+extern "LSXFreeType.dll" fn _lsxFTCreateFace(path:string, pixelHeight:i32) -> ptr
+extern "LSXFreeType.dll" fn _lsxFTFaceValid(handle:ptr) -> i32
+extern "LSXFreeType.dll" fn _lsxFTSetPixelSize(handle:ptr, pixelWidth:i32, pixelHeight:i32) -> i32
+extern "LSXFreeType.dll" fn _lsxFTLoadGlyph(handle:ptr, codepoint:u32, renderMode:i32) -> i32
+extern "LSXFreeType.dll" fn _lsxFTCharIndex(handle:ptr, codepoint:u32) -> u32
+extern "LSXFreeType.dll" fn _lsxFTKerning(handle:ptr, leftCodepoint:u32, rightCodepoint:u32) -> f32
+extern "LSXFreeType.dll" fn _lsxFTBitmapWidth(handle:ptr) -> i32
+extern "LSXFreeType.dll" fn _lsxFTBitmapRows(handle:ptr) -> i32
+extern "LSXFreeType.dll" fn _lsxFTBitmapPitch(handle:ptr) -> i32
+extern "LSXFreeType.dll" fn _lsxFTBitmapBuffer(handle:ptr) -> ptr
+extern "LSXFreeType.dll" fn _lsxFTBitmapLeft(handle:ptr) -> i32
+extern "LSXFreeType.dll" fn _lsxFTBitmapTop(handle:ptr) -> i32
+extern "LSXFreeType.dll" fn _lsxFTAdvanceX(handle:ptr) -> f32
+extern "LSXFreeType.dll" fn _lsxFTLineHeight(handle:ptr) -> f32
+extern "LSXFreeType.dll" fn _lsxFTAscender(handle:ptr) -> f32
+extern "LSXFreeType.dll" fn _lsxFTDescender(handle:ptr) -> f32
+extern "LSXFreeType.dll" fn _lsxFTCopyBitmap(handle:ptr, destination:ptr, destinationWidth:i32, destinationHeight:i32, destinationX:i32, destinationY:i32) -> i32
+extern "LSXFreeType.dll" fn _lsxFTLastErrorCode(handle:ptr) -> i32
+extern "LSXFreeType.dll" fn _lsxFTLastError(handle:ptr) -> string
+extern "LSXFreeType.dll" fn _lsxFTDestroyFace(handle:ptr) -> void
+
+export fn ready() -> bool
+    return _lsxFTReady() ~= 0
+end
+
+export fn version_major() -> i32
+    return _lsxFTVersionMajor()
+end
+
+export fn version_minor() -> i32
+    return _lsxFTVersionMinor()
+end
+
+export fn version_patch() -> i32
+    return _lsxFTVersionPatch()
+end
+
+export const Face = {
+    handle:ptr = null,
+    pixel_width:i32 = 0,
+    pixel_height:i32 = 0,
+
+    valid = fn() -> bool
+        return self.handle ~= 0 and _lsxFTFaceValid(self.handle) ~= 0
+    end,
+
+    error = fn() -> string
+        return _lsxFTLastError(self.handle)
+    end,
+
+    error_code = fn() -> i32
+        return _lsxFTLastErrorCode(self.handle)
+    end,
+
+    set_pixel_size = fn(width:i32, height:i32) -> bool
+        if self.handle == 0 then return false end
+        if _lsxFTSetPixelSize(self.handle,width,height) == 0 then return false end
+        self.pixel_width = width
+        self.pixel_height = height
+        return true
+    end,
+
+    load_char = fn(codepoint:u32, renderMode:i32) -> bool
+        if self.handle == 0 then return false end
+        return _lsxFTLoadGlyph(self.handle,codepoint,renderMode) ~= 0
+    end,
+
+    char_index = fn(codepoint:u32) -> u32
+        if self.handle == 0 then return 0 end
+        return _lsxFTCharIndex(self.handle,codepoint)
+    end,
+
+    kerning = fn(leftCodepoint:u32, rightCodepoint:u32) -> f32
+        if self.handle == 0 then return 0 end
+        return _lsxFTKerning(self.handle,leftCodepoint,rightCodepoint)
+    end,
+
+    bitmap_width = fn() -> i32
+        return _lsxFTBitmapWidth(self.handle)
+    end,
+
+    bitmap_rows = fn() -> i32
+        return _lsxFTBitmapRows(self.handle)
+    end,
+
+    bitmap_pitch = fn() -> i32
+        return _lsxFTBitmapPitch(self.handle)
+    end,
+
+    bitmap_buffer = fn() -> ptr
+        return _lsxFTBitmapBuffer(self.handle)
+    end,
+
+    bitmap_left = fn() -> i32
+        return _lsxFTBitmapLeft(self.handle)
+    end,
+
+    bitmap_top = fn() -> i32
+        return _lsxFTBitmapTop(self.handle)
+    end,
+
+    advance_x = fn() -> f32
+        return _lsxFTAdvanceX(self.handle)
+    end,
+
+    line_height = fn() -> f32
+        return _lsxFTLineHeight(self.handle)
+    end,
+
+    ascender = fn() -> f32
+        return _lsxFTAscender(self.handle)
+    end,
+
+    descender = fn() -> f32
+        return _lsxFTDescender(self.handle)
+    end,
+
+    copy_bitmap = fn(destination:ptr, destinationWidth:i32, destinationHeight:i32, x:i32, y:i32) -> bool
+        return _lsxFTCopyBitmap(self.handle,destination,destinationWidth,destinationHeight,x,y) ~= 0
+    end,
+
+    destroy = fn()
+        if self.handle ~= 0 then _lsxFTDestroyFace(self.handle) self.handle = null end
+        self.pixel_width = 0
+        self.pixel_height = 0
+    end
+}
+
+export fn load(path:string, pixelHeight:i32) -> Face
+    local result = Face.new()
+    result.handle = _lsxFTCreateFace(path,pixelHeight)
+    result.pixel_height = pixelHeight
+    return result
+end

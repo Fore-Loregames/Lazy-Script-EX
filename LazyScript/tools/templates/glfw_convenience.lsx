@@ -1,0 +1,283 @@
+
+-- Typed convenience layer for GLFW output parameters.
+-- Create these objects once and reuse them. Their refresh methods write directly
+-- into the fixed native fields, so normal frame loops do not allocate memory.
+
+export const Version = {
+    major: i32 = 0,
+    minor: i32 = 0,
+    revision: i32 = 0,
+
+    refresh = fn()
+        glfwGetVersion(self, memory.ptr(self, 4), memory.ptr(self, 8))
+        return self
+    end
+}
+
+export const ErrorInfo = {
+    code: i32 = 0,
+    description_ptr: ptr = 0,
+
+    refresh = fn()
+        self.code = glfwGetError(memory.ptr(self, 8))
+        return self
+    end
+}
+
+export const WindowPosition = {
+    x: i32 = 0,
+    y: i32 = 0,
+
+    refresh = fn(window)
+        glfwGetWindowPos(window, self, memory.ptr(self, 4))
+        return self
+    end
+}
+
+export const WindowSize = {
+    width: i32 = 0,
+    height: i32 = 0,
+
+    refresh = fn(window)
+        glfwGetWindowSize(window, self, memory.ptr(self, 4))
+        return self
+    end
+}
+
+export const FramebufferSize = {
+    width: i32 = 0,
+    height: i32 = 0,
+
+    refresh = fn(window)
+        glfwGetFramebufferSize(window, self, memory.ptr(self, 4))
+        return self
+    end
+}
+
+export const FrameSize = {
+    left: i32 = 0,
+    top: i32 = 0,
+    right: i32 = 0,
+    bottom: i32 = 0,
+
+    refresh = fn(window)
+        glfwGetWindowFrameSize(window, self, memory.ptr(self, 4), memory.ptr(self, 8), memory.ptr(self, 12))
+        return self
+    end
+}
+
+export const CursorPosition = {
+    x: f32 = 0.0,
+    y: f32 = 0.0,
+
+    refresh = fn(window)
+        glfwGetCursorPos(window, self, memory.ptr(self, 4))
+        return self
+    end
+}
+
+export const ContentScale = {
+    x: f32 = 1.0,
+    y: f32 = 1.0,
+
+    refresh_window = fn(window)
+        glfwGetWindowContentScale(window, self, memory.ptr(self, 4))
+        return self
+    end,
+
+    refresh_monitor = fn(monitor)
+        glfwGetMonitorContentScale(monitor, self, memory.ptr(self, 4))
+        return self
+    end
+}
+
+export const MonitorPosition = {
+    x: i32 = 0,
+    y: i32 = 0,
+
+    refresh = fn(monitor)
+        glfwGetMonitorPos(monitor, self, memory.ptr(self, 4))
+        return self
+    end
+}
+
+export const MonitorWorkArea = {
+    x: i32 = 0,
+    y: i32 = 0,
+    width: i32 = 0,
+    height: i32 = 0,
+
+    refresh = fn(monitor)
+        glfwGetMonitorWorkarea(monitor, self, memory.ptr(self, 4), memory.ptr(self, 8), memory.ptr(self, 12))
+        return self
+    end
+}
+
+export const MonitorPhysicalSize = {
+    width_mm: i32 = 0,
+    height_mm: i32 = 0,
+
+    refresh = fn(monitor)
+        glfwGetMonitorPhysicalSize(monitor, self, memory.ptr(self, 4))
+        return self
+    end
+}
+
+export const MonitorList = {
+    items: ptr = 0,
+    count: i32 = 0,
+
+    refresh = fn()
+        self.items = glfwGetMonitors(memory.ptr(self, 8))
+        return self
+    end,
+
+    get = fn(index)
+        if self.items == 0 or index < 0 or index >= self.count then return 0 end
+        return memory.read_u64(self.items, index * 8)
+    end
+}
+
+export const VideoMode = {
+    width: i32 = 0,
+    height: i32 = 0,
+    red_bits: i32 = 0,
+    green_bits: i32 = 0,
+    blue_bits: i32 = 0,
+    refresh_rate: i32 = 0,
+
+    read = fn(modes, index)
+        local offset = index * 24
+        self.width = memory.read_u32(modes, offset)
+        self.height = memory.read_u32(modes, offset + 4)
+        self.red_bits = memory.read_u32(modes, offset + 8)
+        self.green_bits = memory.read_u32(modes, offset + 12)
+        self.blue_bits = memory.read_u32(modes, offset + 16)
+        self.refresh_rate = memory.read_u32(modes, offset + 20)
+        return self
+    end
+}
+
+export const VideoModeList = {
+    items: ptr = 0,
+    count: i32 = 0,
+
+    refresh = fn(monitor)
+        self.items = glfwGetVideoModes(monitor, memory.ptr(self, 8))
+        return self
+    end
+}
+
+export const JoystickAxes = {
+    values: ptr = 0,
+    count: i32 = 0,
+
+    refresh = fn(joystick)
+        self.values = glfwGetJoystickAxes(joystick, memory.ptr(self, 8))
+        return self
+    end,
+
+    get = fn(index)
+        if self.values == 0 or index < 0 or index >= self.count then return 0.0 end
+        return memory.read_f32(self.values, index * 4)
+    end
+}
+
+export const JoystickButtons = {
+    values: ptr = 0,
+    count: i32 = 0,
+
+    refresh = fn(joystick)
+        self.values = glfwGetJoystickButtons(joystick, memory.ptr(self, 8))
+        return self
+    end,
+
+    get = fn(index)
+        if self.values == 0 or index < 0 or index >= self.count then return GLFW_RELEASE end
+        return memory.read_u8(self.values, index)
+    end
+}
+
+export const JoystickHats = {
+    values: ptr = 0,
+    count: i32 = 0,
+
+    refresh = fn(joystick)
+        self.values = glfwGetJoystickHats(joystick, memory.ptr(self, 8))
+        return self
+    end,
+
+    get = fn(index)
+        if self.values == 0 or index < 0 or index >= self.count then return GLFW_HAT_CENTERED end
+        return memory.read_u8(self.values, index)
+    end
+}
+
+export const GamepadState = {
+    data: ptr = 0,
+    connected: i32 = 0,
+
+    initialize = fn()
+        if self.data == 0 then self.data = memory.alloc(40) end
+        return self.data ~= 0
+    end,
+
+    refresh = fn(joystick)
+        if self.data == 0 then self.initialize() end
+        if self.data == 0 then self.connected = 0 return false end
+        self.connected = glfwGetGamepadState(joystick, self.data)
+        return self.connected ~= 0
+    end,
+
+    button = fn(index)
+        if self.data == 0 or index < 0 or index > GLFW_GAMEPAD_BUTTON_LAST then return GLFW_RELEASE end
+        return memory.read_u8(self.data, index)
+    end,
+
+    axis = fn(index)
+        if self.data == 0 or index < 0 or index > GLFW_GAMEPAD_AXIS_LAST then return 0.0 end
+        return memory.read_f32(self.data, 16 + index * 4)
+    end,
+
+    release = fn()
+        if self.data ~= 0 then memory.free(self.data) self.data = 0 end
+        self.connected = 0
+    end
+}
+
+-- Matches GLFWimage exactly on Windows x64: int width, int height, pixels pointer.
+export const ImageRGBA = {
+    width: i32 = 0,
+    height: i32 = 0,
+    pixels: ptr = 0,
+
+    set = fn(width, height, pixels)
+        self.width = width
+        self.height = height
+        self.pixels = pixels
+        return self
+    end,
+
+    set_window_icon = fn(window)
+        glfwSetWindowIcon(window, 1, self)
+    end,
+
+    create_cursor = fn(x_hotspot, y_hotspot)
+        return glfwCreateCursor(self, x_hotspot, y_hotspot)
+    end
+}
+
+export fn clearWindowIcon(window)
+    glfwSetWindowIcon(window, 0, 0)
+end
+
+extern "LSXGameKit.dll" fn _lsxGlfwSetWindowIconRGBA(window: ptr, width: i32, height: i32, pixels: ptr) -> void
+extern "LSXGameKit.dll" fn _lsxGlfwCreateCursorRGBA(width: i32, height: i32, pixels: ptr, x_hotspot: i32, y_hotspot: i32) -> ptr
+
+export fn setWindowIconRGBA(window, width, height, pixels)
+    _lsxGlfwSetWindowIconRGBA(window, width, height, pixels)
+end
+
+export fn createCursorRGBA(width, height, pixels, x_hotspot, y_hotspot)
+    return _lsxGlfwCreateCursorRGBA(width, height, pixels, x_hotspot, y_hotspot)
+end

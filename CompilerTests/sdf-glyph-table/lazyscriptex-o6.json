@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/sdf-glyph-table-o6.exe",
+  "subsystem": "console",
+  "optimization": 6
+}

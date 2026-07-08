@@ -1,0 +1,16 @@
+fn main() -> i32
+    local values:table<f32> = {1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0,16.0}
+    local total:f32 = 0.0
+    local repeat:i64 = 0
+    while repeat < 8000000 do
+        local index:i64 = 0
+        while index < values.count() do
+            total = total + values[index]
+            index = index + 1
+        end
+        if total > 1000000.0 then total = total * 0.000001 end
+        repeat = repeat + 1
+    end
+    if total < 0.0 then return 1 end
+    return 0
+end

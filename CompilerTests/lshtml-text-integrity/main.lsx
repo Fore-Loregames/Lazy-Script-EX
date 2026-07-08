@@ -1,0 +1,20 @@
+lshtml text_integrity_view = {(
+    <panel title="A &amp; B">
+        <span>Health &lt; 25 &amp;&amp; Mana &gt; 10</span>
+        <textarea>left &lt; right</textarea>
+    </panel>
+)}
+
+fn main() -> i32
+    local root = text_integrity_view()
+    if root == null then return 1 end
+    if not string.equals(root.title,"A & B") then return 2 end
+    if root.child_count() ~= 2 then return 3 end
+    local label = root.child(0)
+    local editor = root.child(1)
+    if label == null or editor == null then return 4 end
+    if not string.equals(label.text,"Health < 25 && Mana > 10") then return 5 end
+    if not string.equals(editor.value,"left < right") then return 6 end
+    root.destroy()
+    return 0
+end

@@ -1,0 +1,11 @@
+fn main() -> i32
+    local value:f32 = 0.125
+    local i:i64 = 0
+    while i < 90000000 do
+        value = value * 1.0000001192092896 + 0.0000001192092896
+        if value > 8192.0 then value = value * 0.0001220703125 end
+        i = i + 1
+    end
+    if value <= 0.0 then return 1 end
+    return 0
+end

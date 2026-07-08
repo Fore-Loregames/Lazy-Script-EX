@@ -1,0 +1,58 @@
+const GlyphRecord = {
+    codepoint:i32 = 0
+    advance:f32 = 0.0
+    x0:f32 = 0.0
+    y0:f32 = 0.0
+    x1:f32 = 0.0
+    y1:f32 = 0.0
+}
+
+fn main() -> i32
+    local records:table<GlyphRecord> = {}
+    local glyph = GlyphRecord.new()
+    glyph.codepoint = 65
+    glyph.advance = 17.5
+    glyph.x0 = -2.0
+    glyph.y0 = -11.0
+    glyph.x1 = 14.0
+    glyph.y1 = 3.0
+
+    records.push(glyph)
+    if records.count() ~= 1 then return 1 end
+    if records.byte_length() ~= GlyphRecord.size() then return 2 end
+    if records.at(0) == glyph then return 3 end
+    glyph.destroy()
+
+    local stored = records.at(0)
+    if stored == null then return 4 end
+    if stored.codepoint ~= 65 then return 5 end
+    if stored.advance < 17.49 or stored.advance > 17.51 then return 6 end
+    if stored.x0 ~= -2.0 or stored.y0 ~= -11.0 or stored.x1 ~= 14.0 or stored.y1 ~= 3.0 then return 7 end
+
+    stored.codepoint = 66
+    local stored_again = records[0]
+    if stored_again.codepoint ~= 66 then return 8 end
+
+    local second = GlyphRecord.new()
+    second.codepoint = 90
+    second.advance = 9.25
+    local copied = records.add_copy(second)
+    if copied == second then return 9 end
+    second.destroy()
+    if copied.codepoint ~= 90 then return 10 end
+    local last_record = records.last()
+    if last_record.advance < 9.24 or last_record.advance > 9.26 then return 11 end
+
+    local reserved = GlyphRecord.table(4)
+    local third = GlyphRecord.new()
+    third.codepoint = 48
+    reserved.push(third)
+    third.destroy()
+    local reserved_first = reserved.first()
+    if reserved.count() ~= 1 or reserved_first.codepoint ~= 48 then return 12 end
+    if reserved.byte_length() ~= GlyphRecord.size() then return 13 end
+
+    records.destroy()
+    reserved.destroy()
+    return 0
+end

@@ -1,0 +1,18 @@
+-- Native media-runtime diagnostics. This module verifies that LSXMedia.dll is
+-- loaded and gives image/font systems a shared error source.
+
+extern "LSXMedia.dll" fn _lsxMediaVersion() -> u32
+extern "LSXMedia.dll" fn _lsxMediaProbe() -> i32
+extern "LSXMedia.dll" fn _lsxMediaLastError() -> string
+
+export fn version()
+    return _lsxMediaVersion()
+end
+
+export fn ready()
+    return _lsxMediaProbe() ~= 0
+end
+
+export fn last_error()
+    return _lsxMediaLastError()
+end

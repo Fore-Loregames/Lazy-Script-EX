@@ -1,0 +1,153 @@
+use "STBImage.lsx" as STBImage
+use "../OpenGL/OpenGL46.lsx" as GL
+
+
+-- Direct stb_image -> OpenGL texture loading.
+-- The decoded RGBA pixels are copied once into an annotation-free packed u8 collection. The upload
+-- then follows the same proven OpenGL path as example 04: create, bind, set
+-- filtering, and call glTexImage2D with the table as the pixel source.
+
+export const Texture = {
+    id:u32 = 0,
+    ok:bool = false,
+    width:i32 = 0,
+    height:i32 = 0,
+    channels:i32 = 0,
+    error_message:string = null,
+
+    bind = fn(unit:i32)
+        GL.glActiveTexture(GL.GL_TEXTURE0 + unit)
+        GL.glBindTexture(GL.GL_TEXTURE_2D,self.id)
+    end,
+
+    valid = fn() -> bool
+        return self.ok and self.id ~= 0
+    end,
+
+    error = fn() -> string
+        if self.error_message ~= null then return self.error_message end
+        if self.ok then return "No texture error" end
+        return "OpenGL texture creation failed"
+    end,
+
+    destroy = fn()
+        if self.id ~= 0 then GL.deleteTexture(self.id) self.id = 0 end
+        self.ok = false
+        self.width = 0
+        self.height = 0
+        self.channels = 0
+        self.error_message = null
+    end
+}
+
+fn fail_texture(message:string) -> Texture
+    local result = Texture.new()
+    result.error_message = message
+    return result
+end
+
+export fn create_rgba32(width:i32, height:i32, pixels, srgb:bool, mipmaps:bool) -> Texture
+    if width <= 0 or height <= 0 then return fail_texture("Texture dimensions must be greater than zero") end
+    local pixelCount:i64 = width * height
+    if pixels.byte_length() < pixelCount * 4 then return fail_texture("RGBA pixel buffer is smaller than width * height * 4 bytes") end
+
+    local result = Texture.new()
+    result.width = width
+    result.height = height
+    result.channels = 4
+    result.id = GL.createTexture()
+    if result.id == 0 then
+        result.error_message = "OpenGL texture object creation failed"
+        return result
+    end
+
+    GL.glActiveTexture(GL.GL_TEXTURE0)
+    GL.glBindTexture(GL.GL_TEXTURE_2D,result.id)
+    GL.glTexParameteri(GL.GL_TEXTURE_2D,GL.GL_TEXTURE_WRAP_S,GL.GL_REPEAT)
+    GL.glTexParameteri(GL.GL_TEXTURE_2D,GL.GL_TEXTURE_WRAP_T,GL.GL_REPEAT)
+    if mipmaps then
+        GL.glTexParameteri(GL.GL_TEXTURE_2D,GL.GL_TEXTURE_MIN_FILTER,GL.GL_LINEAR_MIPMAP_LINEAR)
+    else
+        GL.glTexParameteri(GL.GL_TEXTURE_2D,GL.GL_TEXTURE_MIN_FILTER,GL.GL_LINEAR)
+    end
+    GL.glTexParameteri(GL.GL_TEXTURE_2D,GL.GL_TEXTURE_MAG_FILTER,GL.GL_LINEAR)
+
+    local internalFormat = GL.GL_RGBA8
+    if srgb then internalFormat = GL.GL_SRGB8_ALPHA8 end
+    while GL.glGetError() ~= GL.GL_NO_ERROR do end
+    GL.glTexImage2D(GL.GL_TEXTURE_2D,0,internalFormat,width,height,0,GL.GL_RGBA,GL.GL_UNSIGNED_BYTE,pixels)
+    local uploadError = GL.glGetError()
+    if uploadError == GL.GL_NO_ERROR and mipmaps then
+        GL.glGenerateMipmap(GL.GL_TEXTURE_2D)
+        uploadError = GL.glGetError()
+    end
+
+    if uploadError ~= GL.GL_NO_ERROR then
+        GL.deleteTexture(result.id)
+        result.id = 0
+        result.error_message = "OpenGL rejected the RGBA texture upload"
+        return result
+    end
+
+    result.ok = true
+    return result
+end
+
+-- Loads an sRGB texture without changing stb_image row order. This matches the
+-- established texture-coordinate layout used by example 04: V=1 on the bottom
+-- vertices and V=0 on the top vertices.
+export fn load(path:string) -> Texture
+    return load_ex(path,true,true,false)
+end
+
+-- Loads an sRGB texture and vertically flips the decoded rows for callers that
+-- use conventional OpenGL UVs with V=0 at the bottom and V=1 at the top.
+export fn load_flipped(path:string) -> Texture
+    return load_ex(path,true,true,true)
+end
+
+-- Loads a non-sRGB UI texture without mipmaps and preserves stb_image row order.
+-- Use this with the same UV layout demonstrated by example 04.
+export fn load_ui(path:string) -> Texture
+    return load_ex(path,false,false,false)
+end
+
+-- Loads a non-sRGB UI texture without mipmaps and flips the decoded rows.
+export fn load_ui_flipped(path:string) -> Texture
+    return load_ex(path,false,false,true)
+end
+
+-- Explicit texture loader. flipY=false preserves stb_image row order;
+-- flipY=true reverses image rows during decoding.
+export fn load_ex(path:string, srgb:bool, mipmaps:bool, flipY:bool) -> Texture
+    local image = STBImage.load_ex(path,STBImage.STBI_RGBA,flipY)
+    if not image.valid() then
+        local message = image.error()
+        image.destroy()
+        return fail_texture(message)
+    end
+
+    -- Snapshot metadata before releasing the stb_image allocation. The compiler
+    -- must preserve these scalar snapshots across image.destroy().
+    local width:i32 = image.width
+    local height:i32 = image.height
+    local byteCount:i64 = image.bytes
+    local pixels = {}
+    if not pixels.resize_bytes(byteCount) then
+        image.destroy()
+        return fail_texture("Could not allocate the RGBA texture upload buffer")
+    end
+
+    -- The compiler copies the foreign stb_image byte block directly into the
+    -- collection's contiguous byte storage. No per-pixel LSX loop or external memcpy
+    -- declaration is needed in the binding.
+    if not pixels.copy_bytes_from_ptr(image.pixels(),byteCount) then
+        image.destroy()
+        pixels.destroy()
+        return fail_texture("Could not copy stb_image pixels into the RGBA texture buffer")
+    end
+    image.destroy()
+    local result = create_rgba32(width,height,pixels,srgb,mipmaps)
+    pixels.destroy()
+    return result
+end

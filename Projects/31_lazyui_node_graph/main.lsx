@@ -1,0 +1,1602 @@
+use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
+use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
+use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
+
+const GraphConnection = {
+    active = false
+    output = null
+    input = null
+    line_a = null
+    line_b = null
+    line_c = null
+    mini_line = null
+}
+
+const GraphNode = {
+    element = null
+    mini = null
+    world_x = 0.0
+    world_y = 0.0
+}
+
+const ElementRef = {
+    element = null
+}
+
+const GraphProps = {
+    root = null
+    graph = null
+    canvas = null
+    minimap = null
+    mini_canvas = null
+    dragging_node = null
+    pending_output = null
+    drag_offset_x = 0.0
+    drag_offset_y = 0.0
+    drag_world_x = 0.0
+    drag_world_y = 0.0
+    dragging_wire = false
+    dragging_node_moved = false
+    panning = false
+    panning_moved = false
+    minimap_dragging = false
+    pan_start_x = 0.0
+    pan_start_y = 0.0
+    pan_origin_x = 0.0
+    pan_origin_y = 0.0
+    pan_x = 150.0
+    pan_y = 110.0
+    zoom = 1.0
+    min_zoom = 0.30
+    max_zoom = 2.50
+    space_down = false
+    pointer_x = 0.0
+    pointer_y = 0.0
+    map_min_x = 0.0
+    map_min_y = 0.0
+    map_max_x = 1.0
+    map_max_y = 1.0
+    node_count = 3
+    graph_dirty = true
+    connections = {}
+    nodes = {}
+    vertical_grid = {}
+    horizontal_grid = {}
+}
+
+lscss .root = {
+    width = "100vw"
+    height = "100vh"
+    background = "#090d14"
+    color = "#e4ebf8"
+}
+lscss .toolbar = {
+    height = "48px"
+    flex_shrink = 0
+    padding = "7px 10px"
+    flex_direction = "row"
+    align_items = "center"
+    gap = "7px"
+    background = "#192332"
+    border_bottom = "1px #34455f"
+}
+lscss button, .chip = {
+    height = "32px"
+    padding = "7px 11px"
+    background = "#263750"
+    border = "1px #466083"
+    border_radius = "6px"
+    hover = { background = "#334b70"; border = "1px #7194c7" }
+    active = { translate_y = "1px" }
+}
+lscss .workspace = {
+    flex_direction = "row"
+    flex_grow = 1
+    min_height = "0px"
+    gap = "5px"
+    padding = "5px"
+}
+lscss .palette = {
+    width = "235px"
+    min_height = "0px"
+    padding = "8px 20px 8px 8px"
+    gap = "6px"
+    background = "#121a26"
+    border = "1px #2e3d54"
+    border_radius = "7px"
+    overflow_y = "scroll"
+    overflow_x = "hidden"
+}
+lscss .palette-item = {
+    height = "34px"
+    flex_shrink = 0
+    padding = "8px 9px"
+    background = "#1c2839"
+    border = "1px #334760"
+    border_radius = "5px"
+    hover = { border = "1px #668bc0"; background = "#263b57" }
+}
+lscss .hint = {
+    flex_shrink = 0
+    padding = "7px"
+    color = "#9caecc"
+    font_size = "12px"
+    background = "#0d141f"
+    border = "1px #29384d"
+    border_radius = "5px"
+}
+lscss .graph-shell = {
+    position = "relative"
+    flex_grow = 1
+    min_width = "0px"
+    min_height = "0px"
+}
+lscss .graph = {
+    position = "absolute"
+    left = "0px"
+    right = "0px"
+    top = "0px"
+    bottom = "0px"
+    width = "100%"
+    height = "100%"
+    min_width = "0px"
+    min_height = "0px"
+    background = "linear-gradient(135deg, #111a28, #080c13)"
+    border = "1px #31435c"
+    border_radius = "8px"
+    overflow_x = "hidden"
+    overflow_y = "hidden"
+    cursor = "grab"
+    active = { cursor = "grabbing" }
+}
+lscss .graph-canvas = {
+    position = "absolute"
+    left = "0px"
+    top = "0px"
+    width = "100%"
+    height = "100%"
+    pointer_events = false
+}
+lscss .node = {
+    position = "absolute"
+    width = "250px"
+    min_height = "170px"
+    box_sizing = "border-box"
+    flex_shrink = 0
+    gap = "5px"
+    padding = "7px"
+    background = "#1c2737"
+    border = "1px #4b6387"
+    border_radius = "10px"
+    box_shadow = "0 8 22 0 rgba(0,0,0,0.42)"
+    selected = { border = "2px #83adff"; outline = "1px rgba(73,126,220,0.45)" }
+}
+lscss .node-title = {
+    height = "31px"
+    flex_shrink = 0
+    padding = "7px 8px"
+    background = "linear-gradient(90deg, #315d9e, #283c60)"
+    border_radius = "7px"
+    color = "#ffffff"
+    cursor = "move"
+    hover = { background = "linear-gradient(90deg, #3c70bd, #314a75)" }
+}
+lscss .node-title-purple = { background = "linear-gradient(90deg, #7440a7, #3d315f)" }
+lscss .node-title-green = { background = "linear-gradient(90deg, #28785a, #274f45)" }
+lscss .node-title-orange = { background = "linear-gradient(90deg, #9a5c29, #5c3f2a)" }
+lscss .node-title-red = { background = "linear-gradient(90deg, #9a3545, #5e2935)" }
+lscss .socket-row = {
+    height = "28px"
+    flex_shrink = 0
+    flex_direction = "row"
+    align_items = "center"
+    gap = "6px"
+}
+lscss .socket = {
+    width = "20px"
+    height = "20px"
+    flex_shrink = 0
+    padding = "0px"
+    background = "#62a0ff"
+    border = "2px #b9d5ff"
+    border_radius = "9px"
+    cursor = "crosshair"
+    hover = { scale_x = 1.20; scale_y = 1.20; border = "2px #ffffff" }
+    selected = { outline = "3px #ffd05c"; outline_offset = "2px" }
+}
+lscss .socket-purple = { background = "#a96cff"; border = "2px #e3caff" }
+lscss .socket-green = { background = "#51d49b"; border = "2px #c5ffe7" }
+lscss .field = {
+    flex_grow = 1
+    flex_shrink = 0
+    min_width = "0px"
+    min_height = "28px"
+    padding = "5px 7px"
+    background = "#0d141f"
+    border = "1px #354760"
+    border_radius = "4px"
+}
+lscss .graph-controls = {
+    position = "absolute"
+    right = "14px"
+    top = "14px"
+    height = "34px"
+    flex_direction = "row"
+    gap = "4px"
+    padding = "3px"
+    background = "rgba(11,18,29,0.94)"
+    border = "1px #536b8f"
+    border_radius = "7px"
+    box_shadow = "0 6 18 0 rgba(0,0,0,0.45)"
+}
+lscss .graph-control-button = {
+    min_width = "34px"
+    height = "28px"
+    padding = "4px 8px"
+    background = "#1d2a3e"
+    border = "1px #405777"
+    border_radius = "4px"
+    hover = { background = "#2b4263"; border = "1px #7398cc" }
+}
+lscss .zoom-readout = {
+    min_width = "54px"
+    height = "28px"
+    padding = "6px 8px"
+    text_align = "center"
+    background = "#0e1622"
+    border = "1px #344862"
+    border_radius = "4px"
+}
+lscss .graph-help = {
+    position = "absolute"
+    left = "14px"
+    bottom = "14px"
+    padding = "6px 9px"
+    background = "rgba(11,18,29,0.86)"
+    border = "1px #354b6a"
+    border_radius = "5px"
+    color = "#9fb3d1"
+    font_size = "11px"
+    pointer_events = false
+}
+lscss .minimap = {
+    position = "absolute"
+    right = "14px"
+    bottom = "14px"
+    width = "230px"
+    height = "165px"
+    padding = "6px"
+    gap = "4px"
+    background = "rgba(15,23,36,0.96)"
+    border = "1px #6b86ad"
+    border_radius = "8px"
+    box_shadow = "0 8 24 0 rgba(0,0,0,0.55)"
+    cursor = "crosshair"
+}
+lscss .minimap-title = { height = "18px"; flex_shrink = 0; color = "#b7c8e2"; font_size = "11px"; pointer_events = false }
+lscss .mini-canvas = { width = "100%"; flex_grow = 1; min_height = "0px"; pointer_events = false; background = "#0a101a"; border = "1px #283b57"; border_radius = "4px" }
+lscss .inspector = {
+    width = "310px"
+    min_height = "0px"
+    padding = "8px 20px 8px 8px"
+    gap = "7px"
+    background = "#121a26"
+    border = "1px #2e3d54"
+    border_radius = "7px"
+    overflow_y = "scroll"
+    overflow_x = "hidden"
+}
+lscss .property = {
+    padding = "7px"
+    flex_shrink = 0
+    gap = "4px"
+    background = "#192333"
+    border = "1px #2d3d54"
+    border_radius = "5px"
+}
+lscss input, search, number, select, textarea = {
+    width = "100%"
+    min_width = "0px"
+    height = "34px"
+    box_sizing = "border-box"
+    padding = "7px 9px"
+    background = "#0d141f"
+    border = "1px #354760"
+    border_radius = "5px"
+    color = "#dce7fa"
+    focus = { border = "2px #6696ff" }
+}
+lscss textarea = { height = "90px"; overflow_y = "auto" }
+lscss checkbox = { width = "100%"; height = "30px"; padding = "5px 4px"; background = "rgba(0,0,0,0)"; color = "#dce7fa" }
+lscss .status = {
+    height = "28px"
+    flex_shrink = 0
+    padding = "6px 9px"
+    flex_direction = "row"
+    background = "#182232"
+    border_top = "1px #33445d"
+    color = "#98abc8"
+    font_size = "12px"
+}
+
+lshtml graph_view(props) = {(
+    <ui class="root">
+        <toolbar class="toolbar">
+            <h3>Behavior Graph</h3><separator />
+            <button onclick={compile_graph} context={props}>Compile</button>
+            <button onclick={auto_layout_graph} context={props}>Auto Layout</button>
+            <button onclick={frame_all_graph} context={props}>Frame All</button>
+            <button onclick={clear_connections_clicked} context={props}>Clear Wires</button>
+            <spacer />
+            <badge class="chip">Drag nodes and pins</badge>
+            <badge class="chip">Infinite camera</badge>
+            <badge id="node-count" class="chip">Nodes 3</badge>
+        </toolbar>
+        <row class="workspace">
+            <column class="palette">
+                <h3>Node Palette</h3>
+                <search placeholder="Search nodes..." />
+                <panel class="hint">Drag title bars to move nodes. Middle-drag, or hold Space and left-drag, to pan forever. Wheel zooms at the pointer. Drag the navigator to recenter.</panel>
+                <button class="palette-item" number-value=4 onclick={add_palette_node} context={props}>Debug / Print String</button>
+                <button class="palette-item" number-value=5 onclick={add_palette_node} context={props}>Flow / Delay</button>
+                <panel class="palette-item">Events / On Player Enter</panel><panel class="palette-item">Flow / Branch</panel><panel class="palette-item">Animation / Play</panel><panel class="palette-item">Character / Move</panel><panel class="palette-item">Audio / One Shot</panel><panel class="palette-item">Math / Compare Float</panel><panel class="palette-item">Variables / Get Health</panel><panel class="palette-item">Variables / Set State</panel><panel class="palette-item">UI / Show Dialogue</panel><panel class="palette-item">Save / Write Slot</panel>
+            </column>
+
+            <panel class="graph-shell">
+                <nodeeditor class="graph" id="graph" onpointerdown={graph_pan_start} onpointermove={graph_pan_move} onpointerup={graph_pan_end} onscroll={graph_scrolled} context={props}>
+                    <canvas id="graph-canvas" class="graph-canvas">
+                        <line id="grid-v0" stroke="#1c2a40" stroke_width=1 /><line id="grid-v1" stroke="#1c2a40" stroke_width=1 /><line id="grid-v2" stroke="#1c2a40" stroke_width=1 /><line id="grid-v3" stroke="#1c2a40" stroke_width=1 /><line id="grid-v4" stroke="#1c2a40" stroke_width=1 /><line id="grid-v5" stroke="#1c2a40" stroke_width=1 /><line id="grid-v6" stroke="#1c2a40" stroke_width=1 /><line id="grid-v7" stroke="#1c2a40" stroke_width=1 /><line id="grid-v8" stroke="#1c2a40" stroke_width=1 /><line id="grid-v9" stroke="#1c2a40" stroke_width=1 /><line id="grid-v10" stroke="#1c2a40" stroke_width=1 /><line id="grid-v11" stroke="#1c2a40" stroke_width=1 /><line id="grid-v12" stroke="#1c2a40" stroke_width=1 /><line id="grid-v13" stroke="#1c2a40" stroke_width=1 /><line id="grid-v14" stroke="#1c2a40" stroke_width=1 /><line id="grid-v15" stroke="#1c2a40" stroke_width=1 /><line id="grid-v16" stroke="#1c2a40" stroke_width=1 /><line id="grid-v17" stroke="#1c2a40" stroke_width=1 /><line id="grid-v18" stroke="#1c2a40" stroke_width=1 /><line id="grid-v19" stroke="#1c2a40" stroke_width=1 /><line id="grid-v20" stroke="#1c2a40" stroke_width=1 /><line id="grid-v21" stroke="#1c2a40" stroke_width=1 /><line id="grid-v22" stroke="#1c2a40" stroke_width=1 /><line id="grid-v23" stroke="#1c2a40" stroke_width=1 /><line id="grid-v24" stroke="#1c2a40" stroke_width=1 /><line id="grid-v25" stroke="#1c2a40" stroke_width=1 /><line id="grid-v26" stroke="#1c2a40" stroke_width=1 /><line id="grid-v27" stroke="#1c2a40" stroke_width=1 /><line id="grid-v28" stroke="#1c2a40" stroke_width=1 /><line id="grid-v29" stroke="#1c2a40" stroke_width=1 /><line id="grid-v30" stroke="#1c2a40" stroke_width=1 /><line id="grid-v31" stroke="#1c2a40" stroke_width=1 /><line id="grid-v32" stroke="#1c2a40" stroke_width=1 /><line id="grid-v33" stroke="#1c2a40" stroke_width=1 /><line id="grid-v34" stroke="#1c2a40" stroke_width=1 /><line id="grid-v35" stroke="#1c2a40" stroke_width=1 /><line id="grid-v36" stroke="#1c2a40" stroke_width=1 /><line id="grid-v37" stroke="#1c2a40" stroke_width=1 /><line id="grid-v38" stroke="#1c2a40" stroke_width=1 /><line id="grid-v39" stroke="#1c2a40" stroke_width=1 /><line id="grid-v40" stroke="#1c2a40" stroke_width=1 /><line id="grid-v41" stroke="#1c2a40" stroke_width=1 /><line id="grid-v42" stroke="#1c2a40" stroke_width=1 /><line id="grid-v43" stroke="#1c2a40" stroke_width=1 /><line id="grid-v44" stroke="#1c2a40" stroke_width=1 /><line id="grid-v45" stroke="#1c2a40" stroke_width=1 /><line id="grid-v46" stroke="#1c2a40" stroke_width=1 /><line id="grid-v47" stroke="#1c2a40" stroke_width=1 />
+                        <line id="grid-h0" stroke="#1c2a40" stroke_width=1 /><line id="grid-h1" stroke="#1c2a40" stroke_width=1 /><line id="grid-h2" stroke="#1c2a40" stroke_width=1 /><line id="grid-h3" stroke="#1c2a40" stroke_width=1 /><line id="grid-h4" stroke="#1c2a40" stroke_width=1 /><line id="grid-h5" stroke="#1c2a40" stroke_width=1 /><line id="grid-h6" stroke="#1c2a40" stroke_width=1 /><line id="grid-h7" stroke="#1c2a40" stroke_width=1 /><line id="grid-h8" stroke="#1c2a40" stroke_width=1 /><line id="grid-h9" stroke="#1c2a40" stroke_width=1 /><line id="grid-h10" stroke="#1c2a40" stroke_width=1 /><line id="grid-h11" stroke="#1c2a40" stroke_width=1 /><line id="grid-h12" stroke="#1c2a40" stroke_width=1 /><line id="grid-h13" stroke="#1c2a40" stroke_width=1 /><line id="grid-h14" stroke="#1c2a40" stroke_width=1 /><line id="grid-h15" stroke="#1c2a40" stroke_width=1 /><line id="grid-h16" stroke="#1c2a40" stroke_width=1 /><line id="grid-h17" stroke="#1c2a40" stroke_width=1 /><line id="grid-h18" stroke="#1c2a40" stroke_width=1 /><line id="grid-h19" stroke="#1c2a40" stroke_width=1 /><line id="grid-h20" stroke="#1c2a40" stroke_width=1 /><line id="grid-h21" stroke="#1c2a40" stroke_width=1 /><line id="grid-h22" stroke="#1c2a40" stroke_width=1 /><line id="grid-h23" stroke="#1c2a40" stroke_width=1 /><line id="grid-h24" stroke="#1c2a40" stroke_width=1 /><line id="grid-h25" stroke="#1c2a40" stroke_width=1 /><line id="grid-h26" stroke="#1c2a40" stroke_width=1 /><line id="grid-h27" stroke="#1c2a40" stroke_width=1 /><line id="grid-h28" stroke="#1c2a40" stroke_width=1 /><line id="grid-h29" stroke="#1c2a40" stroke_width=1 /><line id="grid-h30" stroke="#1c2a40" stroke_width=1 /><line id="grid-h31" stroke="#1c2a40" stroke_width=1 /><line id="grid-h32" stroke="#1c2a40" stroke_width=1 /><line id="grid-h33" stroke="#1c2a40" stroke_width=1 /><line id="grid-h34" stroke="#1c2a40" stroke_width=1 /><line id="grid-h35" stroke="#1c2a40" stroke_width=1 />
+                        <line id="wire-0-a" hidden stroke="#a96cff" stroke_width=4 /><line id="wire-0-b" hidden stroke="#a96cff" stroke_width=4 /><line id="wire-0-c" hidden stroke="#a96cff" stroke_width=4 />
+                        <line id="wire-1-a" hidden stroke="#51d49b" stroke_width=4 /><line id="wire-1-b" hidden stroke="#51d49b" stroke_width=4 /><line id="wire-1-c" hidden stroke="#51d49b" stroke_width=4 />
+                        <line id="wire-2-a" hidden stroke="#a96cff" stroke_width=4 /><line id="wire-2-b" hidden stroke="#a96cff" stroke_width=4 /><line id="wire-2-c" hidden stroke="#a96cff" stroke_width=4 />
+                        <line id="wire-3-a" hidden stroke="#ff9b4a" stroke_width=4 /><line id="wire-3-b" hidden stroke="#ff9b4a" stroke_width=4 /><line id="wire-3-c" hidden stroke="#ff9b4a" stroke_width=4 />
+                        <line id="wire-4-a" hidden stroke="#a96cff" stroke_width=4 /><line id="wire-4-b" hidden stroke="#a96cff" stroke_width=4 /><line id="wire-4-c" hidden stroke="#a96cff" stroke_width=4 />
+                        <line id="wire-5-a" hidden stroke="#51d49b" stroke_width=4 /><line id="wire-5-b" hidden stroke="#51d49b" stroke_width=4 /><line id="wire-5-c" hidden stroke="#51d49b" stroke_width=4 />
+                        <line id="preview-a" hidden stroke="#ffd05c" stroke_width=4 /><line id="preview-b" hidden stroke="#ffd05c" stroke_width=4 /><line id="preview-c" hidden stroke="#ffd05c" stroke_width=4 />
+                    </canvas>
+
+                    <panel id="node-start" class="node">
+                        <titlebar id="title-start" class="node-title" onpointerdown={node_drag_start} onpointermove={node_drag_move} onpointerup={node_drag_end} context={props}>On Player Enter</titlebar>
+                        <row class="socket-row"><span>Actor</span><spacer /><panel id="port-start-actor" class="socket" min=1 max=2 onpointerdown={port_drag_start} onpointermove={port_drag_move} onpointerup={port_drag_end} context={props} /></row>
+                        <row class="socket-row"><span>Position</span><spacer /><panel id="port-start-position" class="socket socket-green" min=1 max=3 onpointerdown={port_drag_start} onpointermove={port_drag_move} onpointerup={port_drag_end} context={props} /></row>
+                        <row class="socket-row"><span>Execute</span><spacer /><panel id="port-start-exec" class="socket socket-purple" min=1 max=1 onpointerdown={port_drag_start} onpointermove={port_drag_move} onpointerup={port_drag_end} context={props} /></row>
+                    </panel>
+
+                    <panel id="node-branch" class="node">
+                        <titlebar id="title-branch" class="node-title node-title-purple" onpointerdown={node_drag_start} onpointermove={node_drag_move} onpointerup={node_drag_end} context={props}>Branch</titlebar>
+                        <row class="socket-row"><panel id="port-branch-in" class="socket socket-purple" min=0 max=1 onclick={input_port_clicked} context={props} /><span>In</span></row>
+                        <row class="socket-row"><panel id="port-branch-condition" class="socket" min=0 max=2 onclick={input_port_clicked} context={props} /><span>Condition</span><panel class="field">Health &lt; 25</panel></row>
+                        <row class="socket-row"><span>True</span><spacer /><panel id="port-branch-true" class="socket socket-purple" min=1 max=1 onpointerdown={port_drag_start} onpointermove={port_drag_move} onpointerup={port_drag_end} context={props} /></row>
+                        <row class="socket-row"><span>False</span><spacer /><panel id="port-branch-false" class="socket socket-purple" min=1 max=1 onpointerdown={port_drag_start} onpointermove={port_drag_move} onpointerup={port_drag_end} context={props} /></row>
+                    </panel>
+
+                    <panel id="node-play" class="node">
+                        <titlebar id="title-play" class="node-title node-title-green" onpointerdown={node_drag_start} onpointermove={node_drag_move} onpointerup={node_drag_end} context={props}>Play Animation</titlebar>
+                        <row class="socket-row"><panel id="port-play-exec" class="socket socket-purple" min=0 max=1 onclick={input_port_clicked} context={props} /><span>Execute</span></row>
+                        <row class="socket-row"><panel id="port-play-target" class="socket socket-green" min=0 max=3 onclick={input_port_clicked} context={props} /><span>Target</span></row>
+                        <property class="field">HitReaction_Heavy</property>
+                        <row class="socket-row"><span>Completed</span><spacer /><panel id="port-play-complete" class="socket socket-purple" min=1 max=1 onpointerdown={port_drag_start} onpointermove={port_drag_move} onpointerup={port_drag_end} context={props} /></row>
+                    </panel>
+
+                    <panel id="node-print" class="node" hidden>
+                        <titlebar id="title-print" class="node-title node-title-orange" onpointerdown={node_drag_start} onpointermove={node_drag_move} onpointerup={node_drag_end} context={props}>Print String</titlebar>
+                        <row class="socket-row"><panel id="port-print-exec" class="socket socket-purple" min=0 max=1 onclick={input_port_clicked} context={props} /><span>Execute</span></row>
+                        <property class="field">Player entered trigger</property>
+                        <row class="socket-row"><span>Then</span><spacer /><panel id="port-print-then" class="socket socket-purple" min=1 max=1 onpointerdown={port_drag_start} onpointermove={port_drag_move} onpointerup={port_drag_end} context={props} /></row>
+                    </panel>
+
+                    <panel id="node-delay" class="node" hidden>
+                        <titlebar id="title-delay" class="node-title node-title-red" onpointerdown={node_drag_start} onpointermove={node_drag_move} onpointerup={node_drag_end} context={props}>Delay</titlebar>
+                        <row class="socket-row"><panel id="port-delay-in" class="socket socket-purple" min=0 max=1 onclick={input_port_clicked} context={props} /><span>In</span></row>
+                        <row class="socket-row"><span>Duration</span><number class="field" value="0.35" /></row>
+                        <row class="socket-row"><span>Completed</span><spacer /><panel id="port-delay-out" class="socket socket-purple" min=1 max=1 onpointerdown={port_drag_start} onpointermove={port_drag_move} onpointerup={port_drag_end} context={props} /></row>
+                    </panel>
+                </nodeeditor>
+
+                <row class="graph-controls">
+                    <button class="graph-control-button" onclick={zoom_out_graph} context={props}>-</button>
+                    <button id="zoom-readout" class="zoom-readout" onclick={reset_zoom_graph} context={props}>100%</button>
+                    <button class="graph-control-button" onclick={zoom_in_graph} context={props}>+</button>
+                    <button class="graph-control-button" onclick={frame_all_graph} context={props}>Frame</button>
+                </row>
+                <panel class="graph-help">MMB / Space+LMB pan  |  Wheel zoom  |  F frames all</panel>
+                <minimap id="minimap" class="minimap" onpointerdown={minimap_pan_start} onpointermove={minimap_pan_move} onpointerup={minimap_pan_end} context={props}>
+                    <span class="minimap-title">Navigator</span>
+                    <canvas id="mini-canvas" class="mini-canvas">
+                        <line id="mini-wire-0" stroke="#a96cff" stroke_width=2 /><line id="mini-wire-1" stroke="#51d49b" stroke_width=2 /><line id="mini-wire-2" stroke="#a96cff" stroke_width=2 /><line id="mini-wire-3" stroke="#ff9b4a" stroke_width=2 /><line id="mini-wire-4" stroke="#a96cff" stroke_width=2 /><line id="mini-wire-5" stroke="#51d49b" stroke_width=2 />
+                        <rect id="mini-start" fill="#315d9e" /><rect id="mini-branch" fill="#7440a7" /><rect id="mini-play" fill="#28785a" /><rect id="mini-print" fill="#9a5c29" /><rect id="mini-delay" fill="#9a3545" />
+                        <rect id="mini-view" fill="rgba(95,145,225,0.12)" stroke="#e8f1ff" stroke_width=2 />
+                    </canvas>
+                </minimap>
+            </panel>
+
+            <inspector class="inspector">
+                <h3>Node Inspector</h3>
+                <componentheader id="selected-node-title">Branch</componentheader>
+                <group class="property"><label>Display Name</label><input value="Low Health Branch" /></group>
+                <group class="property"><label>Condition</label><select value="Less Than"><option value="Equals">Equals</option><option value="Not Equals">Not Equals</option><option value="Less Than" selected>Less Than</option><option value="Less Than or Equal">Less Than or Equal</option><option value="Greater Than">Greater Than</option><option value="Greater Than or Equal">Greater Than or Equal</option></select></group>
+                <group class="property"><label>Threshold</label><number value="25" /></group>
+                <group class="property"><label>Breakpoint</label><checkbox>Disabled</checkbox></group>
+                <group class="property"><label>Graph Interaction</label><span>Drag title bars continuously</span><span>Drag output pins onto inputs</span><span>MMB or Space+LMB pans an unbounded camera</span><span>Drag the floating navigator to recenter</span></group>
+                <group class="property"><label>Connection Editing</label><span>Drop matching colors/types to connect</span><span>Click a connected input to disconnect</span></group>
+                <group class="property"><label>Debug Values</label><number value="1.0" /><number value="2.0" /><number value="3.0" /></group>
+                <group class="property"><label>Notes</label><textarea>The navigator mirrors nodes, wires, and the live viewport while the camera pans and zooms without native scrollbars.</textarea></group>
+            </inspector>
+        </row>
+        <statusbar class="status"><span id="graph-status">Ready - drag a node or pin</span><spacer /><span>Instanced nodes, pins, elbow wires and SDF text</span></statusbar>
+    </ui>
+)}
+
+fn set_status(props,message)
+    if props.root == null then return end
+    local status = props.root.find_id(UI.hash("graph-status"))
+    if status ~= null then status.set_text(message) end
+end
+
+fn set_node_count_text(props)
+    local badge = props.root.find_id(UI.hash("node-count"))
+    if badge == null then return end
+    if props.node_count <= 3 then badge.set_text("Nodes 3")
+    elseif props.node_count == 4 then badge.set_text("Nodes 4")
+    else badge.set_text("Nodes 5") end
+end
+
+fn select_node(props,node,title)
+    if node == null then return end
+    local index = 0
+    while index < props.nodes.length() do
+        local item = props.nodes.at(index)
+        if item.element ~= null then
+            item.element.selected = item.element.id_hash == node.id_hash
+            item.element.mark_visual_dirty()
+        end
+        index = index + 1
+    end
+    local inspectorTitle = props.root.find_id(UI.hash("selected-node-title"))
+    if inspectorTitle ~= null then inspectorTitle.set_text(title) end
+end
+
+fn add_vertical_grid_line(props,element)
+    local item = ElementRef.new()
+    item.element = element
+    props.vertical_grid.push(item)
+end
+
+fn add_horizontal_grid_line(props,element)
+    local item = ElementRef.new()
+    item.element = element
+    props.horizontal_grid.push(item)
+end
+
+fn add_graph_node(props,element,mini,x,y)
+    local node = GraphNode.new()
+    node.element = element
+    node.mini = mini
+    node.world_x = x
+    node.world_y = y
+    props.nodes.push(node)
+end
+
+fn find_graph_node(props,element)
+    if props == null or element == null then return null end
+    local index = 0
+    while index < props.nodes.length() do
+        local node = props.nodes.at(index)
+        if node.element ~= null and node.element.id_hash == element.id_hash then return node end
+        index = index + 1
+    end
+    return null
+end
+
+fn find_graph_node_ancestor(props,element)
+    local current = element
+    while current ~= null do
+        local node = find_graph_node(props,current)
+        if node ~= null then return node end
+        current = current.parent
+    end
+    return null
+end
+
+fn element_or_ancestor_has_class(element,className)
+    local current = element
+    while current ~= null do
+        if current.has_class(className) then return current end
+        current = current.parent
+    end
+    return null
+end
+
+fn point_inside_graph(props,x,y)
+    if props == null or props.graph == null then return false end
+    if x < props.graph.x or y < props.graph.y then return false end
+    if x > props.graph.x+props.graph.width then return false end
+    if y > props.graph.y+props.graph.height then return false end
+    return true
+end
+
+fn set_world_position(node,x,y)
+    if node == null then return end
+    node.world_x = x
+    node.world_y = y
+end
+
+fn apply_node_screen_position(props,node)
+    if node == null or node.element == null then return end
+    node.element.style.left_unit = UI.UNIT_PX
+    node.element.style.top_unit = UI.UNIT_PX
+    node.element.style.left = props.pan_x + node.world_x*props.zoom
+    node.element.style.top = props.pan_y + node.world_y*props.zoom
+    node.element.mark_layout_dirty()
+end
+
+fn apply_all_node_positions(props)
+    local index = 0
+    while index < props.nodes.length() do
+        apply_node_screen_position(props,props.nodes.at(index))
+        index = index + 1
+    end
+    props.graph_dirty = true
+end
+
+fn add_connection_slot(props,a,b,c,mini)
+    local connection = GraphConnection.new()
+    connection.line_a = a
+    connection.line_b = b
+    connection.line_c = c
+    connection.mini_line = mini
+    if a ~= null then a.hidden = true end
+    if b ~= null then b.hidden = true end
+    if c ~= null then c.hidden = true end
+    props.connections.push(connection)
+end
+
+fn set_wire_color(line,portType)
+    if line == null then return end
+    local color = UI.rgba(98,160,255,255)
+    if portType == 1.0 then color = UI.rgba(169,108,255,255)
+    elseif portType == 3.0 then color = UI.rgba(81,212,155,255)
+    elseif portType == 4.0 then color = UI.rgba(255,155,74,255) end
+    line.style.border_top_color = color
+    line.style.border_right_color = color
+    line.style.border_bottom_color = color
+    line.style.border_left_color = color
+    line.mark_visual_dirty()
+end
+
+fn set_line(line,x1,y1,x2,y2,visible)
+    if line == null then return end
+    line.hidden = not visible
+    if visible then
+        line.canvas_x = x1
+        line.canvas_y = y1
+        line.canvas_x2 = x2
+        line.canvas_y2 = y2
+    end
+    line.mark_visual_dirty()
+end
+
+fn set_elbow(a,b,c,x1,y1,x2,y2,visible)
+    local middle = (x1+x2)*0.5
+    set_line(a,x1,y1,middle,y1,visible)
+    set_line(b,middle,y1,middle,y2,visible)
+    set_line(c,middle,y2,x2,y2,visible)
+end
+
+fn find_connection_to(props,input)
+    local index = 0
+    while index < props.connections.length() do
+        local connection = props.connections.at(index)
+        if connection.active and connection.input ~= null and connection.input.id_hash == input.id_hash then return connection end
+        index = index + 1
+    end
+    return null
+end
+
+fn find_free_connection(props)
+    local index = 0
+    while index < props.connections.length() do
+        local connection = props.connections.at(index)
+        if not connection.active then return connection end
+        index = index + 1
+    end
+    return null
+end
+
+fn disconnect_connection(connection)
+    if connection == null then return end
+    connection.active = false
+    connection.output = null
+    connection.input = null
+    set_elbow(connection.line_a,connection.line_b,connection.line_c,0.0,0.0,0.0,0.0,false)
+end
+
+fn connect_ports(props,output,input)
+    if output == null or input == null then return false end
+    if output.max_value ~= input.max_value then return false end
+    local existing = find_connection_to(props,input)
+    if existing ~= null then disconnect_connection(existing) end
+    local connection = find_free_connection(props)
+    if connection == null then return false end
+    connection.active = true
+    connection.output = output
+    connection.input = input
+    set_wire_color(connection.line_a,output.max_value)
+    set_wire_color(connection.line_b,output.max_value)
+    set_wire_color(connection.line_c,output.max_value)
+    set_wire_color(connection.mini_line,output.max_value)
+    props.graph_dirty = true
+    return true
+end
+
+fn clear_pending_output(props)
+    if props.pending_output ~= null then props.pending_output.selected = false props.pending_output.mark_visual_dirty() end
+    props.pending_output = null
+    props.dragging_wire = false
+    props.graph_dirty = true
+end
+
+fn update_grid(props)
+    if props.graph == null then return end
+    -- The grid is camera-relative, never a finite scroll surface. Scale the
+    -- spacing with the camera and wrap offsets so panning can continue forever.
+    local spacing = 64.0*props.zoom
+    if spacing < 18.0 then spacing = 18.0 end
+    local offsetX = props.pan_x
+    local offsetY = props.pan_y
+    while offsetX >= spacing do offsetX = offsetX-spacing end
+    while offsetX < 0.0 do offsetX = offsetX+spacing end
+    while offsetY >= spacing do offsetY = offsetY-spacing end
+    while offsetY < 0.0 do offsetY = offsetY+spacing end
+    local i = 0
+    while i < props.vertical_grid.length() do
+        local x = offsetX + i*spacing
+        local line = props.vertical_grid.at(i)
+        if x <= props.graph.content_width+spacing then set_line(line.element,x,0.0,x,props.graph.content_height,true)
+        else set_line(line.element,0.0,0.0,0.0,0.0,false) end
+        i = i + 1
+    end
+    i = 0
+    while i < props.horizontal_grid.length() do
+        local y = offsetY + i*spacing
+        local horizontalLine = props.horizontal_grid.at(i)
+        if y <= props.graph.content_height+spacing then set_line(horizontalLine.element,0.0,y,props.graph.content_width,y,true)
+        else set_line(horizontalLine.element,0.0,0.0,0.0,0.0,false) end
+        i = i + 1
+    end
+end
+
+fn update_connections(props)
+    if props.canvas == null then return end
+    local index = 0
+    while index < props.connections.length() do
+        local connection = props.connections.at(index)
+        if connection.active and connection.output ~= null and connection.input ~= null then
+            local x1 = connection.output.x + connection.output.width*0.5 - props.canvas.content_x
+            local y1 = connection.output.y + connection.output.height*0.5 - props.canvas.content_y
+            local x2 = connection.input.x + connection.input.width*0.5 - props.canvas.content_x
+            local y2 = connection.input.y + connection.input.height*0.5 - props.canvas.content_y
+            set_elbow(connection.line_a,connection.line_b,connection.line_c,x1,y1,x2,y2,true)
+        else set_elbow(connection.line_a,connection.line_b,connection.line_c,0.0,0.0,0.0,0.0,false) end
+        index = index + 1
+    end
+    local pa = props.root.find_id(UI.hash("preview-a"))
+    local pb = props.root.find_id(UI.hash("preview-b"))
+    local pc = props.root.find_id(UI.hash("preview-c"))
+    if props.dragging_wire and props.pending_output ~= null then
+        local previewX1 = props.pending_output.x + props.pending_output.width*0.5 - props.canvas.content_x
+        local previewY1 = props.pending_output.y + props.pending_output.height*0.5 - props.canvas.content_y
+        local previewX2 = props.pointer_x - props.canvas.content_x
+        local previewY2 = props.pointer_y - props.canvas.content_y
+        set_elbow(pa,pb,pc,previewX1,previewY1,previewX2,previewY2,true)
+    else set_elbow(pa,pb,pc,0.0,0.0,0.0,0.0,false) end
+end
+
+fn update_minimap(props)
+    if props.minimap == null or props.mini_canvas == null or props.graph == null or props.nodes.length() == 0 then return end
+    local minX = 1000000.0
+    local minY = 1000000.0
+    local maxX = -1000000.0
+    local maxY = -1000000.0
+    local index = 0
+    while index < props.nodes.length() do
+        local node = props.nodes.at(index)
+        if node.element ~= null and not node.element.hidden then
+            if node.world_x < minX then minX = node.world_x end
+            if node.world_y < minY then minY = node.world_y end
+            if node.world_x+250.0 > maxX then maxX = node.world_x+250.0 end
+            if node.world_y+190.0 > maxY then maxY = node.world_y+190.0 end
+        end
+        index = index + 1
+    end
+    local zoom = props.zoom
+    if zoom <= 0.0 then zoom = 1.0 end
+    local viewLeft = -props.pan_x/zoom
+    local viewTop = -props.pan_y/zoom
+    local viewWidth = props.graph.content_width/zoom
+    local viewHeight = props.graph.content_height/zoom
+    local viewRight = viewLeft+viewWidth
+    local viewBottom = viewTop+viewHeight
+    if viewLeft < minX then minX = viewLeft end
+    if viewTop < minY then minY = viewTop end
+    if viewRight > maxX then maxX = viewRight end
+    if viewBottom > maxY then maxY = viewBottom end
+    minX = minX-100.0
+    minY = minY-100.0
+    maxX = maxX+100.0
+    maxY = maxY+100.0
+    if maxX <= minX then maxX = minX+1.0 end
+    if maxY <= minY then maxY = minY+1.0 end
+    props.map_min_x = minX
+    props.map_min_y = minY
+    props.map_max_x = maxX
+    props.map_max_y = maxY
+    local mapWidth = props.mini_canvas.content_width
+    local mapHeight = props.mini_canvas.content_height
+    if mapWidth <= 0.0 or mapHeight <= 0.0 then return end
+    local scaleX = mapWidth/(maxX-minX)
+    local scaleY = mapHeight/(maxY-minY)
+    index = 0
+    while index < props.nodes.length() do
+        local mapNode = props.nodes.at(index)
+        local mini = mapNode.mini
+        if mapNode.element ~= null and mini ~= null then
+            mini.hidden = mapNode.element.hidden
+            if not mapNode.element.hidden then
+                mini.canvas_x = (mapNode.world_x-minX)*scaleX
+                mini.canvas_y = (mapNode.world_y-minY)*scaleY
+                mini.canvas_width = 250.0*scaleX
+                mini.canvas_height = 190.0*scaleY
+                if mini.canvas_width < 7.0 then mini.canvas_width = 7.0 end
+                if mini.canvas_height < 5.0 then mini.canvas_height = 5.0 end
+            end
+            mini.mark_visual_dirty()
+        end
+        index = index + 1
+    end
+    index = 0
+    while index < props.connections.length() do
+        local connection = props.connections.at(index)
+        if connection.mini_line ~= null then
+            if connection.active and connection.output ~= null and connection.input ~= null then
+                local outputNode = find_graph_node_ancestor(props,connection.output)
+                local inputNode = find_graph_node_ancestor(props,connection.input)
+                if outputNode ~= null and inputNode ~= null then
+                    local x1 = (outputNode.world_x+125.0-minX)*scaleX
+                    local y1 = (outputNode.world_y+95.0-minY)*scaleY
+                    local x2 = (inputNode.world_x+125.0-minX)*scaleX
+                    local y2 = (inputNode.world_y+95.0-minY)*scaleY
+                    set_line(connection.mini_line,x1,y1,x2,y2,true)
+                else set_line(connection.mini_line,0.0,0.0,0.0,0.0,false) end
+            else set_line(connection.mini_line,0.0,0.0,0.0,0.0,false) end
+        end
+        index = index + 1
+    end
+    local view = props.root.find_id(UI.hash("mini-view"))
+    if view ~= null then
+        view.canvas_x = (viewLeft-minX)*scaleX
+        view.canvas_y = (viewTop-minY)*scaleY
+        view.canvas_width = viewWidth*scaleX
+        view.canvas_height = viewHeight*scaleY
+        if view.canvas_width < 4.0 then view.canvas_width = 4.0 end
+        if view.canvas_height < 4.0 then view.canvas_height = 4.0 end
+        view.mark_visual_dirty()
+    end
+end
+
+fn update_graph_visuals(props)
+    if props.graph == null then return end
+    -- A node viewport never exposes native retained-layout scrolling. Clear any
+    -- scroll metrics that absolute children may have contributed and redraw the
+    -- camera-owned grid, links, and navigator every frame.
+    props.graph.scroll_x = 0.0
+    props.graph.scroll_y = 0.0
+    props.graph.scroll_max_x = 0.0
+    props.graph.scroll_max_y = 0.0
+    update_grid(props)
+    update_connections(props)
+    update_minimap(props)
+    props.graph_dirty = false
+end
+
+fn push_grid_lines(props)
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v0")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v1")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v2")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v3")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v4")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v5")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v6")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v7")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v8")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v9")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v10")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v11")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v12")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v13")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v14")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v15")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v16")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v17")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v18")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v19")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v20")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v21")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v22")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v23")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v24")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v25")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v26")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v27")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v28")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v29")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v30")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v31")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v32")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v33")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v34")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v35")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v36")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v37")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v38")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v39")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v40")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v41")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v42")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v43")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v44")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v45")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v46")))
+    add_vertical_grid_line(props,props.root.find_id(UI.hash("grid-v47")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h0")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h1")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h2")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h3")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h4")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h5")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h6")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h7")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h8")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h9")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h10")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h11")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h12")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h13")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h14")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h15")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h16")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h17")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h18")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h19")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h20")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h21")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h22")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h23")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h24")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h25")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h26")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h27")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h28")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h29")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h30")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h31")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h32")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h33")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h34")))
+    add_horizontal_grid_line(props,props.root.find_id(UI.hash("grid-h35")))
+end
+
+fn initialize_graph(props,root)
+    props.root = root
+    props.graph = root.find_id(UI.hash("graph"))
+    props.canvas = root.find_id(UI.hash("graph-canvas"))
+    props.minimap = root.find_id(UI.hash("minimap"))
+    props.mini_canvas = root.find_id(UI.hash("mini-canvas"))
+    add_graph_node(props,root.find_id(UI.hash("node-start")),root.find_id(UI.hash("mini-start")),0.0,0.0)
+    add_graph_node(props,root.find_id(UI.hash("node-branch")),root.find_id(UI.hash("mini-branch")),370.0,210.0)
+    add_graph_node(props,root.find_id(UI.hash("node-play")),root.find_id(UI.hash("mini-play")),760.0,15.0)
+    add_graph_node(props,root.find_id(UI.hash("node-print")),root.find_id(UI.hash("mini-print")),1110.0,270.0)
+    add_graph_node(props,root.find_id(UI.hash("node-delay")),root.find_id(UI.hash("mini-delay")),700.0,500.0)
+    apply_all_node_positions(props)
+    push_grid_lines(props)
+    add_connection_slot(props,root.find_id(UI.hash("wire-0-a")),root.find_id(UI.hash("wire-0-b")),root.find_id(UI.hash("wire-0-c")),root.find_id(UI.hash("mini-wire-0")))
+    add_connection_slot(props,root.find_id(UI.hash("wire-1-a")),root.find_id(UI.hash("wire-1-b")),root.find_id(UI.hash("wire-1-c")),root.find_id(UI.hash("mini-wire-1")))
+    add_connection_slot(props,root.find_id(UI.hash("wire-2-a")),root.find_id(UI.hash("wire-2-b")),root.find_id(UI.hash("wire-2-c")),root.find_id(UI.hash("mini-wire-2")))
+    add_connection_slot(props,root.find_id(UI.hash("wire-3-a")),root.find_id(UI.hash("wire-3-b")),root.find_id(UI.hash("wire-3-c")),root.find_id(UI.hash("mini-wire-3")))
+    add_connection_slot(props,root.find_id(UI.hash("wire-4-a")),root.find_id(UI.hash("wire-4-b")),root.find_id(UI.hash("wire-4-c")),root.find_id(UI.hash("mini-wire-4")))
+    add_connection_slot(props,root.find_id(UI.hash("wire-5-a")),root.find_id(UI.hash("wire-5-b")),root.find_id(UI.hash("wire-5-c")),root.find_id(UI.hash("mini-wire-5")))
+    connect_ports(props,root.find_id(UI.hash("port-start-exec")),root.find_id(UI.hash("port-branch-in")))
+    connect_ports(props,root.find_id(UI.hash("port-start-position")),root.find_id(UI.hash("port-play-target")))
+    connect_ports(props,root.find_id(UI.hash("port-branch-true")),root.find_id(UI.hash("port-play-exec")))
+    local initialNode = props.nodes.at(1)
+    select_node(props,initialNode.element,"Branch")
+    set_zoom_readout(props)
+end
+
+fn set_zoom_readout(props)
+    if props.root == null then return end
+    local readout = props.root.find_id(UI.hash("zoom-readout"))
+    if readout == null then return end
+    if props.zoom < 0.35 then readout.set_text("30%")
+    elseif props.zoom < 0.45 then readout.set_text("40%")
+    elseif props.zoom < 0.55 then readout.set_text("50%")
+    elseif props.zoom < 0.68 then readout.set_text("60%")
+    elseif props.zoom < 0.83 then readout.set_text("75%")
+    elseif props.zoom < 0.95 then readout.set_text("90%")
+    elseif props.zoom < 1.06 then readout.set_text("100%")
+    elseif props.zoom < 1.18 then readout.set_text("110%")
+    elseif props.zoom < 1.38 then readout.set_text("125%")
+    elseif props.zoom < 1.63 then readout.set_text("150%")
+    elseif props.zoom < 1.88 then readout.set_text("175%")
+    elseif props.zoom < 2.25 then readout.set_text("200%")
+    else readout.set_text("250%") end
+end
+
+fn set_graph_zoom(props,newZoom,anchorX,anchorY)
+    if props.graph == null then return end
+    if newZoom < props.min_zoom then newZoom = props.min_zoom end
+    if newZoom > props.max_zoom then newZoom = props.max_zoom end
+    local oldZoom = props.zoom
+    if oldZoom <= 0.0 then oldZoom = 1.0 end
+    local localX = anchorX-props.graph.content_x
+    local localY = anchorY-props.graph.content_y
+    local worldX = (localX-props.pan_x)/oldZoom
+    local worldY = (localY-props.pan_y)/oldZoom
+    props.zoom = newZoom
+    props.pan_x = localX-worldX*newZoom
+    props.pan_y = localY-worldY*newZoom
+    apply_all_node_positions(props)
+    set_zoom_readout(props)
+end
+
+fn zoom_graph_center(props,factor)
+    if props.graph == null then return end
+    set_graph_zoom(props,props.zoom*factor,props.graph.content_x+props.graph.content_width*0.5,props.graph.content_y+props.graph.content_height*0.5)
+end
+
+fn zoom_in_graph(element,event,props)
+    zoom_graph_center(props,1.20)
+    set_status(props,"Graph zoomed in")
+    return 0
+end
+
+fn zoom_out_graph(element,event,props)
+    zoom_graph_center(props,0.8333333)
+    set_status(props,"Graph zoomed out")
+    return 0
+end
+
+fn reset_zoom_graph(element,event,props)
+    if props.graph ~= null then set_graph_zoom(props,1.0,props.graph.content_x+props.graph.content_width*0.5,props.graph.content_y+props.graph.content_height*0.5) end
+    set_status(props,"Graph zoom reset")
+    return 0
+end
+
+fn move_dragging_node(props,x,y)
+    if props.dragging_node == null or props.graph == null then return end
+    local deltaX = x-props.drag_offset_x
+    local deltaY = y-props.drag_offset_y
+    local absoluteX = graph_absolute_value(deltaX)
+    local absoluteY = graph_absolute_value(deltaY)
+    if not props.dragging_node_moved then
+        if absoluteX < 2.0 and absoluteY < 2.0 then return end
+        props.dragging_node_moved = true
+    end
+    local zoom = props.zoom
+    if zoom <= 0.0 then zoom = 1.0 end
+    props.dragging_node.world_x = props.drag_world_x+deltaX/zoom
+    props.dragging_node.world_y = props.drag_world_y+deltaY/zoom
+    apply_node_screen_position(props,props.dragging_node)
+    props.pointer_x = x
+    props.pointer_y = y
+    props.graph_dirty = true
+end
+
+fn move_graph_camera(props,x,y)
+    if not props.panning then return end
+    local deltaX = x-props.pan_start_x
+    local deltaY = y-props.pan_start_y
+    if not props.panning_moved then
+        if graph_absolute_value(deltaX) < 2.0 and graph_absolute_value(deltaY) < 2.0 then return end
+        props.panning_moved = true
+    end
+    props.pan_x = props.pan_origin_x+deltaX
+    props.pan_y = props.pan_origin_y+deltaY
+    apply_all_node_positions(props)
+end
+
+fn ensure_pointer_gesture_started(props,root,button,x,y)
+    if props == null or root == null then return end
+    local target = UI.hit_test(root,x,y)
+    if button == GLFW.GLFW_MOUSE_BUTTON_MIDDLE and point_inside_graph(props,x,y) then
+        if not props.panning then
+            props.panning = true
+            props.panning_moved = false
+            props.pan_start_x = x
+            props.pan_start_y = y
+            props.pan_origin_x = props.pan_x
+            props.pan_origin_y = props.pan_y
+        end
+        return
+    end
+    if button ~= GLFW.GLFW_MOUSE_BUTTON_LEFT then return end
+    if props.space_down and point_inside_graph(props,x,y) then
+        if not props.panning then
+            props.panning = true
+            props.panning_moved = false
+            props.pan_start_x = x
+            props.pan_start_y = y
+            props.pan_origin_x = props.pan_x
+            props.pan_origin_y = props.pan_y
+        end
+        return
+    end
+    if target == null then return end
+    local title = element_or_ancestor_has_class(target,"node-title")
+    if title ~= null and props.dragging_node == null then
+        local node = find_graph_node_ancestor(props,title)
+        if node ~= null then
+            props.dragging_node = node
+            props.dragging_node_moved = false
+            props.drag_offset_x = x
+            props.drag_offset_y = y
+            props.drag_world_x = node.world_x
+            props.drag_world_y = node.world_y
+            select_node(props,node.element,title.text)
+        end
+        return
+    end
+    local socket = element_or_ancestor_has_class(target,"socket")
+    if socket ~= null and socket.min_value >= 0.5 and not props.dragging_wire then
+        clear_pending_output(props)
+        props.pending_output = socket
+        props.dragging_wire = true
+        props.pointer_x = x
+        props.pointer_y = y
+        socket.selected = true
+        socket.mark_visual_dirty()
+        props.graph_dirty = true
+        return
+    end
+    local mini = element_or_ancestor_has_class(target,"minimap")
+    if mini ~= null and not props.minimap_dragging then
+        props.minimap_dragging = true
+        minimap_pan_to_xy(props,x,y)
+    end
+end
+
+fn update_active_graph_gesture(props,x,y)
+    props.pointer_x = x
+    props.pointer_y = y
+    if props.dragging_node ~= null then move_dragging_node(props,x,y)
+    elseif props.panning then move_graph_camera(props,x,y)
+    elseif props.minimap_dragging then minimap_pan_to_xy(props,x,y)
+    elseif props.dragging_wire then props.graph_dirty = true end
+end
+
+fn node_drag_start(element,event,props)
+    if event.button ~= GLFW.GLFW_MOUSE_BUTTON_LEFT then return 0 end
+    local nodeElement = element.parent
+    if nodeElement == null or props.graph == null then return 0 end
+    local node = find_graph_node(props,nodeElement)
+    if node == null then return 0 end
+    props.dragging_node = node
+    props.dragging_node_moved = false
+    props.drag_offset_x = event.x
+    props.drag_offset_y = event.y
+    props.drag_world_x = node.world_x
+    props.drag_world_y = node.world_y
+    select_node(props,node.element,element.text)
+    set_status(props,"Moving node")
+    event.prevent_default()
+    return 0
+end
+
+fn node_drag_move(element,event,props)
+    move_dragging_node(props,event.x,event.y)
+    event.prevent_default()
+    return 0
+end
+
+fn node_drag_end(element,event,props)
+    move_dragging_node(props,event.x,event.y)
+    local moved = props.dragging_node_moved
+    props.dragging_node = null
+    props.dragging_node_moved = false
+    if moved then set_status(props,"Node moved") else set_status(props,"Node selected") end
+    event.prevent_default()
+    return 0
+end
+
+fn graph_pan_start(element,event,props)
+    local valid = event.button == GLFW.GLFW_MOUSE_BUTTON_MIDDLE
+    if event.button == GLFW.GLFW_MOUSE_BUTTON_LEFT and props.space_down then valid = true end
+    if not valid then return 0 end
+    props.panning = true
+    props.panning_moved = false
+    props.pan_start_x = event.x
+    props.pan_start_y = event.y
+    props.pan_origin_x = props.pan_x
+    props.pan_origin_y = props.pan_y
+    set_status(props,"Panning graph camera")
+    event.prevent_default()
+    return 0
+end
+
+fn graph_pan_move(element,event,props)
+    move_graph_camera(props,event.x,event.y)
+    event.prevent_default()
+    return 0
+end
+
+fn graph_pan_end(element,event,props)
+    move_graph_camera(props,event.x,event.y)
+    local moved = props.panning_moved
+    props.panning = false
+    props.panning_moved = false
+    if moved then set_status(props,"Graph pan complete") end
+    event.prevent_default()
+    return 0
+end
+
+fn graph_scrolled(element,event,props)
+    local factor = 1.12
+    if event.delta_y < 0.0 then factor = 0.8928571 end
+    if event.delta_y == 0.0 then
+        if event.delta_x > 0.0 then factor = 1.12
+        elseif event.delta_x < 0.0 then factor = 0.8928571 end
+    end
+    set_graph_zoom(props,props.zoom*factor,event.x,event.y)
+    set_status(props,"Wheel zoomed graph at pointer")
+    event.prevent_default()
+    return 0
+end
+
+fn minimap_pan_to_xy(props,x,y)
+    if props.graph == null or props.mini_canvas == null then return end
+    local width = props.mini_canvas.content_width
+    local height = props.mini_canvas.content_height
+    if width <= 0.0 or height <= 0.0 then return end
+    local ratioX = (x-props.mini_canvas.content_x)/width
+    local ratioY = (y-props.mini_canvas.content_y)/height
+    if ratioX < 0.0 then ratioX = 0.0 end
+    if ratioX > 1.0 then ratioX = 1.0 end
+    if ratioY < 0.0 then ratioY = 0.0 end
+    if ratioY > 1.0 then ratioY = 1.0 end
+    local worldX = props.map_min_x+ratioX*(props.map_max_x-props.map_min_x)
+    local worldY = props.map_min_y+ratioY*(props.map_max_y-props.map_min_y)
+    props.pan_x = props.graph.content_width*0.5-worldX*props.zoom
+    props.pan_y = props.graph.content_height*0.5-worldY*props.zoom
+    apply_all_node_positions(props)
+end
+
+fn minimap_pan_start(element,event,props)
+    if event.button ~= GLFW.GLFW_MOUSE_BUTTON_LEFT then return 0 end
+    props.minimap_dragging = true
+    minimap_pan_to_xy(props,event.x,event.y)
+    set_status(props,"Navigator moving camera")
+    event.prevent_default()
+    return 0
+end
+
+fn minimap_pan_move(element,event,props)
+    if props.minimap_dragging then minimap_pan_to_xy(props,event.x,event.y) end
+    event.prevent_default()
+    return 0
+end
+
+fn minimap_pan_end(element,event,props)
+    if props.minimap_dragging then minimap_pan_to_xy(props,event.x,event.y) end
+    props.minimap_dragging = false
+    set_status(props,"Navigator recentered graph")
+    event.prevent_default()
+    return 0
+end
+
+fn port_drag_start(element,event,props)
+    if event.button ~= GLFW.GLFW_MOUSE_BUTTON_LEFT or element.min_value < 0.5 then return 0 end
+    clear_pending_output(props)
+    props.pending_output = element
+    props.dragging_wire = true
+    props.pointer_x = event.x props.pointer_y = event.y
+    element.selected = true element.mark_visual_dirty()
+    props.graph_dirty = true
+    set_status(props,"Dragging wire - drop on a matching input pin")
+    event.prevent_default()
+    return 0
+end
+
+fn port_drag_move(element,event,props)
+    if not props.dragging_wire then return 0 end
+    props.pointer_x = event.x props.pointer_y = event.y props.graph_dirty = true
+    event.prevent_default()
+    return 0
+end
+
+fn port_drag_end(element,event,props)
+    if not props.dragging_wire then return 0 end
+    props.pointer_x = event.x props.pointer_y = event.y
+    local target = UI.hit_test(props.root,event.x,event.y)
+    local connected = false
+    if target ~= null and target.has_class("socket") and target.min_value < 0.5 then connected = connect_ports(props,props.pending_output,target) end
+    clear_pending_output(props)
+    if connected then set_status(props,"Pins connected by drag and drop")
+    else set_status(props,"Wire cancelled - drop directly on a matching input pin") end
+    event.prevent_default()
+    return 0
+end
+
+fn input_port_clicked(element,event,props)
+    local existing = find_connection_to(props,element)
+    if existing ~= null then disconnect_connection(existing) props.graph_dirty = true set_status(props,"Input wire disconnected")
+    else set_status(props,"Input is unconnected - drag an output pin onto it") end
+    return 0
+end
+
+fn compile_graph(element,event,props)
+    set_status(props,"Graph compiled - active pin types validated")
+    return 0
+end
+
+fn clear_connections_clicked(element,event,props)
+    local index = 0
+    while index < props.connections.length() do
+        disconnect_connection(props.connections.at(index))
+        index = index + 1
+    end
+    clear_pending_output(props)
+    props.graph_dirty = true
+    set_status(props,"All wires cleared")
+    return 0
+end
+
+fn auto_layout_graph(element,event,props)
+    set_world_position(props.nodes.at(0),0.0,20.0)
+    set_world_position(props.nodes.at(1),350.0,210.0)
+    set_world_position(props.nodes.at(2),730.0,20.0)
+    set_world_position(props.nodes.at(3),1080.0,240.0)
+    set_world_position(props.nodes.at(4),700.0,500.0)
+    apply_all_node_positions(props)
+    set_status(props,"Auto layout applied")
+    return 0
+end
+
+fn frame_graph_contents(props)
+    if props.graph == null or props.nodes.length() == 0 then return end
+    local minX = 1000000.0
+    local minY = 1000000.0
+    local maxX = -1000000.0
+    local maxY = -1000000.0
+    local index = 0
+    while index < props.nodes.length() do
+        local node = props.nodes.at(index)
+        if node.element ~= null and not node.element.hidden then
+            if node.world_x < minX then minX = node.world_x end
+            if node.world_y < minY then minY = node.world_y end
+            if node.world_x+250.0 > maxX then maxX = node.world_x+250.0 end
+            if node.world_y+190.0 > maxY then maxY = node.world_y+190.0 end
+        end
+        index = index + 1
+    end
+    local boundsWidth = maxX-minX
+    local boundsHeight = maxY-minY
+    if boundsWidth <= 1.0 then boundsWidth = 1.0 end
+    if boundsHeight <= 1.0 then boundsHeight = 1.0 end
+    local targetX = (props.graph.content_width-100.0)/boundsWidth
+    local targetY = (props.graph.content_height-100.0)/boundsHeight
+    local target = targetX
+    if targetY < target then target = targetY end
+    if target > 1.25 then target = 1.25 end
+    if target < props.min_zoom then target = props.min_zoom end
+    props.zoom = target
+    props.pan_x = props.graph.content_width*0.5-(minX+maxX)*0.5*target
+    props.pan_y = props.graph.content_height*0.5-(minY+maxY)*0.5*target
+    apply_all_node_positions(props)
+    set_zoom_readout(props)
+end
+
+fn frame_all_graph(element,event,props)
+    frame_graph_contents(props)
+    set_status(props,"All graph nodes framed")
+    return 0
+end
+
+fn add_palette_node(element,event,props)
+    local node = null
+    local title = "Node"
+    if element.number_value == 4.0 then node = props.nodes.at(3) title = "Print String"
+    elseif element.number_value == 5.0 then node = props.nodes.at(4) title = "Delay" end
+    if node == null or node.element == null then return 0 end
+    if node.element.hidden then
+        node.element.hidden = false
+        props.node_count = props.node_count+1
+        node.element.mark_layout_dirty()
+        set_node_count_text(props)
+        props.graph_dirty = true
+        set_status(props,"Node added from palette")
+    else set_status(props,"Node is already present") end
+    select_node(props,node.element,title)
+    return 0
+end
+
+fn graph_absolute_value(value)
+    if value < 0.0 then return -value end
+    return value
+end
+
+fn graph_hit_is(root,element,x,y)
+    if root == null or element == null then return false end
+    local target = UI.hit_test(root,x,y)
+    if target == null then return false end
+    return target.id_hash == element.id_hash
+end
+
+fn verify_graph_interactions(document,props)
+    if document == null or props == null or props.root == null or props.graph == null or props.minimap == null then return false end
+    local title = props.root.find_id(UI.hash("title-start"))
+    local output = props.root.find_id(UI.hash("port-start-actor"))
+    local input = props.root.find_id(UI.hash("port-branch-condition"))
+    local miniStart = props.root.find_id(UI.hash("mini-start"))
+    local miniView = props.root.find_id(UI.hash("mini-view"))
+    local miniWire = props.root.find_id(UI.hash("mini-wire-0"))
+    if title == null or output == null or input == null or miniStart == null or miniView == null or miniWire == null or props.nodes.length() < 3 then return false end
+
+    local verifyWidth = document.width
+    local verifyHeight = document.height
+    if verifyWidth < 100.0 then verifyWidth = 1460.0 end
+    if verifyHeight < 100.0 then verifyHeight = 860.0 end
+    document.resize(verifyWidth,verifyHeight)
+    update_graph_visuals(props)
+    local passed = true
+
+    local titleX = title.content_x+title.content_width*0.5
+    local titleY = title.content_y+title.content_height*0.5
+    if not graph_hit_is(props.root,title,titleX,titleY) then passed = false end
+
+    -- Title dragging must travel through the real Document pointer capture path.
+    local node = props.nodes.at(0)
+    local originalNodeX = node.world_x
+    local originalNodeY = node.world_y
+    document.pointer_move(titleX,titleY)
+    document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+    document.pointer_move(titleX+42.0,titleY+26.0)
+    document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+    if graph_absolute_value(node.world_x-(originalNodeX+42.0/props.zoom)) > 0.75 then passed = false end
+    if graph_absolute_value(node.world_y-(originalNodeY+26.0/props.zoom)) > 0.75 then passed = false end
+    set_world_position(node,originalNodeX,originalNodeY)
+    apply_all_node_positions(props)
+    document.resize(document.width,document.height)
+    update_graph_visuals(props)
+
+    -- The graph is an unbounded camera: MMB changes pan; no retained scrollbar
+    -- state is allowed to become the graph navigation mechanism.
+    local blankX = props.graph.content_x+props.graph.content_width-300.0
+    local blankY = props.graph.content_y+props.graph.content_height-220.0
+    local originalPanX = props.pan_x
+    local originalPanY = props.pan_y
+    document.pointer_move(blankX,blankY)
+    document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_MIDDLE)
+    document.pointer_move(blankX+36.0,blankY-22.0)
+    document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_MIDDLE)
+    if graph_absolute_value(props.pan_x-(originalPanX+36.0)) > 0.75 then passed = false end
+    if graph_absolute_value(props.pan_y-(originalPanY-22.0)) > 0.75 then passed = false end
+    if props.graph.scroll_x ~= 0.0 or props.graph.scroll_y ~= 0.0 then passed = false end
+    if props.graph.scroll_max_x ~= 0.0 or props.graph.scroll_max_y ~= 0.0 then passed = false end
+
+    -- Wheel zoom keeps the world point under the cursor anchored.
+    local zoomBefore = props.zoom
+    document.pointer_move(blankX,blankY)
+    document.scroll(0.0,1.0)
+    if props.zoom <= zoomBefore then passed = false end
+
+    -- Navigator must contain node rectangles, live viewport and active links.
+    document.resize(document.width,document.height)
+    update_graph_visuals(props)
+    if miniStart.hidden or miniStart.canvas_width <= 0.0 or miniStart.canvas_height <= 0.0 then passed = false end
+    if miniView.canvas_width <= 0.0 or miniView.canvas_height <= 0.0 then passed = false end
+    if miniWire.hidden then passed = false end
+    local mapStartX = props.mini_canvas.content_x+props.mini_canvas.content_width*0.25
+    local mapStartY = props.mini_canvas.content_y+props.mini_canvas.content_height*0.25
+    local panBeforeMapX = props.pan_x
+    local panBeforeMapY = props.pan_y
+    document.pointer_move(mapStartX,mapStartY)
+    document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+    document.pointer_move(mapStartX+24.0,mapStartY+16.0)
+    document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+    if graph_absolute_value(props.pan_x-panBeforeMapX) < 1.0 and graph_absolute_value(props.pan_y-panBeforeMapY) < 1.0 then passed = false end
+
+    -- Pins connect using pointer capture and final hit-testing at release.
+    document.resize(document.width,document.height)
+    update_graph_visuals(props)
+    local outputX = output.x+output.width*0.5
+    local outputY = output.y+output.height*0.5
+    local inputX = input.x+input.width*0.5
+    local inputY = input.y+input.height*0.5
+    document.pointer_move(outputX,outputY)
+    document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+    document.pointer_move(inputX,inputY)
+    document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+    local connected = find_connection_to(props,input)
+    if connected == null or connected.output == null or connected.output.id_hash ~= output.id_hash then passed = false end
+
+    props.dragging_node = null
+    props.dragging_node_moved = false
+    props.panning = false
+    props.panning_moved = false
+    props.minimap_dragging = false
+    clear_pending_output(props)
+    props.zoom = 1.0
+    props.pan_x = originalPanX
+    props.pan_y = originalPanY
+    set_world_position(node,originalNodeX,originalNodeY)
+    apply_all_node_positions(props)
+    document.resize(document.width,document.height)
+    update_graph_visuals(props)
+    document.focus(null)
+    return passed
+end
+
+fn destroy_graph_props(props)
+    if props == null then return end
+    local index = 0
+    if props.connections ~= null then
+        while index < props.connections.length() do
+            local connection = props.connections.at(index)
+            if connection ~= null then
+                connection.output = null connection.input = null
+                connection.line_a = null connection.line_b = null connection.line_c = null connection.mini_line = null
+                connection.destroy()
+            end
+            index = index + 1
+        end
+        props.connections.destroy() props.connections = null
+    end
+    index = 0
+    if props.nodes ~= null then
+        while index < props.nodes.length() do
+            local node = props.nodes.at(index)
+            if node ~= null then node.element = null node.mini = null node.destroy() end
+            index = index + 1
+        end
+        props.nodes.destroy() props.nodes = null
+    end
+    index = 0
+    if props.vertical_grid ~= null then
+        while index < props.vertical_grid.length() do
+            local vertical = props.vertical_grid.at(index)
+            if vertical ~= null then vertical.element = null vertical.destroy() end
+            index = index + 1
+        end
+        props.vertical_grid.destroy() props.vertical_grid = null
+    end
+    index = 0
+    if props.horizontal_grid ~= null then
+        while index < props.horizontal_grid.length() do
+            local horizontal = props.horizontal_grid.at(index)
+            if horizontal ~= null then horizontal.element = null horizontal.destroy() end
+            index = index + 1
+        end
+        props.horizontal_grid.destroy() props.horizontal_grid = null
+    end
+    props.dragging_node = null
+    props.pending_output = null
+    props.root = null
+    props.graph = null
+    props.canvas = null
+    props.minimap = null
+    props.mini_canvas = null
+    props.destroy()
+end
+
+fn main()
+    local props = GraphProps.new()
+    local root = graph_view(props)
+    initialize_graph(props,root)
+    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return fail("GLFW initialization failed.") end
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
+    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
+    local window = GLFW.glfwCreateWindow(1460,860,"31 - LazyUI infinite draggable node graph",0,0)
+    if window == 0 then return fail("Window creation failed.") end
+    GLFW.glfwMakeContextCurrent(window)
+    GLFW.glfwSwapInterval(1)
+    if GL.lsxLoadOpenGL() < 1 then return fail("OpenGL initialization failed.") end
+    local renderer = UIRenderer.create(null,64)
+    local document = UI.document(root)
+    local windowInput = UI.connect_window_input(window,document)
+    local framebuffer = GLFW.FramebufferSize.new()
+    local windowSize = GLFW.WindowSize.new()
+    local cursor = GLFW.CursorPosition.new()
+    local mouseButtonDown = -1
+    local previousWidth = 0
+    local previousHeight = 0
+    local frameKeyDown = false
+    local plusKeyDown = false
+    local minusKeyDown = false
+
+    framebuffer.refresh(window)
+    windowSize.refresh(window)
+    document.resize(framebuffer.width,framebuffer.height)
+    apply_all_node_positions(props)
+    document.resize(framebuffer.width,framebuffer.height)
+    update_graph_visuals(props)
+    -- Do not synthesize a full interaction sequence before the first visible
+    -- frame. On a real GLFW window that can route pointer capture through an
+    -- unpainted document and terminate the example before the window appears.
+    -- The same verification routine remains available to compiler/runtime tests.
+    set_status(props,"Ready - drag nodes, pins, empty graph space, wheel, and minimap")
+
+    while GLFW.glfwWindowShouldClose(window) == 0 do
+        framebuffer.refresh(window)
+        windowSize.refresh(window)
+        if framebuffer.width ~= previousWidth or framebuffer.height ~= previousHeight then props.graph_dirty = true previousWidth = framebuffer.width previousHeight = framebuffer.height end
+        document.resize(framebuffer.width,framebuffer.height)
+        cursor.refresh(window)
+        props.space_down = GLFW.glfwGetKey(window,GLFW.GLFW_KEY_SPACE) == GLFW.GLFW_PRESS
+        local framePressed = GLFW.glfwGetKey(window,GLFW.GLFW_KEY_F) == GLFW.GLFW_PRESS
+        local plusPressed = GLFW.glfwGetKey(window,GLFW.GLFW_KEY_EQUAL) == GLFW.GLFW_PRESS
+        local minusPressed = GLFW.glfwGetKey(window,GLFW.GLFW_KEY_MINUS) == GLFW.GLFW_PRESS
+        if framePressed and not frameKeyDown then frame_graph_contents(props) set_status(props,"All graph nodes framed") end
+        if plusPressed and not plusKeyDown then zoom_graph_center(props,1.20) end
+        if minusPressed and not minusKeyDown then zoom_graph_center(props,0.8333333) end
+        frameKeyDown = framePressed
+        plusKeyDown = plusPressed
+        minusKeyDown = minusPressed
+        document.pointer_move_scaled(cursor.x,cursor.y,windowSize.width,windowSize.height)
+        props.pointer_x = document.pointer_x props.pointer_y = document.pointer_y
+        local pressedButton = -1
+        if GLFW.glfwGetMouseButton(window,GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS then pressedButton = GLFW.GLFW_MOUSE_BUTTON_LEFT
+        elseif GLFW.glfwGetMouseButton(window,GLFW.GLFW_MOUSE_BUTTON_MIDDLE) == GLFW.GLFW_PRESS then pressedButton = GLFW.GLFW_MOUSE_BUTTON_MIDDLE end
+        if pressedButton >= 0 and mouseButtonDown < 0 then
+            document.pointer_down_button(pressedButton)
+            -- The retained Document provides normal pointer capture. This
+            -- graph-owned fallback mirrors the source editor controller and
+            -- guarantees title dragging/MMB panning/minimap navigation even
+            -- when a decorative child is the exact hit target.
+            ensure_pointer_gesture_started(props,root,pressedButton,document.pointer_x,document.pointer_y)
+        end
+        if pressedButton >= 0 then update_active_graph_gesture(props,document.pointer_x,document.pointer_y) end
+        if pressedButton < 0 and mouseButtonDown >= 0 then
+            update_active_graph_gesture(props,document.pointer_x,document.pointer_y)
+            document.pointer_up_button(mouseButtonDown)
+            props.dragging_node = null
+            props.dragging_node_moved = false
+            props.panning = false
+            props.panning_moved = false
+            props.minimap_dragging = false
+            if props.dragging_wire then clear_pending_output(props) end
+        end
+        mouseButtonDown = pressedButton
+        document.resize(framebuffer.width,framebuffer.height)
+        update_graph_visuals(props)
+
+        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
+        GL.glClearColor(0.015,0.02,0.03,1.0)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        renderer.begin(framebuffer.width,framebuffer.height)
+        renderer.submit(root)
+        renderer.flush()
+        GLFW.glfwSwapBuffers(window)
+        GLFW.glfwPollEvents()
+    end
+
+    windowInput.destroy()
+    cursor.destroy()
+    windowSize.destroy()
+    framebuffer.destroy()
+    document.destroy()
+    renderer.destroy()
+    destroy_graph_props(props)
+    GLFW.glfwDestroyWindow(window)
+    GLFW.glfwTerminate()
+    GLFW.lsxUnloadLibraries()
+    return 0
+end
+
+fn fail(message)
+    Win32.MessageBoxA(0,message,"LazyUI",Win32.MB_OK+Win32.MB_ICONERROR)
+    return 1
+end

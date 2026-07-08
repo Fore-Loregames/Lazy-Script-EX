@@ -1,0 +1,22 @@
+-- Small OS bindings useful to native LSX examples. GLFW still owns windows and input.
+export MB_OK = 0
+export MB_ICONERROR = 0x10
+export MB_ICONINFORMATION = 0x40
+export GENERIC_READ = 0x80000000
+export FILE_SHARE_READ = 1
+export OPEN_EXISTING = 3
+export FILE_ATTRIBUTE_NORMAL = 0x80
+export GWLP_WNDPROC = -4
+export WM_MOUSEWHEEL = 0x020A
+export WM_MOUSEHWHEEL = 0x020E
+
+export extern "user32.dll" fn SetWindowLongPtrW(hwnd: handle, index: i32, value: ptr) -> ptr
+export extern "user32.dll" fn CallWindowProcW(previous: ptr, hwnd: handle, message: u32, wparam: u64, lparam: i64) -> i64
+export extern "user32.dll" fn DefWindowProcW(hwnd: handle, message: u32, wparam: u64, lparam: i64) -> i64
+export extern "user32.dll" fn MessageBoxA(hwnd: handle, text: string, title: string, flags: u32) -> i32
+export extern "kernel32.dll" fn Sleep(milliseconds: u32) -> void
+export extern "kernel32.dll" fn GetTickCount64() -> u64
+export extern "kernel32.dll" fn CreateFileA(path: string, access: u32, share: u32, security: ptr, creation: u32, flags: u32, template_file: handle) -> handle
+export extern "kernel32.dll" fn ReadFile(file: handle, output: ptr, bytes: u32, read_out: ptr, overlapped: ptr) -> i32
+export extern "kernel32.dll" fn GetFileSize(file: handle, high_out: ptr) -> u32
+export extern "kernel32.dll" fn CloseHandle(value: handle) -> i32

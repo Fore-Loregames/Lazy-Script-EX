@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/20_http_client.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

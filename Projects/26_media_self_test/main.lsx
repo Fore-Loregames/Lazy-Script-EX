@@ -1,0 +1,85 @@
+use "@LazyScript/bindings/Graphics/STBImage.lsx" as STBImage
+use "@LazyScript/bindings/Text/FreeType.lsx" as FreeType
+use "@LazyScript/bindings/Text/Font.lsx" as Font
+
+fn stop(code, message)
+    console.error_line(message)
+    console.write_line("")
+    console.write_line("Press Enter to close.")
+    console.wait()
+    console.close()
+    return code
+end
+
+fn main()
+    if not console.open("LazyScriptEX - stb_image + FreeType Self-Test") then return 1 end
+    console.write_line("LazyScriptEX direct native API self-test")
+    console.write_line("")
+
+    local image = STBImage.load("assets/loaded_texture.png")
+    if not image.valid() then
+        local imageError = image.error()
+        image.destroy()
+        return stop(2,imageError)
+    end
+    if image.width ~= 256 or image.height ~= 256 or image.channels ~= 4 then
+        image.destroy()
+        return stop(3,"stb_image returned unexpected image dimensions or channels")
+    end
+    if image.rgba32(0) == 0 then
+        image.destroy()
+        return stop(4,"stb_image returned an empty first RGBA pixel")
+    end
+    console.write_line("[OK] stb_image decoded real RGBA pixels")
+    image.destroy()
+
+    if not FreeType.ready() then return stop(5,"libfreetype.dll could not be loaded") end
+    console.write_line("[OK] FreeType runtime loaded")
+
+    local face = FreeType.load("C:/Windows/Fonts/segoeui.ttf",64)
+    if not face.valid() then
+        local faceError = face.error()
+        face.destroy()
+        return stop(6,faceError)
+    end
+    console.write_line("[OK] FreeType loaded Segoe UI")
+
+    if not face.load_char(65,FreeType.RENDER_SDF) then
+        local glyphError = face.error()
+        face.destroy()
+        return stop(7,glyphError)
+    end
+    if face.bitmap_width() <= 0 or face.bitmap_rows() <= 0 or face.bitmap_buffer() == 0 then
+        face.destroy()
+        return stop(8,"FreeType returned an empty SDF glyph")
+    end
+    console.write_line("[OK] FreeType rendered an SDF glyph")
+
+    local atlas = Font.create_ascii_atlas(face)
+    if not atlas.valid() then
+        local atlasError = atlas.error()
+        atlas.destroy()
+        face.destroy()
+        return stop(9,atlasError)
+    end
+    console.write_line("[OK] ASCII SDF atlas packed")
+
+    local text = Font.build_text(face,atlas,"LazyScriptEX FreeType test",0,0,1)
+    if not text.valid() then
+        text.destroy()
+        atlas.destroy()
+        face.destroy()
+        return stop(10,"SDF text batch generation failed")
+    end
+    console.write_line("[OK] Text geometry generated as one batch")
+
+    text.destroy()
+    atlas.destroy()
+    face.destroy()
+    console.write_line("")
+    console.write_line("ALL DIRECT API TESTS PASSED")
+    console.write_line("Press Enter to close.")
+    console.wait()
+    console.close()
+    return 0
+end

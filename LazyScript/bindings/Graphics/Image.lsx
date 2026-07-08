@@ -1,0 +1,25 @@
+-- Compatibility facade. The implementation is the direct stb_image binding.
+use "STBImage.lsx" as STBImage
+
+export const STBI_DEFAULT = STBImage.STBI_DEFAULT
+export const STBI_GREY = STBImage.STBI_GREY
+export const STBI_GREY_ALPHA = STBImage.STBI_GREY_ALPHA
+export const STBI_RGB = STBImage.STBI_RGB
+export const STBI_RGBA = STBImage.STBI_RGBA
+export const Image = STBImage.Image
+
+export fn load(path:string) -> STBImage.Image
+    return STBImage.load(path)
+end
+
+export fn load_flipped(path:string) -> STBImage.Image
+    return STBImage.load_flipped(path)
+end
+
+export fn load_ex(path:string, desiredChannels:i32, flipY:bool) -> STBImage.Image
+    return STBImage.load_ex(path,desiredChannels,flipY)
+end
+
+export fn load_memory(data:ptr, length:i32, desiredChannels:i32, flipY:bool) -> STBImage.Image
+    return STBImage.load_memory(data,length,desiredChannels,flipY)
+end

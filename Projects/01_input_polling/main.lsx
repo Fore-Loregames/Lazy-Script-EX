@@ -1,0 +1,44 @@
+use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
+use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+
+fn fail(message) Win32.MessageBoxA(0,message,"LazyScriptEX Native GameKit",Win32.MB_OK+Win32.MB_ICONERROR) return 1 end
+
+fn main()
+    if GLFW.lsxLoadLibraries()<1 or GLFW.glfwInit()==0 then return fail("GLFW failed to initialize.") end
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
+    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
+    local window=GLFW.glfwCreateWindow(1000,650,"01 - Keyboard, mouse and cursor polling",0,0)
+    if window==0 then GLFW.glfwTerminate() return fail("Window creation failed.") end
+    GLFW.glfwMakeContextCurrent(window)
+    if GL.lsxLoadOpenGL()<1 then return fail("OpenGL loading failed.") end
+
+    local cursor=GLFW.CursorPosition.new()
+    local framebuffer=GLFW.FramebufferSize.new()
+    while GLFW.glfwWindowShouldClose(window)==0 do
+        if GLFW.glfwGetKey(window,GLFW.GLFW_KEY_ESCAPE)==GLFW.GLFW_PRESS then GLFW.glfwSetWindowShouldClose(window,1) end
+        cursor.refresh(window)
+        framebuffer.refresh(window)
+        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
+
+        local red=0.05 local green=0.08 local blue=0.12
+        if GLFW.glfwGetKey(window,GLFW.GLFW_KEY_R)==GLFW.GLFW_PRESS then red=0.8 end
+        if GLFW.glfwGetKey(window,GLFW.GLFW_KEY_G)==GLFW.GLFW_PRESS then green=0.8 end
+        if GLFW.glfwGetKey(window,GLFW.GLFW_KEY_B)==GLFW.GLFW_PRESS then blue=0.8 end
+        if GLFW.glfwGetMouseButton(window,GLFW.GLFW_MOUSE_BUTTON_LEFT)==GLFW.GLFW_PRESS then red=0.85 green=0.35 blue=0.1 end
+        if cursor.x > framebuffer.width * 0.5 then blue=blue+0.12 end
+
+        GL.glClearColor(red,green,blue,1.0)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        GLFW.glfwSwapBuffers(window)
+        GLFW.glfwPollEvents()
+    end
+
+    framebuffer.destroy()
+    cursor.destroy()
+    GLFW.glfwDestroyWindow(window)
+    GLFW.glfwTerminate()
+    GLFW.lsxUnloadLibraries()
+    return 0
+end

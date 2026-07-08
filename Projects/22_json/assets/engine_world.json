@@ -1,0 +1,240 @@
+{
+  "engine": {
+    "name": "LazyEngine",
+    "language": "LazyScriptEX",
+    "version": "0.15.17",
+    "rendering": {
+      "backend": "OpenGL 4.6",
+      "window": {
+        "title": "Deep JSON World",
+        "width": 1280,
+        "height": 720,
+        "fullscreen": false,
+        "vsync": true
+      },
+      "quality": {
+        "shadowCascades": 4,
+        "anisotropy": 16,
+        "rayTracing": {
+          "enabled": true,
+          "bounceCount": 2,
+          "denoiser": {
+            "enabled": true,
+            "historyFrames": 12
+          }
+        }
+      }
+    },
+    "workers": {
+      "render": 1,
+      "physics": 2,
+      "streaming": 2,
+      "ai": 4
+    }
+  },
+  "worlds": [
+    {
+      "name": "Greenvale",
+      "seed": 741992,
+      "zones": [
+        {
+          "name": "Village",
+          "weather": {
+            "type": "clear",
+            "temperature": 21.5,
+            "wind": {
+              "direction": [
+                0.25,
+                0.0,
+                -0.75
+              ],
+              "speed": 3.25
+            }
+          },
+          "entities": [
+            {
+              "name": "Player",
+              "active": true,
+              "components": {
+                "Transform": {
+                  "position": [
+                    12.0,
+                    1.0,
+                    -8.0
+                  ],
+                  "rotation": [
+                    0.0,
+                    180.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                "Stats": {
+                  "health": 100,
+                  "stamina": 84,
+                  "inventory": [
+                    {
+                      "id": "iron_sword",
+                      "count": 1,
+                      "durability": 0.92
+                    },
+                    {
+                      "id": "healing_herb",
+                      "count": 7,
+                      "quality": "fine"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Blacksmith",
+              "active": true,
+              "components": {
+                "Transform": {
+                  "position": [
+                    -4.0,
+                    0.0,
+                    16.0
+                  ]
+                },
+                "Dialogue": {
+                  "greeting": "Need something forged?",
+                  "branches": [
+                    {
+                      "choice": "Show me your weapons.",
+                      "next": "shop_weapons"
+                    },
+                    {
+                      "choice": "Can you repair this?",
+                      "next": "repair_menu"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "AncientForest",
+          "weather": {
+            "type": "mist",
+            "temperature": 12.25,
+            "wind": {
+              "direction": [
+                -0.5,
+                0.1,
+                0.25
+              ],
+              "speed": 1.5
+            }
+          },
+          "entities": [
+            {
+              "name": "ForestGuardian",
+              "active": false,
+              "components": {
+                "Transform": {
+                  "position": [
+                    88.0,
+                    4.0,
+                    112.0
+                  ]
+                },
+                "AI": {
+                  "state": "sleeping",
+                  "senses": {
+                    "visionRange": 45.0,
+                    "hearingRange": 28.0,
+                    "targets": []
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Ashlands",
+      "seed": 99128,
+      "zones": [
+        {
+          "name": "Caldera",
+          "weather": {
+            "type": "ash_storm",
+            "temperature": 47.75,
+            "wind": {
+              "direction": [
+                0.8,
+                0.0,
+                0.2
+              ],
+              "speed": 14.0
+            }
+          },
+          "entities": [
+            {
+              "name": "LavaTitan",
+              "active": true,
+              "components": {
+                "Boss": {
+                  "phase": 1,
+                  "health": 125000,
+                  "abilities": [
+                    {
+                      "name": "MagmaWave",
+                      "cooldown": 8.0
+                    },
+                    {
+                      "name": "MeteorRain",
+                      "cooldown": 18.0
+                    },
+                    {
+                      "name": "CoreBurst",
+                      "cooldown": 35.0
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "saveSlots": [
+    {
+      "slot": 1,
+      "player": "Jessie",
+      "world": "Greenvale",
+      "playTimeSeconds": 18422,
+      "lastCheckpoint": {
+        "zone": "Village",
+        "position": [
+          12.0,
+          1.0,
+          -8.0
+        ]
+      }
+    },
+    {
+      "slot": 2,
+      "player": "Luna",
+      "world": "Ashlands",
+      "playTimeSeconds": 8021,
+      "lastCheckpoint": {
+        "zone": "Caldera",
+        "position": [
+          -22.0,
+          3.0,
+          91.0
+        ]
+      }
+    }
+  ]
+}

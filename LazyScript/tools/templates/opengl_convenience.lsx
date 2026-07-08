@@ -1,0 +1,82 @@
+
+-- Allocation-free scalar helpers for the pointer-output parts of OpenGL.
+-- The complete raw OpenGL API above remains available for arrays and advanced use.
+extern "LSXGameKit.dll" fn _lsxGlCreateBuffer() -> u32
+extern "LSXGameKit.dll" fn _lsxGlCreateVertexArray() -> u32
+extern "LSXGameKit.dll" fn _lsxGlCreateTexture() -> u32
+extern "LSXGameKit.dll" fn _lsxGlCreateFramebuffer() -> u32
+extern "LSXGameKit.dll" fn _lsxGlCreateRenderbuffer() -> u32
+extern "LSXGameKit.dll" fn _lsxGlCreateSampler() -> u32
+extern "LSXGameKit.dll" fn _lsxGlCreateQuery() -> u32
+extern "LSXGameKit.dll" fn _lsxGlCreateTransformFeedback() -> u32
+extern "LSXGameKit.dll" fn _lsxGlCreateProgramPipeline() -> u32
+extern "LSXGameKit.dll" fn _lsxGlDeleteBuffer(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxGlDeleteVertexArray(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxGlDeleteTexture(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxGlDeleteFramebuffer(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxGlDeleteRenderbuffer(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxGlDeleteSampler(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxGlDeleteQuery(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxGlDeleteTransformFeedback(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxGlDeleteProgramPipeline(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxGlGetInteger(pname: u32) -> i32
+extern "LSXGameKit.dll" fn _lsxGlGetInteger64(pname: u32) -> i64
+extern "LSXGameKit.dll" fn _lsxGlGetFloat(pname: u32) -> f32
+extern "LSXGameKit.dll" fn _lsxGlGetBoolean(pname: u32) -> i32
+extern "LSXGameKit.dll" fn _lsxGlGetShaderInteger(shader: u32, pname: u32) -> i32
+extern "LSXGameKit.dll" fn _lsxGlGetProgramInteger(program: u32, pname: u32) -> i32
+extern "LSXGameKit.dll" fn _lsxGlGetBufferInteger(target: u32, pname: u32) -> i32
+extern "LSXGameKit.dll" fn _lsxGlGetNamedBufferInteger(buffer: u32, pname: u32) -> i32
+extern "LSXGameKit.dll" fn _lsxGlGetTextureInteger(texture: u32, pname: u32) -> i32
+extern "LSXGameKit.dll" fn _lsxGlGetSamplerInteger(sampler: u32, pname: u32) -> i32
+extern "LSXGameKit.dll" fn _lsxGlGetQueryInteger(target: u32, pname: u32) -> i32
+extern "LSXGameKit.dll" fn _lsxGlShaderInfoLog(shader: u32) -> string
+extern "LSXGameKit.dll" fn _lsxGlProgramInfoLog(program: u32) -> string
+extern "LSXGameKit.dll" fn _lsxGlProgramPipelineInfoLog(pipeline: u32) -> string
+extern "LSXGameKit.dll" fn _lsxGlString(name: u32) -> string
+
+export fn createBuffer() return _lsxGlCreateBuffer() end
+export fn createVertexArray() return _lsxGlCreateVertexArray() end
+export fn createTexture() return _lsxGlCreateTexture() end
+export fn createFramebuffer() return _lsxGlCreateFramebuffer() end
+export fn createRenderbuffer() return _lsxGlCreateRenderbuffer() end
+export fn createSampler() return _lsxGlCreateSampler() end
+export fn createQuery() return _lsxGlCreateQuery() end
+export fn createTransformFeedback() return _lsxGlCreateTransformFeedback() end
+export fn createProgramPipeline() return _lsxGlCreateProgramPipeline() end
+export fn deleteBuffer(value) _lsxGlDeleteBuffer(value) end
+export fn deleteVertexArray(value) _lsxGlDeleteVertexArray(value) end
+export fn deleteTexture(value) _lsxGlDeleteTexture(value) end
+export fn deleteFramebuffer(value) _lsxGlDeleteFramebuffer(value) end
+export fn deleteRenderbuffer(value) _lsxGlDeleteRenderbuffer(value) end
+export fn deleteSampler(value) _lsxGlDeleteSampler(value) end
+export fn deleteQuery(value) _lsxGlDeleteQuery(value) end
+export fn deleteTransformFeedback(value) _lsxGlDeleteTransformFeedback(value) end
+export fn deleteProgramPipeline(value) _lsxGlDeleteProgramPipeline(value) end
+export fn getInteger(pname) return _lsxGlGetInteger(pname) end
+export fn getInteger64(pname) return _lsxGlGetInteger64(pname) end
+export fn getFloat(pname) return _lsxGlGetFloat(pname) end
+export fn getBoolean(pname) return _lsxGlGetBoolean(pname) end
+export fn getShaderInteger(shader, pname) return _lsxGlGetShaderInteger(shader, pname) end
+export fn getProgramInteger(program, pname) return _lsxGlGetProgramInteger(program, pname) end
+export fn getBufferInteger(target, pname) return _lsxGlGetBufferInteger(target, pname) end
+export fn getNamedBufferInteger(buffer, pname) return _lsxGlGetNamedBufferInteger(buffer, pname) end
+export fn getTextureInteger(texture, pname) return _lsxGlGetTextureInteger(texture, pname) end
+export fn getSamplerInteger(sampler, pname) return _lsxGlGetSamplerInteger(sampler, pname) end
+export fn getQueryInteger(target, pname) return _lsxGlGetQueryInteger(target, pname) end
+export fn shaderInfoLog(shader) return _lsxGlShaderInfoLog(shader) end
+export fn programInfoLog(program) return _lsxGlProgramInfoLog(program) end
+export fn programPipelineInfoLog(pipeline) return _lsxGlProgramPipelineInfoLog(pipeline) end
+export fn getString(name) return _lsxGlString(name) end
+export fn shaderCompiled(shader) return _lsxGlGetShaderInteger(shader, GL_COMPILE_STATUS) ~= 0 end
+export fn programLinked(program) return _lsxGlGetProgramInteger(program, GL_LINK_STATUS) ~= 0 end
+
+-- Reusable fixed-layout output values for raw functions that naturally return arrays.
+export const UIntValue = { value: u32 = 0 }
+export const IntValue = { value: i32 = 0 }
+export const Int64Value = { value: i64 = 0 }
+export const FloatValue = { value: f32 = 0.0 }
+export const Int2 = { x: i32 = 0, y: i32 = 0 }
+export const Int4 = { x: i32 = 0, y: i32 = 0, z: i32 = 0, w: i32 = 0 }
+export const Float2 = { x: f32 = 0.0, y: f32 = 0.0 }
+export const Float4 = { x: f32 = 0.0, y: f32 = 0.0, z: f32 = 0.0, w: f32 = 0.0 }

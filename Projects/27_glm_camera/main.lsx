@@ -1,0 +1,127 @@
+use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
+use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/bindings/Math/GLM.lsx" as GLM
+use "@LazyScript/bindings/Math/Camera.lsx" as Camera
+use "@LazyScript/bindings/Math/OpenGL.lsx" as GLMOpenGL
+use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+use "@LazyScript/bindings/System/Log.lsx" as Log
+
+fn fail(logger,message)
+    logger.error_line(message)
+    logger.close()
+    Win32.MessageBoxA(0,message,"LazyScriptEX GLM camera",Win32.MB_OK+Win32.MB_ICONERROR)
+    return 1
+end
+
+fn main()
+    local logger=Log.open_default()
+    logger.stage("GLM camera example entered main")
+    logger.stage("Loading LSXMath.dll and GLM wrapper")
+    if not GLM.ready() then return fail(logger,"LSXMath.dll / GLM failed to load.") end
+    logger.success("GLM wrapper ready")
+    logger.stage("Initializing GLFW")
+    if GLFW.lsxLoadLibraries()<1 or GLFW.glfwInit()==0 then return fail(logger,"GLFW failed.") end
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
+    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
+    local window=GLFW.glfwCreateWindow(1000,700,"27 - GLM camera and transforms",0,0)
+    if window==0 then return fail(logger,"Window creation failed.") end
+    logger.success("Visible window created")
+    GLFW.glfwMakeContextCurrent(window)
+    GLFW.glfwSwapInterval(1)
+    logger.stage("Loading OpenGL functions")
+    if GL.lsxLoadOpenGL()<1 then return fail(logger,"OpenGL loading failed.") end
+    logger.success("OpenGL initialized")
+
+    logger.stage("Creating GLM camera rendering pipeline")
+    local vertexShader=`#version 460 core
+layout(location=0) in vec3 a_position;
+uniform mat4 u_model;
+uniform mat4 u_view;
+uniform mat4 u_projection;
+out vec3 v_color;
+void main(){
+    gl_Position=u_projection*u_view*u_model*vec4(a_position,1.0);
+    v_color=a_position*0.5+0.5;
+}`
+    local fragmentShader=`#version 460 core
+in vec3 v_color;
+out vec4 out_color;
+void main(){out_color=vec4(v_color,1.0);}`
+    local program=GL.lsxCreateProgram(vertexShader,fragmentShader)
+    if program==0 then return fail(logger,"Shader program failed.") end
+
+    local vertices = {
+        -1.0,-1.0,-1.0, 1.0,-1.0,-1.0, 1.0,1.0,-1.0, -1.0,1.0,-1.0,
+        -1.0,-1.0, 1.0, 1.0,-1.0, 1.0, 1.0,1.0, 1.0, -1.0,1.0, 1.0
+    }
+    local indices = {
+        0,1,2,2,3,0, 4,6,5,6,4,7, 0,4,5,5,1,0,
+        3,2,6,6,7,3, 1,5,6,6,2,1, 0,3,7,7,4,0
+    }
+    local vao=GL.createVertexArray()
+    local vbo=GL.createBuffer()
+    local ebo=GL.createBuffer()
+    GL.glBindVertexArray(vao)
+    GL.glBindBuffer(GL.GL_ARRAY_BUFFER,vbo)
+    GL.glBufferData(GL.GL_ARRAY_BUFFER,vertices.byte_length(),vertices,GL.GL_STATIC_DRAW)
+    GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER,ebo)
+    GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER,indices.byte_length(),indices,GL.GL_STATIC_DRAW)
+    GL.glVertexAttribPointer(0,3,GL.GL_FLOAT,GL.GL_FALSE,12,0)
+    GL.glEnableVertexAttribArray(0)
+    GL.glEnable(GL.GL_DEPTH_TEST)
+
+    local modelLocation=GL.glGetUniformLocation(program,"u_model")
+    local viewLocation=GL.glGetUniformLocation(program,"u_view")
+    local projectionLocation=GL.glGetUniformLocation(program,"u_projection")
+    local camera=Camera.create()
+    camera.position.set(4.0,3.0,6.0)
+    camera.target.set(0.0,0.0,0.0)
+    camera.set_perspective(60.0,1000.0/700.0,0.1,100.0)
+    local view=camera.view()
+    local projection=camera.projection()
+    local framebuffer=GLFW.FramebufferSize.new()
+    local firstFrame=true
+    logger.success("GLM camera rendering pipeline ready")
+
+    while GLFW.glfwWindowShouldClose(window)==0 do
+        framebuffer.refresh(window)
+        camera.set_aspect_from_size(framebuffer.width,framebuffer.height)
+        projection.destroy()
+        projection=camera.projection()
+        local angle=GLFW.glfwGetTime()*0.7
+        local rawAxis=GLM.vec3(0.25,1.0,0.1)
+        local axis=rawAxis.normalized()
+        rawAxis.destroy()
+        local rotation=GLM.quat_angle_axis(angle,axis)
+        local position=GLM.vec3(0.0,0.0,0.0)
+        local scale=GLM.vec3_one()
+        local model=GLM.trs(position,rotation,scale)
+
+        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
+        GL.glClearColor(0.025,0.03,0.05,1.0)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT+GL.GL_DEPTH_BUFFER_BIT)
+        GL.glUseProgram(program)
+        GLMOpenGL.uniform_mat4(modelLocation,model)
+        GLMOpenGL.uniform_mat4(viewLocation,view)
+        GLMOpenGL.uniform_mat4(projectionLocation,projection)
+        GL.glBindVertexArray(vao)
+        GL.glDrawElements(GL.GL_TRIANGLES,indices.length(),GL.GL_UNSIGNED_INT,0)
+
+        model.destroy() position.destroy() rotation.destroy() scale.destroy() axis.destroy()
+        GLFW.glfwSwapBuffers(window)
+        GLFW.glfwPollEvents()
+        if firstFrame then
+            logger.success("First GLM camera frame rendered")
+            firstFrame=false
+        end
+    end
+
+    projection.destroy() view.destroy() camera.destroy() framebuffer.destroy()
+    GL.deleteBuffer(ebo) GL.deleteBuffer(vbo) GL.deleteVertexArray(vao) GL.glDeleteProgram(program)
+    indices.destroy() vertices.destroy()
+    GLFW.glfwDestroyWindow(window) GLFW.glfwTerminate() GLFW.lsxUnloadLibraries()
+    logger.success("GLM camera example completed normally")
+    logger.close()
+    return 0
+end

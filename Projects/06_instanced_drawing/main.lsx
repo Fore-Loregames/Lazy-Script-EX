@@ -1,0 +1,45 @@
+use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
+use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+
+fn fail(message)
+    Win32.MessageBoxA(0, message, "LazyScriptEX Native GameKit", Win32.MB_OK + Win32.MB_ICONERROR)
+    return 1
+end
+
+fn main()
+    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return fail("GLFW failed.") end
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
+    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
+    local window = GLFW.glfwCreateWindow(1000,700,"06 - Instanced drawing",0,0)
+    if window == 0 then return fail("Window failed.") end
+    GLFW.glfwMakeContextCurrent(window)
+    if GL.lsxLoadOpenGL() < 1 then return fail("OpenGL loading failed.") end
+
+    local vs = "#version 460 core\nconst vec2 p[3]=vec2[](vec2(-0.035,-0.03),vec2(0.035,-0.03),vec2(0,0.045));out vec3 c;void main(){int x=gl_InstanceID%16;int y=gl_InstanceID/16;vec2 o=vec2(float(x)-7.5,float(y)-4.0)*vec2(0.12,0.2);gl_Position=vec4(p[gl_VertexID]+o,0,1);c=vec3(float(x)/15.0,float(y)/8.0,0.8);}"
+    local fs = "#version 460 core\nin vec3 c;out vec4 o;void main(){o=vec4(c,1);}"
+    local program = GL.lsxCreateProgram(vs,fs)
+    local vao = GL.createVertexArray()
+    local framebuffer = GLFW.FramebufferSize.new()
+
+    while GLFW.glfwWindowShouldClose(window) == 0 do
+        framebuffer.refresh(window)
+        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
+        GL.glClearColor(0.025,0.03,0.05,1)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        GL.glUseProgram(program)
+        GL.glBindVertexArray(vao)
+        GL.glDrawArraysInstanced(GL.GL_TRIANGLES,0,3,144)
+        GLFW.glfwSwapBuffers(window)
+        GLFW.glfwPollEvents()
+    end
+
+    framebuffer.destroy()
+    GL.deleteVertexArray(vao)
+    GL.glDeleteProgram(program)
+    GLFW.glfwDestroyWindow(window)
+    GLFW.glfwTerminate()
+    GLFW.lsxUnloadLibraries()
+    return 0
+end

@@ -1,0 +1,34 @@
+-- Direct FreeType public C API declarations. These are available for callers
+-- that want full control over library and face handles.
+
+export const FT_LOAD_DEFAULT = 0
+export const FT_LOAD_NO_SCALE = 1
+export const FT_LOAD_NO_HINTING = 2
+export const FT_LOAD_RENDER = 4
+export const FT_LOAD_NO_BITMAP = 8
+export const FT_LOAD_FORCE_AUTOHINT = 32
+export const FT_LOAD_MONOCHROME = 4096
+export const FT_LOAD_COLOR = 1048576
+
+export const FT_RENDER_MODE_NORMAL = 0
+export const FT_RENDER_MODE_LIGHT = 1
+export const FT_RENDER_MODE_MONO = 2
+export const FT_RENDER_MODE_LCD = 3
+export const FT_RENDER_MODE_LCD_V = 4
+export const FT_RENDER_MODE_SDF = 5
+
+export const FT_KERNING_DEFAULT = 0
+export const FT_KERNING_UNFITTED = 1
+export const FT_KERNING_UNSCALED = 2
+
+export extern "libfreetype.dll" fn FT_Init_FreeType(libraryOut:ptr) -> i32
+export extern "libfreetype.dll" fn FT_Done_FreeType(library:ptr) -> i32
+export extern "libfreetype.dll" fn FT_New_Face(library:ptr, path:string, faceIndex:i32, faceOut:ptr) -> i32
+export extern "libfreetype.dll" fn FT_Done_Face(face:ptr) -> i32
+export extern "libfreetype.dll" fn FT_Set_Pixel_Sizes(face:ptr, pixelWidth:u32, pixelHeight:u32) -> i32
+export extern "libfreetype.dll" fn FT_Load_Char(face:ptr, codepoint:u32, loadFlags:i32) -> i32
+export extern "libfreetype.dll" fn FT_Render_Glyph(glyphSlot:ptr, renderMode:i32) -> i32
+export extern "libfreetype.dll" fn FT_Get_Char_Index(face:ptr, codepoint:u32) -> u32
+export extern "libfreetype.dll" fn FT_Get_Kerning(face:ptr, leftGlyph:u32, rightGlyph:u32, mode:u32, vectorOut:ptr) -> i32
+export extern "libfreetype.dll" fn FT_Library_Version(library:ptr, majorOut:ptr, minorOut:ptr, patchOut:ptr) -> void
+export extern "libfreetype.dll" fn FT_Error_String(errorCode:i32) -> string

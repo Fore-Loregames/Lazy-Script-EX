@@ -1,0 +1,12 @@
+fn main() -> i32
+    local state:u64 = 88172645463325252
+    local checksum:u64 = 0
+    local i:i64 = 0
+    while i < 120000000 do
+        state = state * 2862933555777941757 + 3037000493
+        checksum = checksum + state
+        i = i + 1
+    end
+    if checksum == 0 then return 1 end
+    return 0
+end

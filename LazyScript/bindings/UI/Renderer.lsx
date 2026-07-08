@@ -1,0 +1,1495 @@
+use "LazyUI.lsx" as UI
+use "ShaderSources.lsx" as Shaders
+use "../OpenGL/OpenGL46.lsx" as GL
+use "../Text/FreeType.lsx" as FreeType
+use "../Text/Font.lsx" as Font
+use "../System/Log.lsx" as Log
+
+-- LazyUI geometry uses ordinary flat LSX tables, the same way the OpenGL
+-- examples define ordinary flat geometry tables. No typed vertex declarations or
+-- pointer-facing mesh API is required. Native upload details stay internal.
+fn color_red(value:u32) -> f32 return (value % 256) * 1.0 / 255.0 end
+fn color_green(value:u32) -> f32 return (value / 256 % 256) * 1.0 / 255.0 end
+fn color_blue(value:u32) -> f32 return (value / 65536 % 256) * 1.0 / 255.0 end
+fn color_alpha(value:u32) -> f32 return (value / 16777216 % 256) * 1.0 / 255.0 end
+fn color_rg_pair(value:u32) -> f32 return (value % 256) + (value / 256 % 256) * 256.0 end
+fn color_ba_pair(value:u32) -> f32 return (value / 65536 % 256) + (value / 16777216 % 256) * 256.0 end
+fn maximum(left:f32,right:f32) -> f32 if left > right then return left end return right end
+fn minimum(left:f32,right:f32) -> f32 if left < right then return left end return right end
+fn next_buffer_capacity(required:i64) -> i64
+    local capacity:i64 = 256
+    while capacity < required do capacity = capacity * 2 end
+    return capacity
+end
+
+export TAG_INPUT = 262753047
+export TAG_TEXTAREA = 147640391
+export TAG_SEARCH = 461053825
+export TAG_PASSWORD = 405580554
+export TAG_EMAIL = 257956687
+export TAG_URL = 193508280
+export TAG_TEL = 193506762
+export TAG_NUMBER = 284765492
+export TAG_DATE = 2090176869
+export TAG_TIME = 2090760342
+export TAG_KEYBIND = 615959123
+export TAG_CHECKBOX = 299628256
+export TAG_TOGGLE = 512252365
+export TAG_SWITCH = 482690077
+export TAG_RADIO = 272945686
+export TAG_RANGE = 272956500
+export TAG_SLIDER = 469627598
+export TAG_SELECT = 461434987
+export TAG_COMBOBOX = 1062010422
+export TAG_DROPDOWN = 404709856
+export TAG_COLOR = 255668902
+export TAG_COLOR_PICKER = 690891131
+
+-- Retained paint commands preserve DOM/canvas painter order while still
+-- drawing consecutive instances of the same pipeline in one batch.
+export RENDER_RUN_BOX = 1
+export RENDER_RUN_TEXT = 2
+export RENDER_RUN_IMAGE = 3
+export RENDER_RUN_SOLID = 4
+
+fn push_surface_vertex(vertices,x:f32,y:f32,u:f32,v:f32,r:f32,g:f32,b:f32,a:f32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    vertices.push(x) vertices.push(y)
+    vertices.push(u) vertices.push(v)
+    vertices.push(r) vertices.push(g) vertices.push(b) vertices.push(a)
+    vertices.push(clipX) vertices.push(clipY) vertices.push(clipWidth) vertices.push(clipHeight)
+end
+
+fn push_surface_triangle(vertices,x:f32,y:f32,x2:f32,y2:f32,x3:f32,y3:f32,r:f32,g:f32,b:f32,a:f32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    push_surface_vertex(vertices,x,y,0.0,0.0,r,g,b,a,clipX,clipY,clipWidth,clipHeight)
+    push_surface_vertex(vertices,x2,y2,0.0,0.0,r,g,b,a,clipX,clipY,clipWidth,clipHeight)
+    push_surface_vertex(vertices,x3,y3,0.0,0.0,r,g,b,a,clipX,clipY,clipWidth,clipHeight)
+end
+
+fn clear_visual_dirty_tree(element:UI.Element)
+    if element == null then return end
+    element.visual_dirty = false
+    local index = 0
+    while index < element.children.length() do
+        clear_visual_dirty_tree(element.children.at(index))
+        index = index + 1
+    end
+end
+
+export const Renderer = {
+    box_program:u32 = 0,
+    text_program:u32 = 0,
+    image_program:u32 = 0,
+    solid_program:u32 = 0,
+    box_vao:u32 = 0,
+    box_data_buffer:u32 = 0,
+    text_data_buffer:u32 = 0,
+    image_data_buffer:u32 = 0,
+    surface_vao:u32 = 0,
+    surface_vbo:u32 = 0,
+    box_viewport:i32 = -1,
+    text_viewport:i32 = -1,
+    image_viewport:i32 = -1,
+    solid_viewport:i32 = -1,
+    viewport_width:f32 = 0.0,
+    viewport_height:f32 = 0.0,
+    root_x:f32 = 0.0,
+    root_y:f32 = 0.0,
+    root_width:f32 = 0.0,
+    root_height:f32 = 0.0,
+    box_data = {},
+    box_geometry = {},
+    text_data = {},
+    solid_vertices = {},
+    image_textures = {},
+    image_batch_starts = {},
+    image_batch_counts = {},
+    image_data = {},
+    render_run_types = {},
+    render_run_starts = {},
+    render_run_counts = {},
+    render_run_textures = {},
+    render_run_count:i64 = 0,
+    select_overlays = {},
+    overlay_box_start:i64 = 0,
+    overlay_box_count:i64 = 0,
+    overlay_text_start:i64 = 0,
+    overlay_text_count:i64 = 0,
+    box_capacity_bytes:i64 = 0,
+    text_capacity_bytes:i64 = 0,
+    image_capacity_bytes:i64 = 0,
+    surface_capacity_bytes:i64 = 0,
+    face:FreeType.Face = null,
+    atlas:Font.Atlas = null,
+    atlas_texture:Font.Texture = null,
+    control_style:UI.Style = null,
+    control_text_style:UI.Style = null,
+    diagnostics:Log.Logger = null,
+    diagnostics_enabled:bool = false,
+    diagnostics_frames:i64 = 0,
+    element_count:i64 = 0,
+    box_count:i64 = 0,
+    text_count:i64 = 0,
+    text_glyph_count:i64 = 0,
+    image_count:i64 = 0,
+    canvas_shape_count:i64 = 0,
+    retained_count:i64 = 0,
+    culled_count:i64 = 0,
+    cache_hits:i64 = 0,
+    cache_valid:bool = false,
+    gpu_upload_dirty:bool = true,
+    frame_rebuilt:bool = false,
+    last_root:UI.Element = null,
+    ready:bool = false,
+
+    initialize = fn(fontPath:string,fontPixelHeight:i32) -> bool
+        if self.ready then return true end
+        if self.box_geometry.length() == 0 then
+            local geometryIndex = 0
+            while geometryIndex < 14 do
+                self.box_geometry.push(0.0)
+                geometryIndex = geometryIndex + 1
+            end
+        end
+        self.box_program = GL.lsxCreateProgram(Shaders.BOX_VERTEX,Shaders.BOX_FRAGMENT)
+        self.text_program = GL.lsxCreateProgram(Shaders.TEXT_VERTEX,Shaders.TEXT_FRAGMENT)
+        self.image_program = GL.lsxCreateProgram(Shaders.IMAGE_VERTEX,Shaders.IMAGE_FRAGMENT)
+        self.solid_program = GL.lsxCreateProgram(Shaders.SOLID_VERTEX,Shaders.SOLID_FRAGMENT)
+        if self.box_program == 0 or self.text_program == 0 or self.image_program == 0 or self.solid_program == 0 then return false end
+
+        -- Every box, circle, ellipse, line, border, and shadow uses one
+        -- shader-generated unit quad. Per-element values live in the flat
+        -- surface table and gl_InstanceID selects the correct record. This is
+        -- the same proven instanced path as example 06 combined with the
+        -- four-corner panel layout from example 24; no index table is needed.
+        self.box_vao = GL.createVertexArray()
+        self.box_data_buffer = GL.createBuffer()
+        self.text_data_buffer = GL.createBuffer()
+        self.image_data_buffer = GL.createBuffer()
+        GL.glBindVertexArray(self.box_vao)
+        GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,self.box_data_buffer)
+        GL.glBindBufferBase(GL.GL_SHADER_STORAGE_BUFFER,0,self.box_data_buffer)
+
+        -- Text glyphs and images also use the same four-corner instanced quad.
+        -- Only free-form polygons and triangles need a streamed vertex buffer.
+        self.surface_vao = GL.createVertexArray()
+        self.surface_vbo = GL.createBuffer()
+        GL.glBindVertexArray(self.surface_vao)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER,self.surface_vbo)
+        GL.glVertexAttribPointer(0,2,GL.GL_FLOAT,0,48,0)
+        GL.glEnableVertexAttribArray(0)
+        GL.glVertexAttribPointer(1,2,GL.GL_FLOAT,0,48,8)
+        GL.glEnableVertexAttribArray(1)
+        GL.glVertexAttribPointer(2,4,GL.GL_FLOAT,0,48,16)
+        GL.glEnableVertexAttribArray(2)
+        GL.glVertexAttribPointer(3,4,GL.GL_FLOAT,0,48,32)
+        GL.glEnableVertexAttribArray(3)
+
+        self.box_viewport = GL.glGetUniformLocation(self.box_program,"viewport")
+        self.text_viewport = GL.glGetUniformLocation(self.text_program,"viewport")
+        self.image_viewport = GL.glGetUniformLocation(self.image_program,"viewport")
+        self.solid_viewport = GL.glGetUniformLocation(self.solid_program,"viewport")
+        GL.glUseProgram(self.text_program)
+        GL.glUniform1i(GL.glGetUniformLocation(self.text_program,"fontAtlas"),0)
+        GL.glUseProgram(self.image_program)
+        GL.glUniform1i(GL.glGetUniformLocation(self.image_program,"sourceTexture"),0)
+
+        if fontPath == null then fontPath = "C:/Windows/Fonts/segoeui.ttf" end
+        if fontPixelHeight <= 0 then fontPixelHeight = 64 end
+        self.face = FreeType.load(fontPath,fontPixelHeight)
+        if not self.face.valid() then return false end
+        self.atlas = Font.create_ascii_atlas(self.face)
+        if not self.atlas.valid() then return false end
+        self.atlas_texture = Font.upload_atlas(self.atlas)
+        if not self.atlas_texture.valid() then return false end
+        self.control_style = UI.Style.new()
+        self.control_text_style = UI.Style.new()
+
+        GL.glEnable(GL.GL_BLEND)
+        GL.glBlendFunc(GL.GL_SRC_ALPHA,GL.GL_ONE_MINUS_SRC_ALPHA)
+        self.ready = true
+        return true
+    end,
+
+    enable_diagnostics = fn() -> bool
+        if self.diagnostics ~= null then self.diagnostics.destroy() end
+        self.diagnostics = Log.open_default()
+        self.diagnostics_enabled = self.diagnostics ~= null and self.diagnostics.is_open()
+        self.diagnostics_frames = 0
+        if self.diagnostics_enabled then
+            self.diagnostics.stage("LazyUI renderer diagnostics enabled")
+            self.diagnostics.number("renderer.ready=",self.ready)
+            self.diagnostics.number("program.box=",self.box_program)
+            self.diagnostics.number("program.text=",self.text_program)
+            self.diagnostics.number("program.image=",self.image_program)
+            self.diagnostics.number("program.solid=",self.solid_program)
+            self.diagnostics.number("program.box.linked=",GL.programLinked(self.box_program))
+            self.diagnostics.number("program.text.linked=",GL.programLinked(self.text_program))
+            self.diagnostics.number("program.image.linked=",GL.programLinked(self.image_program))
+            self.diagnostics.number("program.solid.linked=",GL.programLinked(self.solid_program))
+            self.diagnostics.number("vao.box=",self.box_vao)
+            self.diagnostics.number("vao.surface=",self.surface_vao)
+            self.diagnostics.number("buffer.surface=",self.surface_vbo)
+            self.diagnostics.number("buffer.box_data=",self.box_data_buffer)
+            self.diagnostics.number("buffer.text_data=",self.text_data_buffer)
+            self.diagnostics.number("buffer.image_data=",self.image_data_buffer)
+            self.diagnostics.number("uniform.box_viewport=",self.box_viewport)
+            self.diagnostics.number("uniform.text_viewport=",self.text_viewport)
+            self.diagnostics.number("font.face.valid=",self.face.valid())
+            self.diagnostics.number("font.atlas.valid=",self.atlas.valid())
+            self.diagnostics.number("font.texture.valid=",self.atlas_texture.valid())
+            self._diagnostic_gl_error("gl.error.after_initialize=")
+        end
+        return self.diagnostics_enabled
+    end,
+
+    _diagnostic_gl_error = fn(label:string)
+        if not self.diagnostics_enabled or self.diagnostics == null or self.diagnostics_frames >= 3 then return end
+        self.diagnostics.number(label,GL.glGetError())
+    end,
+
+    begin = fn(width:f32,height:f32)
+        local viewportChanged = self.viewport_width ~= width or self.viewport_height ~= height
+        self.viewport_width = width
+        self.viewport_height = height
+        self.frame_rebuilt = false
+        if viewportChanged then self.cache_valid = false end
+    end,
+
+    invalidate = fn()
+        self.cache_valid = false
+    end,
+
+    submit = fn(root:UI.Element)
+        if root == null then
+            if self.diagnostics_enabled then self.diagnostics.error_line("renderer.submit received a null root") end
+            return
+        end
+
+        -- Static retained UI reuses the already-uploaded instance buffers.
+        -- A rebuild only occurs after layout/visual dirtiness, root replacement,
+        -- or a viewport change. This removes per-frame table clearing, glyph
+        -- generation, and GPU uploads for unchanged editor interfaces.
+        local rebuild = not self.cache_valid or self.last_root ~= root or root.visual_dirty or root.layout_dirty
+        if not rebuild then
+            self.cache_hits = self.cache_hits + 1
+            return
+        end
+
+        self.box_data.clear()
+        self.text_data.clear()
+        self.solid_vertices.clear()
+        self.image_textures.clear()
+        self.image_batch_starts.clear()
+        self.image_batch_counts.clear()
+        self.image_data.clear()
+        self.render_run_types.clear()
+        self.render_run_starts.clear()
+        self.render_run_counts.clear()
+        self.render_run_textures.clear()
+        self.render_run_count = 0
+        self.select_overlays.clear()
+        self.overlay_box_start = 0
+        self.overlay_box_count = 0
+        self.overlay_text_start = 0
+        self.overlay_text_count = 0
+        self.element_count = 0
+        self.box_count = 0
+        self.text_count = 0
+        self.text_glyph_count = 0
+        self.image_count = 0
+        self.canvas_shape_count = 0
+        self.retained_count = 0
+        self.culled_count = 0
+
+        self.root_x = root.x
+        self.root_y = root.y
+        self.root_width = root.width
+        self.root_height = root.height
+        submit_tree(self,root,0.0,0.0,self.viewport_width,self.viewport_height)
+        -- Popups are submitted after the regular tree so they remain above
+        -- later siblings. Separate base-instance ranges preserve box/text
+        -- painter order without giving every element its own draw call.
+        self.overlay_box_start = self.box_count
+        self.overlay_text_start = self.text_glyph_count
+        local overlayIndex:i64 = 0
+        while overlayIndex < self.select_overlays.length() do
+            submit_select_popup(self,self.select_overlays[overlayIndex])
+            overlayIndex = overlayIndex + 1
+        end
+        self.overlay_box_count = self.box_count - self.overlay_box_start
+        self.overlay_text_count = self.text_glyph_count - self.overlay_text_start
+        clear_visual_dirty_tree(root)
+        self.last_root = root
+        self.cache_valid = true
+        self.gpu_upload_dirty = true
+        self.frame_rebuilt = true
+    end,
+
+    flush = fn()
+        if not self.ready then return end
+        GL.glEnable(GL.GL_BLEND)
+        GL.glBlendFunc(GL.GL_SRC_ALPHA,GL.GL_ONE_MINUS_SRC_ALPHA)
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        GL.glDisable(GL.GL_CULL_FACE)
+
+        -- Upload each retained stream at most once after a dirty rebuild. The
+        -- render-run list below only changes program/buffer state and draws
+        -- base-instance ranges; it never rebuilds or re-uploads geometry.
+        if self.gpu_upload_dirty then
+            if self.box_count > 0 then
+                local boxBytes = self.box_data.byte_length()
+                GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,self.box_data_buffer)
+                if boxBytes > self.box_capacity_bytes then
+                    self.box_capacity_bytes = next_buffer_capacity(boxBytes)
+                    GL.glBufferData(GL.GL_SHADER_STORAGE_BUFFER,self.box_capacity_bytes,0,GL.GL_DYNAMIC_DRAW)
+                end
+                GL.glBufferSubData(GL.GL_SHADER_STORAGE_BUFFER,0,boxBytes,self.box_data)
+                self._diagnostic_gl_error("gl.error.box_upload=")
+            end
+            if self.text_glyph_count > 0 then
+                local textBytes = self.text_data.byte_length()
+                GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,self.text_data_buffer)
+                if textBytes > self.text_capacity_bytes then
+                    self.text_capacity_bytes = next_buffer_capacity(textBytes)
+                    GL.glBufferData(GL.GL_SHADER_STORAGE_BUFFER,self.text_capacity_bytes,0,GL.GL_DYNAMIC_DRAW)
+                end
+                GL.glBufferSubData(GL.GL_SHADER_STORAGE_BUFFER,0,textBytes,self.text_data)
+                self._diagnostic_gl_error("gl.error.text_upload=")
+            end
+            if self.image_count > 0 then
+                local imageBytes = self.image_data.byte_length()
+                GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,self.image_data_buffer)
+                if imageBytes > self.image_capacity_bytes then
+                    self.image_capacity_bytes = next_buffer_capacity(imageBytes)
+                    GL.glBufferData(GL.GL_SHADER_STORAGE_BUFFER,self.image_capacity_bytes,0,GL.GL_DYNAMIC_DRAW)
+                end
+                GL.glBufferSubData(GL.GL_SHADER_STORAGE_BUFFER,0,imageBytes,self.image_data)
+                self._diagnostic_gl_error("gl.error.image_upload=")
+            end
+            if self.solid_vertices.length() > 0 then
+                local solidBytes = self.solid_vertices.byte_length()
+                GL.glBindBuffer(GL.GL_ARRAY_BUFFER,self.surface_vbo)
+                if solidBytes > self.surface_capacity_bytes then
+                    self.surface_capacity_bytes = next_buffer_capacity(solidBytes)
+                    GL.glBufferData(GL.GL_ARRAY_BUFFER,self.surface_capacity_bytes,0,GL.GL_DYNAMIC_DRAW)
+                end
+                GL.glBufferSubData(GL.GL_ARRAY_BUFFER,0,solidBytes,self.solid_vertices)
+                self._diagnostic_gl_error("gl.error.solid_upload=")
+            end
+        end
+
+        -- Execute consecutive painter-order runs. This keeps text behind later
+        -- panels, canvas labels behind nodes, caret/selection ordering intact,
+        -- and runtime overlays correct without giving every glyph its own draw.
+        local activeKind:i32 = 0
+        local activeTexture:u32 = 0
+        local runIndex:i64 = 0
+        while runIndex < self.render_run_types.length() do
+            local kind = self.render_run_types[runIndex]
+            local start = self.render_run_starts[runIndex]
+            local count = self.render_run_counts[runIndex]
+            local texture = self.render_run_textures[runIndex]
+            if count > 0 then
+                if kind == RENDER_RUN_BOX then
+                    if activeKind ~= kind then
+                        GL.glUseProgram(self.box_program)
+                        GL.glUniform2f(self.box_viewport,self.viewport_width,self.viewport_height)
+                        GL.glBindVertexArray(self.box_vao)
+                        GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,self.box_data_buffer)
+                        GL.glBindBufferBase(GL.GL_SHADER_STORAGE_BUFFER,0,self.box_data_buffer)
+                        activeKind = kind
+                        activeTexture = 0
+                    end
+                    GL.glDrawArraysInstancedBaseInstance(GL.GL_TRIANGLE_STRIP,0,4,count,start)
+                elseif kind == RENDER_RUN_TEXT then
+                    if activeKind ~= kind then
+                        GL.glUseProgram(self.text_program)
+                        GL.glUniform2f(self.text_viewport,self.viewport_width,self.viewport_height)
+                        self.atlas_texture.bind(0)
+                        GL.glBindVertexArray(self.box_vao)
+                        GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,self.text_data_buffer)
+                        GL.glBindBufferBase(GL.GL_SHADER_STORAGE_BUFFER,0,self.text_data_buffer)
+                        activeKind = kind
+                        activeTexture = 0
+                    end
+                    GL.glDrawArraysInstancedBaseInstance(GL.GL_TRIANGLE_STRIP,0,4,count,start)
+                elseif kind == RENDER_RUN_IMAGE then
+                    if activeKind ~= kind then
+                        GL.glUseProgram(self.image_program)
+                        GL.glUniform2f(self.image_viewport,self.viewport_width,self.viewport_height)
+                        GL.glBindVertexArray(self.box_vao)
+                        GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,self.image_data_buffer)
+                        GL.glBindBufferBase(GL.GL_SHADER_STORAGE_BUFFER,0,self.image_data_buffer)
+                        activeKind = kind
+                        activeTexture = 0
+                    end
+                    if activeTexture ~= texture then
+                        GL.glActiveTexture(GL.GL_TEXTURE0)
+                        GL.glBindTexture(GL.GL_TEXTURE_2D,texture)
+                        activeTexture = texture
+                    end
+                    GL.glDrawArraysInstancedBaseInstance(GL.GL_TRIANGLE_STRIP,0,4,count,start)
+                elseif kind == RENDER_RUN_SOLID then
+                    if activeKind ~= kind then
+                        GL.glUseProgram(self.solid_program)
+                        GL.glUniform2f(self.solid_viewport,self.viewport_width,self.viewport_height)
+                        GL.glBindVertexArray(self.surface_vao)
+                        GL.glBindBuffer(GL.GL_ARRAY_BUFFER,self.surface_vbo)
+                        activeKind = kind
+                        activeTexture = 0
+                    end
+                    GL.glDrawArrays(GL.GL_TRIANGLES,start,count)
+                end
+            end
+            runIndex = runIndex + 1
+        end
+        self._diagnostic_gl_error("gl.error.painter_runs=")
+        self.gpu_upload_dirty = false
+
+        if self.diagnostics_enabled and self.diagnostics_frames < 3 then
+            self.diagnostics.stage("LazyUI frame summary")
+            self.diagnostics.number("frame.index=",self.diagnostics_frames)
+            self.diagnostics.number("viewport.width=",self.viewport_width)
+            self.diagnostics.number("viewport.height=",self.viewport_height)
+            self.diagnostics.number("root.x=",self.root_x)
+            self.diagnostics.number("root.y=",self.root_y)
+            self.diagnostics.number("root.width=",self.root_width)
+            self.diagnostics.number("root.height=",self.root_height)
+            self.diagnostics.number("elements.retained_visited=",self.retained_count)
+            self.diagnostics.number("elements.submitted=",self.element_count)
+            self.diagnostics.number("elements.culled=",self.culled_count)
+            self.diagnostics.number("cache.frame_rebuilt=",self.frame_rebuilt)
+            self.diagnostics.number("cache.hits=",self.cache_hits)
+            self.diagnostics.number("paint.runs=",self.render_run_count)
+            self.diagnostics.number("boxes.count=",self.box_count)
+            self.diagnostics.number("boxes.data_values=",self.box_data.length())
+            self.diagnostics.number("boxes.data_bytes=",self.box_data.byte_length())
+            self.diagnostics.number("boxes.buffer_capacity=",self.box_capacity_bytes)
+            self.diagnostics.number("text.items=",self.text_count)
+            self.diagnostics.number("text.glyph_instances=",self.text_glyph_count)
+            self.diagnostics.number("text.instance_values=",self.text_data.length())
+            self.diagnostics.number("text.instance_bytes=",self.text_data.byte_length())
+            self.diagnostics.number("canvas.shapes=",self.canvas_shape_count)
+            self.diagnostics.number("solid.vertex_values=",self.solid_vertices.length())
+            self.diagnostics.number("images.instances=",self.image_count)
+            self.diagnostics.number("images.batches=",self.image_textures.length())
+            self._diagnostic_gl_error("gl.error.frame_end=")
+            self.diagnostics_frames = self.diagnostics_frames + 1
+        end
+    end,
+
+    destroy = fn()
+        if self.diagnostics_enabled and self.diagnostics ~= null then self.diagnostics.stage("LazyUI renderer destroy") end
+        if self.box_program ~= 0 then GL.glDeleteProgram(self.box_program) self.box_program = 0 end
+        if self.text_program ~= 0 then GL.glDeleteProgram(self.text_program) self.text_program = 0 end
+        if self.image_program ~= 0 then GL.glDeleteProgram(self.image_program) self.image_program = 0 end
+        if self.solid_program ~= 0 then GL.glDeleteProgram(self.solid_program) self.solid_program = 0 end
+        if self.box_data_buffer ~= 0 then GL.deleteBuffer(self.box_data_buffer) self.box_data_buffer = 0 end
+        if self.text_data_buffer ~= 0 then GL.deleteBuffer(self.text_data_buffer) self.text_data_buffer = 0 end
+        if self.image_data_buffer ~= 0 then GL.deleteBuffer(self.image_data_buffer) self.image_data_buffer = 0 end
+        if self.surface_vbo ~= 0 then GL.deleteBuffer(self.surface_vbo) self.surface_vbo = 0 end
+        if self.box_vao ~= 0 then GL.deleteVertexArray(self.box_vao) self.box_vao = 0 end
+        if self.surface_vao ~= 0 then GL.deleteVertexArray(self.surface_vao) self.surface_vao = 0 end
+        if self.atlas_texture ~= null then self.atlas_texture.destroy() self.atlas_texture = null end
+        if self.control_style ~= null then self.control_style.destroy() self.control_style = null end
+        if self.control_text_style ~= null then self.control_text_style.destroy() self.control_text_style = null end
+        if self.atlas ~= null then self.atlas.destroy() self.atlas = null end
+        if self.face ~= null then self.face.destroy() self.face = null end
+        self.box_data.destroy()
+        self.box_geometry.destroy()
+        self.text_data.destroy()
+        self.solid_vertices.destroy()
+        self.image_textures.destroy()
+        self.image_batch_starts.destroy()
+        self.image_batch_counts.destroy()
+        self.image_data.destroy()
+        self.render_run_types.destroy()
+        self.render_run_starts.destroy()
+        self.render_run_counts.destroy()
+        self.render_run_textures.destroy()
+        self.render_run_count = 0
+        self.select_overlays.destroy()
+        self.box_capacity_bytes = 0
+        self.text_capacity_bytes = 0
+        self.image_capacity_bytes = 0
+        self.surface_capacity_bytes = 0
+        self.cache_valid = false
+        self.gpu_upload_dirty = true
+        self.frame_rebuilt = false
+        self.last_root = null
+        self.ready = false
+        if self.diagnostics ~= null then self.diagnostics.destroy() self.diagnostics = null end
+        self.diagnostics_enabled = false
+    end
+}
+
+
+fn record_render_run(renderer:Renderer,kind:i32,start:i64,count:i64,texture:u32)
+    if renderer == null or count <= 0 then return end
+    local runCount = renderer.render_run_types.length()
+    if runCount > 0 then
+        local last = runCount - 1
+        if renderer.render_run_types[last] == kind and renderer.render_run_textures[last] == texture and renderer.render_run_starts[last] + renderer.render_run_counts[last] == start then
+            renderer.render_run_counts[last] = renderer.render_run_counts[last] + count
+            renderer.render_run_count = renderer.render_run_types.length()
+            return
+        end
+    end
+    renderer.render_run_types.push(kind)
+    renderer.render_run_starts.push(start)
+    renderer.render_run_counts.push(count)
+    renderer.render_run_textures.push(texture)
+    renderer.render_run_count = renderer.render_run_types.length()
+end
+
+fn submit_surface_triangle(renderer:Renderer,x:f32,y:f32,x2:f32,y2:f32,x3:f32,y3:f32,r:f32,g:f32,b:f32,a:f32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    local start = renderer.solid_vertices.length() / 12
+    push_surface_triangle(renderer.solid_vertices,x,y,x2,y2,x3,y3,r,g,b,a,clipX,clipY,clipWidth,clipHeight)
+    record_render_run(renderer,RENDER_RUN_SOLID,start,3,0)
+end
+
+fn prepare_box_rect(renderer:Renderer,x:f32,y:f32,width:f32,height:f32)
+    renderer.box_geometry[0] = x
+    renderer.box_geometry[1] = y
+    renderer.box_geometry[2] = width
+    renderer.box_geometry[3] = height
+end
+
+fn prepare_box_clip(renderer:Renderer,x:f32,y:f32,width:f32,height:f32)
+    renderer.box_geometry[4] = x
+    renderer.box_geometry[5] = y
+    renderer.box_geometry[6] = width
+    renderer.box_geometry[7] = height
+end
+
+fn prepare_box_shape(renderer:Renderer,mode:f32,lineWidth:f32,x1:f32,y1:f32,x2:f32,y2:f32)
+    renderer.box_geometry[8] = mode
+    renderer.box_geometry[9] = lineWidth
+    renderer.box_geometry[10] = x1
+    renderer.box_geometry[11] = y1
+    renderer.box_geometry[12] = x2
+    renderer.box_geometry[13] = y2
+end
+
+fn submit_prepared_box(renderer:Renderer,style:UI.Style)
+    if style == null then return end
+    local width = renderer.box_geometry[2]
+    local height = renderer.box_geometry[3]
+    if width <= 0.0 or height <= 0.0 then return end
+
+    -- Every retained element gets geometry even when its current alpha is zero.
+    -- Hover, animation, theme, class, ID, and {var} changes can make it opaque
+    -- later without removing it from the retained render path.
+    local endColor = style.background_end
+    if endColor == 0 then endColor = style.background end
+
+    -- Rect
+    renderer.box_data.push(renderer.box_geometry[0]) renderer.box_data.push(renderer.box_geometry[1]) renderer.box_data.push(width) renderer.box_data.push(height)
+    -- Background start/end
+    renderer.box_data.push(color_red(style.background)) renderer.box_data.push(color_green(style.background)) renderer.box_data.push(color_blue(style.background)) renderer.box_data.push(color_alpha(style.background))
+    renderer.box_data.push(color_red(endColor)) renderer.box_data.push(color_green(endColor)) renderer.box_data.push(color_blue(endColor)) renderer.box_data.push(color_alpha(endColor))
+    -- Per-side border colors packed as exact 16-bit RG and BA pairs.
+    renderer.box_data.push(color_rg_pair(style.border_top_color)) renderer.box_data.push(color_ba_pair(style.border_top_color)) renderer.box_data.push(color_rg_pair(style.border_right_color)) renderer.box_data.push(color_ba_pair(style.border_right_color))
+    renderer.box_data.push(color_rg_pair(style.border_bottom_color)) renderer.box_data.push(color_ba_pair(style.border_bottom_color)) renderer.box_data.push(color_rg_pair(style.border_left_color)) renderer.box_data.push(color_ba_pair(style.border_left_color))
+    -- Shadow, radii, border widths, shadow geometry, clip.
+    renderer.box_data.push(color_red(style.shadow_color)) renderer.box_data.push(color_green(style.shadow_color)) renderer.box_data.push(color_blue(style.shadow_color)) renderer.box_data.push(color_alpha(style.shadow_color))
+    renderer.box_data.push(style.radius_top_left) renderer.box_data.push(style.radius_top_right) renderer.box_data.push(style.radius_bottom_right) renderer.box_data.push(style.radius_bottom_left)
+    renderer.box_data.push(style.border_top_width) renderer.box_data.push(style.border_right_width) renderer.box_data.push(style.border_bottom_width) renderer.box_data.push(style.border_left_width)
+    renderer.box_data.push(style.shadow_x) renderer.box_data.push(style.shadow_y) renderer.box_data.push(style.shadow_blur) renderer.box_data.push(style.shadow_spread)
+    renderer.box_data.push(renderer.box_geometry[4]) renderer.box_data.push(renderer.box_geometry[5]) renderer.box_data.push(renderer.box_geometry[6]) renderer.box_data.push(renderer.box_geometry[7])
+    -- Opacity/gradient/outline plus outline color and shape information.
+    renderer.box_data.push(style.opacity) renderer.box_data.push(style.gradient_mode) renderer.box_data.push(style.gradient_angle) renderer.box_data.push(style.outline_width)
+    renderer.box_data.push(color_red(style.outline_color)) renderer.box_data.push(color_green(style.outline_color)) renderer.box_data.push(color_blue(style.outline_color)) renderer.box_data.push(color_alpha(style.outline_color))
+    renderer.box_data.push(style.outline_offset) renderer.box_data.push(renderer.box_geometry[8]) renderer.box_data.push(renderer.box_geometry[9]) renderer.box_data.push(0.0)
+    renderer.box_data.push(renderer.box_geometry[10]) renderer.box_data.push(renderer.box_geometry[11]) renderer.box_data.push(renderer.box_geometry[12]) renderer.box_data.push(renderer.box_geometry[13])
+    record_render_run(renderer,RENDER_RUN_BOX,renderer.box_count,1,0)
+    renderer.box_count = renderer.box_count + 1
+end
+
+fn submit_element_box(renderer:Renderer,style:UI.Style,element:UI.Element,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    prepare_box_rect(renderer,element.x,element.y,element.width,element.height)
+    prepare_box_clip(renderer,clipX,clipY,clipWidth,clipHeight)
+    prepare_box_shape(renderer,0.0,0.0,0.0,0.0,0.0,0.0)
+    submit_prepared_box(renderer,style)
+end
+
+fn submit_text_at(renderer:Renderer,style:UI.Style,text:string,x:f32,y:f32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    if style == null or text == null or string.length(text) <= 0 or not renderer.face.valid() or not renderer.atlas.valid() then return end
+    local scale = style.font_size / renderer.face.pixel_height
+    local appended = Font.append_text_instances(
+        renderer.face,renderer.atlas,text,x,y,scale,renderer.text_data,
+        color_red(style.text_color),color_green(style.text_color),color_blue(style.text_color),color_alpha(style.text_color) * style.opacity,
+        clipX,clipY,clipWidth,clipHeight
+    )
+    if appended > 0 then
+        record_render_run(renderer,RENDER_RUN_TEXT,renderer.text_glyph_count,appended,0)
+        renderer.text_glyph_count = renderer.text_glyph_count + appended
+        renderer.text_count = renderer.text_count + 1
+    end
+end
+
+
+fn reset_control_style(renderer:Renderer,color:u32,radius:f32)
+    local control = renderer.control_style
+    control.background = color
+    control.background_end = color
+    control.gradient_mode = 0
+    control.gradient_angle = 0.0
+    control.opacity = 1.0
+    control.border_top_width = 0.0
+    control.border_right_width = 0.0
+    control.border_bottom_width = 0.0
+    control.border_left_width = 0.0
+    control.border_top_color = 0
+    control.border_right_color = 0
+    control.border_bottom_color = 0
+    control.border_left_color = 0
+    control.radius_top_left = radius
+    control.radius_top_right = radius
+    control.radius_bottom_right = radius
+    control.radius_bottom_left = radius
+    control.shadow_x = 0.0
+    control.shadow_y = 0.0
+    control.shadow_blur = 0.0
+    control.shadow_spread = 0.0
+    control.shadow_color = 0
+    control.outline_width = 0.0
+    control.outline_color = 0
+    control.outline_offset = 0.0
+end
+
+fn submit_control_rect(renderer:Renderer,x:f32,y:f32,width:f32,height:f32,color:u32,radius:f32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    if width <= 0.0 or height <= 0.0 then return end
+    reset_control_style(renderer,color,radius)
+    prepare_box_rect(renderer,x,y,width,height)
+    prepare_box_clip(renderer,clipX,clipY,clipWidth,clipHeight)
+    prepare_box_shape(renderer,0.0,0.0,0.0,0.0,0.0,0.0)
+    submit_prepared_box(renderer,renderer.control_style)
+end
+
+fn submit_control_circle(renderer:Renderer,x:f32,y:f32,size:f32,color:u32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    if size <= 0.0 then return end
+    reset_control_style(renderer,color,size * 0.5)
+    prepare_box_rect(renderer,x,y,size,size)
+    prepare_box_clip(renderer,clipX,clipY,clipWidth,clipHeight)
+    prepare_box_shape(renderer,1.0,0.0,0.0,0.0,0.0,0.0)
+    submit_prepared_box(renderer,renderer.control_style)
+end
+
+fn submit_control_line(renderer:Renderer,x1:f32,y1:f32,x2:f32,y2:f32,width:f32,color:u32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    local lineLeft = x1
+    if x2 < lineLeft then lineLeft = x2 end
+    local lineTop = y1
+    if y2 < lineTop then lineTop = y2 end
+    local lineRight = x1
+    if x2 > lineRight then lineRight = x2 end
+    local lineBottom = y1
+    if y2 > lineBottom then lineBottom = y2 end
+    local linePad = width + 2.0
+    reset_control_style(renderer,color,0.0)
+    prepare_box_rect(renderer,lineLeft-linePad,lineTop-linePad,lineRight-lineLeft+linePad*2.0,lineBottom-lineTop+linePad*2.0)
+    prepare_box_clip(renderer,clipX,clipY,clipWidth,clipHeight)
+    prepare_box_shape(renderer,2.0,width,x1,y1,x2,y2)
+    submit_prepared_box(renderer,renderer.control_style)
+end
+
+fn copy_control_text_style(renderer:Renderer,source:UI.Style,color:u32)
+    local target = renderer.control_text_style
+    target.text_color = color
+    target.font_size = source.font_size
+    target.font_weight = source.font_weight
+    target.line_height = source.line_height
+    target.letter_spacing = source.letter_spacing
+    target.word_spacing = source.word_spacing
+    target.opacity = source.opacity
+end
+
+fn text_width_range(renderer:Renderer,text:string,start:i64,finish:i64,scale:f32) -> f32
+    return Font.measure_text_range(renderer.face,renderer.atlas,text,start,finish,scale)
+end
+
+fn input_line_start(text:string,index:i64) -> i64
+    if text == null then return 0 end
+    local valueIndex = index
+    local valueLength = string.length(text)
+    if valueIndex > valueLength then valueIndex = valueLength end
+    while valueIndex > 0 do
+        if string.byte_at(text,valueIndex-1) == 10 then return valueIndex end
+        valueIndex = valueIndex - 1
+    end
+    return 0
+end
+
+fn input_line_number(text:string,index:i64) -> i64
+    if text == null then return 0 end
+    local line:i64 = 0
+    local valueLength = string.length(text)
+    local valueIndex:i64 = 0
+    if index > valueLength then index = valueLength end
+    while valueIndex < index do
+        if string.byte_at(text,valueIndex) == 10 then line = line + 1 end
+        valueIndex = valueIndex + 1
+    end
+    return line
+end
+
+fn submit_input_text(renderer:Renderer,element:UI.Element,style:UI.Style,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    local valueText = element.value
+    if element.tag_hash == TAG_PASSWORD and valueText ~= null and string.length(valueText) > 0 then valueText = element.password_display_value() end
+    local placeholderText = false
+    if valueText == null or string.length(valueText) == 0 then
+        valueText = element.placeholder
+        placeholderText = true
+    end
+    local multiline = element.tag_hash == TAG_TEXTAREA
+    local lineHeight = style.line_height
+    if lineHeight <= 0.0 then lineHeight = style.font_size * 1.25 end
+    local textX = element.content_x - element.input_scroll_x
+    local textY = element.content_y - element.input_scroll_y
+    if not multiline and element.content_height > lineHeight then textY = element.content_y + (element.content_height - lineHeight) * 0.5 end
+    local inputTextColor = style.text_color
+    if placeholderText then inputTextColor = UI.rgba(138,151,173,255) end
+    copy_control_text_style(renderer,style,inputTextColor)
+
+    local actualValue = valueText
+    if placeholderText or actualValue == null then actualValue = "" end
+    local inputScale = style.font_size / renderer.face.pixel_height
+    if element.focused and not placeholderText then
+        local selectionStart = element.selection_start()
+        local selectionFinish = element.selection_end()
+        if selectionFinish > selectionStart then
+            local startLine = input_line_number(actualValue,selectionStart)
+            local finishLine = input_line_number(actualValue,selectionFinish)
+            local startLineIndex = input_line_start(actualValue,selectionStart)
+            local finishLineIndex = input_line_start(actualValue,selectionFinish)
+            local startX = textX + text_width_range(renderer,actualValue,startLineIndex,selectionStart,inputScale)
+            local finishX = textX + text_width_range(renderer,actualValue,finishLineIndex,selectionFinish,inputScale)
+            local selectionY = textY + startLine * lineHeight
+            if startLine == finishLine then
+                submit_control_rect(renderer,startX,selectionY,finishX-startX,lineHeight,UI.rgba(59,130,246,110),2.0,clipX,clipY,clipWidth,clipHeight)
+            else
+                submit_control_rect(renderer,startX,selectionY,element.content_x+element.content_width-startX,lineHeight,UI.rgba(59,130,246,110),2.0,clipX,clipY,clipWidth,clipHeight)
+                local middleLine = startLine + 1
+                while middleLine < finishLine do
+                    submit_control_rect(renderer,textX,textY+middleLine*lineHeight,element.content_width,lineHeight,UI.rgba(59,130,246,110),2.0,clipX,clipY,clipWidth,clipHeight)
+                    middleLine = middleLine + 1
+                end
+                submit_control_rect(renderer,textX,textY+finishLine*lineHeight,finishX-textX,lineHeight,UI.rgba(59,130,246,110),2.0,clipX,clipY,clipWidth,clipHeight)
+            end
+        end
+    end
+
+    if valueText ~= null then submit_text_at(renderer,renderer.control_text_style,valueText,textX,textY,clipX,clipY,clipWidth,clipHeight) end
+
+    -- A focused empty field still owns a caret. Placeholder text is only a
+    -- visual hint and must not suppress keyboard focus feedback.
+    if element.focused then
+        local caretLine = input_line_number(actualValue,element.cursor_index)
+        local caretLineStart = input_line_start(actualValue,element.cursor_index)
+        local caretX = textX + text_width_range(renderer,actualValue,caretLineStart,element.cursor_index,inputScale)
+        local caretY = textY + caretLine * lineHeight
+        submit_control_rect(renderer,caretX,caretY+2.0,1.5,lineHeight-4.0,UI.rgba(235,242,255,255),0.0,clipX,clipY,clipWidth,clipHeight)
+    end
+end
+
+fn submit_checkbox_visual(renderer:Renderer,element:UI.Element,style:UI.Style,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    local boxSize = style.font_size + 2.0
+    if boxSize > element.content_height then boxSize = element.content_height end
+    if boxSize < 14.0 then boxSize = 14.0 end
+    local boxX = element.content_x
+    local boxY = element.content_y + (element.content_height-boxSize)*0.5
+    local boxColor = UI.rgba(19,29,45,255)
+    if element.checked then boxColor = UI.rgba(83,103,255,255) end
+    submit_control_rect(renderer,boxX,boxY,boxSize,boxSize,boxColor,4.0,clipX,clipY,clipWidth,clipHeight)
+    if element.checked then
+        submit_control_line(renderer,boxX+3.5,boxY+boxSize*0.52,boxX+boxSize*0.43,boxY+boxSize-4.0,2.0,UI.rgba(255,255,255,255),clipX,clipY,clipWidth,clipHeight)
+        submit_control_line(renderer,boxX+boxSize*0.43,boxY+boxSize-4.0,boxX+boxSize-3.0,boxY+3.5,2.0,UI.rgba(255,255,255,255),clipX,clipY,clipWidth,clipHeight)
+    end
+    if element.text ~= null then
+        copy_control_text_style(renderer,style,style.text_color)
+        submit_text_at(renderer,renderer.control_text_style,element.text,boxX+boxSize+9.0,element.content_y,clipX,clipY,clipWidth,clipHeight)
+    end
+end
+
+fn submit_radio_visual(renderer:Renderer,element:UI.Element,style:UI.Style,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    local radioSize = style.font_size + 2.0
+    if radioSize > element.content_height then radioSize = element.content_height end
+    if radioSize < 14.0 then radioSize = 14.0 end
+    local radioX = element.content_x
+    local radioY = element.content_y + (element.content_height-radioSize)*0.5
+    submit_control_circle(renderer,radioX,radioY,radioSize,UI.rgba(50,66,91,255),clipX,clipY,clipWidth,clipHeight)
+    submit_control_circle(renderer,radioX+2.0,radioY+2.0,radioSize-4.0,UI.rgba(14,23,37,255),clipX,clipY,clipWidth,clipHeight)
+    if element.checked then submit_control_circle(renderer,radioX+4.0,radioY+4.0,radioSize-8.0,UI.rgba(105,117,255,255),clipX,clipY,clipWidth,clipHeight) end
+    if element.text ~= null then
+        copy_control_text_style(renderer,style,style.text_color)
+        submit_text_at(renderer,renderer.control_text_style,element.text,radioX+radioSize+9.0,element.content_y,clipX,clipY,clipWidth,clipHeight)
+    end
+end
+
+fn submit_switch_visual(renderer:Renderer,element:UI.Element,style:UI.Style,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    local trackWidth:f32 = 42.0
+    local trackHeight:f32 = 22.0
+    if element.content_height < trackHeight then trackHeight = element.content_height end
+    local trackX = element.content_x
+    local trackY = element.content_y + (element.content_height-trackHeight)*0.5
+    local trackColor = UI.rgba(53,68,91,255)
+    if element.checked then trackColor = UI.rgba(83,103,255,255) end
+    submit_control_rect(renderer,trackX,trackY,trackWidth,trackHeight,trackColor,trackHeight*0.5,clipX,clipY,clipWidth,clipHeight)
+    local thumbSize = trackHeight-4.0
+    local thumbX = trackX+2.0
+    if element.checked then thumbX = trackX+trackWidth-thumbSize-2.0 end
+    submit_control_circle(renderer,thumbX,trackY+2.0,thumbSize,UI.rgba(245,248,255,255),clipX,clipY,clipWidth,clipHeight)
+    if element.text ~= null then
+        copy_control_text_style(renderer,style,style.text_color)
+        submit_text_at(renderer,renderer.control_text_style,element.text,trackX+trackWidth+10.0,element.content_y,clipX,clipY,clipWidth,clipHeight)
+    end
+end
+
+fn submit_range_visual(renderer:Renderer,element:UI.Element,style:UI.Style,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    local minimumValue = element.min_value
+    local maximumValue = element.max_value
+    if maximumValue <= minimumValue then maximumValue = minimumValue + 1.0 end
+    local ratio = (element.number_value-minimumValue)/(maximumValue-minimumValue)
+    if ratio < 0.0 then ratio = 0.0 end
+    if ratio > 1.0 then ratio = 1.0 end
+    local trackX = element.content_x
+    local trackWidth = element.content_width
+    local trackY = element.content_y + element.content_height*0.5 - 3.0
+    -- A styled range can provide its own full-width gradient (for example a
+    -- hue strip). The element box already submits that gradient, so only draw
+    -- the thumb over it instead of covering it with the default blue track.
+    local customTrack = style.gradient_mode ~= UI.GRADIENT_NONE or color_alpha(style.background) > 0.0
+    if not customTrack then
+        submit_control_rect(renderer,trackX,trackY,trackWidth,6.0,UI.rgba(42,57,81,255),3.0,clipX,clipY,clipWidth,clipHeight)
+        submit_control_rect(renderer,trackX,trackY,trackWidth*ratio,6.0,UI.rgba(91,108,255,255),3.0,clipX,clipY,clipWidth,clipHeight)
+    end
+    local thumbSize:f32 = 18.0
+    local thumbX = trackX + trackWidth*ratio - thumbSize*0.5
+    submit_control_circle(renderer,thumbX,trackY+3.0-thumbSize*0.5,thumbSize,UI.rgba(241,245,255,255),clipX,clipY,clipWidth,clipHeight)
+    submit_control_circle(renderer,thumbX+4.0,trackY+3.0-thumbSize*0.5+4.0,thumbSize-8.0,UI.rgba(91,108,255,255),clipX,clipY,clipWidth,clipHeight)
+end
+
+fn submit_select_visual(renderer:Renderer,element:UI.Element,style:UI.Style,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    local selectText = UI.select_display_text(element)
+    if selectText ~= null then
+        copy_control_text_style(renderer,style,style.text_color)
+        submit_text_at(renderer,renderer.control_text_style,selectText,element.content_x,element.content_y,clipX,clipY,clipWidth,clipHeight)
+    end
+    local arrowX = element.x + element.width - 18.0
+    local arrowY = element.y + element.height*0.5 - 2.0
+    if element.open then
+        submit_control_line(renderer,arrowX,arrowY+4.0,arrowX+4.0,arrowY,1.5,UI.rgba(164,177,199,255),clipX,clipY,clipWidth,clipHeight)
+        submit_control_line(renderer,arrowX+4.0,arrowY,arrowX+8.0,arrowY+4.0,1.5,UI.rgba(164,177,199,255),clipX,clipY,clipWidth,clipHeight)
+    else
+        submit_control_line(renderer,arrowX,arrowY,arrowX+4.0,arrowY+4.0,1.5,UI.rgba(164,177,199,255),clipX,clipY,clipWidth,clipHeight)
+        submit_control_line(renderer,arrowX+4.0,arrowY+4.0,arrowX+8.0,arrowY,1.5,UI.rgba(164,177,199,255),clipX,clipY,clipWidth,clipHeight)
+    end
+end
+
+fn submit_select_popup(renderer:Renderer,element:UI.Element)
+    if element == null or not element.open then return end
+    local count = UI.select_option_count(element)
+    local visible = UI.select_popup_visible_count(element)
+    if count <= 0 or visible <= 0 then return end
+    local itemHeight = UI.select_popup_item_height(element)
+    local popupHeight = UI.select_popup_height(element)
+    local popupWidth = UI.select_popup_width(element,renderer.viewport_width)
+    local popupX = UI.select_popup_x(element,renderer.viewport_width)
+    local popupY = UI.select_popup_y(element,renderer.viewport_height)
+    local clipX:f32 = 0.0
+    local clipY:f32 = 0.0
+    local clipWidth = renderer.viewport_width
+    local clipHeight = renderer.viewport_height
+
+    submit_control_rect(renderer,popupX,popupY,popupWidth,popupHeight,UI.rgba(70,92,126,255),7.0,clipX,clipY,clipWidth,clipHeight)
+    submit_control_rect(renderer,popupX+1.0,popupY+1.0,popupWidth-2.0,popupHeight-2.0,UI.rgba(13,20,31,255),6.0,clipX,clipY,clipWidth,clipHeight)
+
+    local style = element.current_style()
+    copy_control_text_style(renderer,style,style.text_color)
+    local localIndex:i64 = 0
+    while localIndex < visible do
+        local optionIndex = element.popup_scroll_index + localIndex
+        local option = UI.select_option_at(element,optionIndex)
+        if option ~= null then
+            local itemY = popupY + 2.0 + localIndex * itemHeight
+            local itemColor = UI.rgba(13,20,31,255)
+            if optionIndex == element.selected_index then itemColor = UI.rgba(44,69,108,255) end
+            if optionIndex == element.popup_hover_index then itemColor = UI.rgba(54,86,136,255) end
+            submit_control_rect(renderer,popupX+3.0,itemY+2.0,popupWidth-6.0,itemHeight-4.0,itemColor,5.0,clipX,clipY,clipWidth,clipHeight)
+            local optionText = option.text
+            if optionText == null or string.length(optionText) == 0 then optionText = option.value end
+            if optionText ~= null then
+                local textY = itemY + (itemHeight-style.font_size*1.25)*0.5
+                submit_text_at(renderer,renderer.control_text_style,optionText,popupX+11.0,textY,clipX,clipY,clipWidth,clipHeight)
+            end
+            if optionIndex == element.selected_index then
+                local checkX = popupX + popupWidth - 21.0
+                local checkY = itemY + itemHeight*0.5
+                submit_control_line(renderer,checkX,checkY,checkX+4.0,checkY+4.0,1.7,UI.rgba(173,200,255,255),clipX,clipY,clipWidth,clipHeight)
+                submit_control_line(renderer,checkX+4.0,checkY+4.0,checkX+10.0,checkY-4.0,1.7,UI.rgba(173,200,255,255),clipX,clipY,clipWidth,clipHeight)
+            end
+        end
+        localIndex = localIndex + 1
+    end
+
+    if count > visible then
+        local trackHeight = popupHeight - 8.0
+        local trackX = popupX + popupWidth - 7.0
+        submit_control_rect(renderer,trackX,popupY+4.0,4.0,trackHeight,UI.rgba(8,13,22,255),2.0,clipX,clipY,clipWidth,clipHeight)
+        local thumbHeight = trackHeight * visible / count
+        if thumbHeight < 18.0 then thumbHeight = 18.0 end
+        local maximumStart = count - visible
+        local travel = trackHeight - thumbHeight
+        local thumbY = popupY + 4.0
+        if maximumStart > 0 then thumbY = thumbY + element.popup_scroll_index * travel / maximumStart end
+        submit_control_rect(renderer,trackX,thumbY,4.0,thumbHeight,UI.rgba(89,112,151,255),2.0,clipX,clipY,clipWidth,clipHeight)
+    end
+end
+
+fn hex_digit_value(value:i32) -> i32
+    if value >= 48 and value <= 57 then return value-48 end
+    if value >= 65 and value <= 70 then return value-55 end
+    if value >= 97 and value <= 102 then return value-87 end
+    return -1
+end
+
+fn parse_hex_color(value:string,fallback:u32) -> u32
+    if value == null then return fallback end
+    local length = string.length(value)
+    if length ~= 7 and length ~= 9 then return fallback end
+    if string.byte_at(value,0) ~= 35 then return fallback end
+    local redHigh = hex_digit_value(string.byte_at(value,1))
+    local redLow = hex_digit_value(string.byte_at(value,2))
+    local greenHigh = hex_digit_value(string.byte_at(value,3))
+    local greenLow = hex_digit_value(string.byte_at(value,4))
+    local blueHigh = hex_digit_value(string.byte_at(value,5))
+    local blueLow = hex_digit_value(string.byte_at(value,6))
+    if redHigh < 0 or redLow < 0 or greenHigh < 0 or greenLow < 0 or blueHigh < 0 or blueLow < 0 then return fallback end
+    local alphaValue = 255
+    if length == 9 then
+        local alphaHigh = hex_digit_value(string.byte_at(value,7))
+        local alphaLow = hex_digit_value(string.byte_at(value,8))
+        if alphaHigh < 0 or alphaLow < 0 then return fallback end
+        alphaValue = alphaHigh*16+alphaLow
+    end
+    return UI.rgba(redHigh*16+redLow,greenHigh*16+greenLow,blueHigh*16+blueLow,alphaValue)
+end
+
+fn submit_color_visual(renderer:Renderer,element:UI.Element,style:UI.Style,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    local swatchSize = element.content_height
+    if swatchSize > 28.0 then swatchSize = 28.0 end
+    if swatchSize < 14.0 then swatchSize = 14.0 end
+    local swatchColor = parse_hex_color(element.value,UI.rgba(124,77,255,255))
+    if element.has_color_value then swatchColor = element.color_value end
+    local swatchY = element.content_y+(element.content_height-swatchSize)*0.5
+    submit_control_rect(renderer,element.content_x,swatchY,swatchSize,swatchSize,swatchColor,5.0,clipX,clipY,clipWidth,clipHeight)
+
+    local valueText = element.value
+    local placeholderText = false
+    if valueText == null or string.length(valueText) == 0 then
+        valueText = element.placeholder
+        placeholderText = true
+    end
+    local lineHeight = style.line_height
+    if lineHeight <= 0.0 then lineHeight = style.font_size*1.25 end
+    local textStartX = element.content_x+swatchSize+10.0
+    local textX = textStartX-element.input_scroll_x
+    local textY = element.content_y
+    if element.content_height > lineHeight then textY = element.content_y+(element.content_height-lineHeight)*0.5 end
+    local textColor = style.text_color
+    if placeholderText then textColor = UI.rgba(138,151,173,255) end
+    copy_control_text_style(renderer,style,textColor)
+
+    local actualValue = valueText
+    if placeholderText or actualValue == null then actualValue = "" end
+    local inputScale = style.font_size/renderer.face.pixel_height
+    if element.focused and not placeholderText then
+        local selectionStart = element.selection_start()
+        local selectionFinish = element.selection_end()
+        if selectionFinish > selectionStart then
+            local selectionX = textX+text_width_range(renderer,actualValue,0,selectionStart,inputScale)
+            local selectionEndX = textX+text_width_range(renderer,actualValue,0,selectionFinish,inputScale)
+            submit_control_rect(renderer,selectionX,textY,selectionEndX-selectionX,lineHeight,UI.rgba(59,130,246,110),2.0,clipX,clipY,clipWidth,clipHeight)
+        end
+    end
+    if valueText ~= null then submit_text_at(renderer,renderer.control_text_style,valueText,textX,textY,clipX,clipY,clipWidth,clipHeight) end
+    if element.focused then
+        local caretX = textX+text_width_range(renderer,actualValue,0,element.cursor_index,inputScale)
+        submit_control_rect(renderer,caretX,textY+2.0,1.5,lineHeight-4.0,UI.rgba(235,242,255,255),0.0,clipX,clipY,clipWidth,clipHeight)
+    end
+end
+
+fn submit_control_visual(renderer:Renderer,element:UI.Element,style:UI.Style,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32) -> bool
+    if element.kind ~= UI.ELEMENT_INPUT then return false end
+    local tag = element.tag_hash
+    if tag == TAG_INPUT or tag == TAG_TEXTAREA or tag == TAG_SEARCH or tag == TAG_PASSWORD or tag == TAG_EMAIL or tag == TAG_URL or tag == TAG_TEL or tag == TAG_NUMBER or tag == TAG_DATE or tag == TAG_TIME or tag == TAG_KEYBIND then
+        submit_input_text(renderer,element,style,clipX,clipY,clipWidth,clipHeight)
+        return true
+    end
+    if tag == TAG_CHECKBOX then submit_checkbox_visual(renderer,element,style,clipX,clipY,clipWidth,clipHeight) return true end
+    if tag == TAG_RADIO then submit_radio_visual(renderer,element,style,clipX,clipY,clipWidth,clipHeight) return true end
+    if tag == TAG_TOGGLE or tag == TAG_SWITCH then submit_switch_visual(renderer,element,style,clipX,clipY,clipWidth,clipHeight) return true end
+    if tag == TAG_RANGE or tag == TAG_SLIDER then submit_range_visual(renderer,element,style,clipX,clipY,clipWidth,clipHeight) return true end
+    if tag == TAG_SELECT or tag == TAG_COMBOBOX or tag == TAG_DROPDOWN then submit_select_visual(renderer,element,style,clipX,clipY,clipWidth,clipHeight) return true end
+    if tag == TAG_COLOR or tag == TAG_COLOR_PICKER then submit_color_visual(renderer,element,style,clipX,clipY,clipWidth,clipHeight) return true end
+    if element.value ~= null or element.placeholder ~= null then submit_input_text(renderer,element,style,clipX,clipY,clipWidth,clipHeight) return true end
+    return false
+end
+
+fn submit_scrollbars(renderer:Renderer,element:UI.Element,style:UI.Style,parentClipX:f32,parentClipY:f32,parentClipWidth:f32,parentClipHeight:f32)
+    local verticalMaximum = UI.effective_scroll_max_y(element)
+    local horizontalMaximum = UI.effective_scroll_max_x(element)
+    local vertical = verticalMaximum > 0.0 and (style.overflow_y == UI.OVERFLOW_SCROLL or style.overflow_y == UI.OVERFLOW_AUTO)
+    local horizontal = horizontalMaximum > 0.0 and (style.overflow_x == UI.OVERFLOW_SCROLL or style.overflow_x == UI.OVERFLOW_AUTO)
+    if not vertical and not horizontal then return end
+    local barSize:f32 = 15.0
+    local trackColor = UI.rgba(10,17,28,255)
+    local thumbColor = UI.rgba(112,151,210,255)
+    if vertical then
+        local verticalTrackHeight = element.height
+        if horizontal then verticalTrackHeight = verticalTrackHeight-barSize end
+        local verticalTrackX = element.x+element.width-barSize
+        submit_control_rect(renderer,verticalTrackX,element.y,barSize,verticalTrackHeight,trackColor,5.0,parentClipX,parentClipY,parentClipWidth,parentClipHeight)
+        local verticalViewport = element.content_height
+        if verticalViewport <= 0.0 then verticalViewport = element.height end
+        local verticalContent = verticalViewport + verticalMaximum
+        local verticalThumbHeight = verticalTrackHeight
+        if verticalContent > 0.0 then verticalThumbHeight = verticalTrackHeight*verticalViewport/verticalContent end
+        if verticalThumbHeight < 24.0 then verticalThumbHeight = 24.0 end
+        if verticalThumbHeight > verticalTrackHeight then verticalThumbHeight = verticalTrackHeight end
+        local verticalTravel = verticalTrackHeight-verticalThumbHeight
+        local verticalThumbY = element.y
+        if verticalTravel > 0.0 and verticalMaximum > 0.0 then verticalThumbY = element.y+UI.effective_scroll_y(element)/verticalMaximum*verticalTravel end
+        submit_control_rect(renderer,verticalTrackX+2.0,verticalThumbY+2.0,barSize-4.0,verticalThumbHeight-4.0,thumbColor,4.0,parentClipX,parentClipY,parentClipWidth,parentClipHeight)
+    end
+    if horizontal then
+        local horizontalTrackWidth = element.width
+        if vertical then horizontalTrackWidth = horizontalTrackWidth-barSize end
+        local horizontalTrackY = element.y+element.height-barSize
+        submit_control_rect(renderer,element.x,horizontalTrackY,horizontalTrackWidth,barSize,trackColor,5.0,parentClipX,parentClipY,parentClipWidth,parentClipHeight)
+        local horizontalViewport = element.content_width
+        if horizontalViewport <= 0.0 then horizontalViewport = element.width end
+        local horizontalContent = horizontalViewport + horizontalMaximum
+        local horizontalThumbWidth = horizontalTrackWidth
+        if horizontalContent > 0.0 then horizontalThumbWidth = horizontalTrackWidth*horizontalViewport/horizontalContent end
+        if horizontalThumbWidth < 24.0 then horizontalThumbWidth = 24.0 end
+        if horizontalThumbWidth > horizontalTrackWidth then horizontalThumbWidth = horizontalTrackWidth end
+        local horizontalTravel = horizontalTrackWidth-horizontalThumbWidth
+        local horizontalThumbX = element.x
+        if horizontalTravel > 0.0 and horizontalMaximum > 0.0 then horizontalThumbX = element.x+UI.effective_scroll_x(element)/horizontalMaximum*horizontalTravel end
+        submit_control_rect(renderer,horizontalThumbX+2.0,horizontalTrackY+2.0,horizontalThumbWidth-4.0,barSize-4.0,thumbColor,4.0,parentClipX,parentClipY,parentClipWidth,parentClipHeight)
+    end
+end
+
+fn submit_image(renderer:Renderer,texture:u32,x:f32,y:f32,width:f32,height:f32,color:u32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    if texture == 0 or width <= 0.0 or height <= 0.0 then return end
+
+    -- Preserve painter order while collapsing consecutive uses of the same
+    -- texture into one instanced draw. A texture atlas therefore stays one
+    -- draw even when every image has a different rectangle or tint.
+    local batchCount = renderer.image_textures.length()
+    if batchCount == 0 or renderer.image_textures[batchCount - 1] ~= texture then
+        renderer.image_textures.push(texture)
+        renderer.image_batch_starts.push(renderer.image_count)
+        renderer.image_batch_counts.push(1)
+    else
+        renderer.image_batch_counts[batchCount - 1] = renderer.image_batch_counts[batchCount - 1] + 1
+    end
+
+    renderer.image_data.push(x)
+    renderer.image_data.push(y)
+    renderer.image_data.push(width)
+    renderer.image_data.push(height)
+    renderer.image_data.push(color_red(color))
+    renderer.image_data.push(color_green(color))
+    renderer.image_data.push(color_blue(color))
+    renderer.image_data.push(color_alpha(color))
+    renderer.image_data.push(clipX)
+    renderer.image_data.push(clipY)
+    renderer.image_data.push(clipWidth)
+    renderer.image_data.push(clipHeight)
+    record_render_run(renderer,RENDER_RUN_IMAGE,renderer.image_count,1,texture)
+    renderer.image_count = renderer.image_count + 1
+end
+
+
+fn canvas_shape_stroke_width(style:UI.Style) -> f32
+    local width = style.border_top_width
+    if style.border_right_width > width then width = style.border_right_width end
+    if style.border_bottom_width > width then width = style.border_bottom_width end
+    if style.border_left_width > width then width = style.border_left_width end
+    if width <= 0.0 then width = 1.0 end
+    return width
+end
+
+fn canvas_shape_has_stroke(style:UI.Style) -> bool
+    if style.border_top_width > 0.0 and color_alpha(style.border_top_color) > 0.0 then return true end
+    if style.border_right_width > 0.0 and color_alpha(style.border_right_color) > 0.0 then return true end
+    if style.border_bottom_width > 0.0 and color_alpha(style.border_bottom_color) > 0.0 then return true end
+    if style.border_left_width > 0.0 and color_alpha(style.border_left_color) > 0.0 then return true end
+    return false
+end
+
+fn canvas_shape_stroke_color(style:UI.Style) -> u32
+    if color_alpha(style.border_top_color) > 0.0 then return style.border_top_color end
+    if color_alpha(style.border_right_color) > 0.0 then return style.border_right_color end
+    if color_alpha(style.border_bottom_color) > 0.0 then return style.border_bottom_color end
+    if color_alpha(style.border_left_color) > 0.0 then return style.border_left_color end
+    if color_alpha(style.background) > 0.0 then return style.background end
+    return style.text_color
+end
+
+fn submit_canvas_line_coords(renderer:Renderer,startX:f32,startY:f32,endX:f32,endY:f32,style:UI.Style,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    local lineStyle = UI.Style.new()
+    lineStyle.background = canvas_shape_stroke_color(style)
+    lineStyle.background_end = lineStyle.background
+    lineStyle.opacity = style.opacity
+    local lineWidth = canvas_shape_stroke_width(style)
+    local minX = minimum(startX,endX)
+    local minY = minimum(startY,endY)
+    local maxX = maximum(startX,endX)
+    local maxY = maximum(startY,endY)
+    local pad = lineWidth + 2.0
+    prepare_box_rect(renderer,minX-pad,minY-pad,maxX-minX+pad*2.0,maxY-minY+pad*2.0)
+    prepare_box_clip(renderer,clipX,clipY,clipWidth,clipHeight)
+    prepare_box_shape(renderer,2.0,lineWidth,startX,startY,endX,endY)
+    submit_prepared_box(renderer,lineStyle)
+    lineStyle.destroy()
+end
+
+fn submit_canvas_line_shape(renderer:Renderer,canvas:UI.Element,shape:UI.Element,style:UI.Style,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    submit_canvas_line_coords(
+        renderer,
+        canvas.content_x + shape.canvas_x + style.translate_x,
+        canvas.content_y + shape.canvas_y + style.translate_y,
+        canvas.content_x + shape.canvas_x2 + style.translate_x,
+        canvas.content_y + shape.canvas_y2 + style.translate_y,
+        style,
+        clipX,clipY,clipWidth,clipHeight
+    )
+end
+
+fn submit_canvas_polygon_fill(renderer:Renderer,canvas:UI.Element,shape:UI.Element,style:UI.Style,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    local count = shape.canvas_points.length()
+    if count < 3 or color_alpha(style.background) <= 0.0 then return end
+    local origin = shape.canvas_points[0]
+    local originX = canvas.content_x + origin.x + style.translate_x
+    local originY = canvas.content_y + origin.y + style.translate_y
+    local red = color_red(style.background)
+    local green = color_green(style.background)
+    local blue = color_blue(style.background)
+    local alpha = color_alpha(style.background) * style.opacity
+    local pointIndex = 2
+    while pointIndex < count do
+        local second = shape.canvas_points[pointIndex - 1]
+        local third = shape.canvas_points[pointIndex]
+        submit_surface_triangle(
+            renderer,
+            originX,originY,
+            canvas.content_x + second.x + style.translate_x,
+            canvas.content_y + second.y + style.translate_y,
+            canvas.content_x + third.x + style.translate_x,
+            canvas.content_y + third.y + style.translate_y,
+            red,green,blue,alpha,
+            clipX,clipY,clipWidth,clipHeight
+        )
+        pointIndex = pointIndex + 1
+    end
+end
+
+fn submit_canvas_polygon_stroke(renderer:Renderer,canvas:UI.Element,shape:UI.Element,style:UI.Style,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    local count = shape.canvas_points.length()
+    if count < 2 then return end
+    local lineWidth = canvas_shape_stroke_width(style)
+    local strokeColor = canvas_shape_stroke_color(style)
+    local pointIndex = 1
+    while pointIndex < count do
+        local first = shape.canvas_points[pointIndex - 1]
+        local second = shape.canvas_points[pointIndex]
+        local lineStyle = UI.Style.new()
+        lineStyle.background = strokeColor
+        lineStyle.border_top_width = lineWidth
+        lineStyle.opacity = style.opacity
+        submit_canvas_line_coords(
+            renderer,
+            canvas.content_x + first.x + style.translate_x,
+            canvas.content_y + first.y + style.translate_y,
+            canvas.content_x + second.x + style.translate_x,
+            canvas.content_y + second.y + style.translate_y,
+            lineStyle,
+            clipX,clipY,clipWidth,clipHeight
+        )
+        lineStyle.destroy()
+        pointIndex = pointIndex + 1
+    end
+    if shape.canvas_closed and count > 2 then
+        local closingFirst = shape.canvas_points[0]
+        local closingLast = shape.canvas_points[count - 1]
+        local closingStyle = UI.Style.new()
+        closingStyle.background = strokeColor
+        closingStyle.border_top_width = lineWidth
+        closingStyle.opacity = style.opacity
+        submit_canvas_line_coords(
+            renderer,
+            canvas.content_x + closingLast.x + style.translate_x,
+            canvas.content_y + closingLast.y + style.translate_y,
+            canvas.content_x + closingFirst.x + style.translate_x,
+            canvas.content_y + closingFirst.y + style.translate_y,
+            closingStyle,
+            clipX,clipY,clipWidth,clipHeight
+        )
+        closingStyle.destroy()
+    end
+end
+
+fn submit_canvas_shape(renderer:Renderer,canvas:UI.Element,shape:UI.Element,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    if shape == null or shape.hidden then return end
+    local style = shape.current_style()
+    if not style.visibility or style.display == UI.DISPLAY_NONE then return end
+    renderer.canvas_shape_count = renderer.canvas_shape_count + 1
+    local x = canvas.content_x + shape.canvas_x + style.translate_x
+    local y = canvas.content_y + shape.canvas_y + style.translate_y
+
+    if shape.canvas_shape == UI.CANVAS_SHAPE_RECT then
+        prepare_box_rect(renderer,x,y,shape.canvas_width,shape.canvas_height)
+        prepare_box_clip(renderer,clipX,clipY,clipWidth,clipHeight)
+        prepare_box_shape(renderer,0.0,0.0,0.0,0.0,0.0,0.0)
+        submit_prepared_box(renderer,style)
+    elseif shape.canvas_shape == UI.CANVAS_SHAPE_CIRCLE then
+        local radius = shape.canvas_radius
+        prepare_box_rect(renderer,x-radius,y-radius,radius*2.0,radius*2.0)
+        prepare_box_clip(renderer,clipX,clipY,clipWidth,clipHeight)
+        prepare_box_shape(renderer,1.0,0.0,0.0,0.0,0.0,0.0)
+        submit_prepared_box(renderer,style)
+    elseif shape.canvas_shape == UI.CANVAS_SHAPE_ELLIPSE then
+        local radiusX = shape.canvas_radius_x
+        local radiusY = shape.canvas_radius_y
+        if radiusX <= 0.0 then radiusX = shape.canvas_radius end
+        if radiusY <= 0.0 then radiusY = shape.canvas_radius end
+        prepare_box_rect(renderer,x-radiusX,y-radiusY,radiusX*2.0,radiusY*2.0)
+        prepare_box_clip(renderer,clipX,clipY,clipWidth,clipHeight)
+        prepare_box_shape(renderer,3.0,0.0,0.0,0.0,0.0,0.0)
+        submit_prepared_box(renderer,style)
+    elseif shape.canvas_shape == UI.CANVAS_SHAPE_LINE then
+        submit_canvas_line_shape(renderer,canvas,shape,style,clipX,clipY,clipWidth,clipHeight)
+    elseif shape.canvas_shape == UI.CANVAS_SHAPE_TRIANGLE then
+        local red = color_red(style.background)
+        local green = color_green(style.background)
+        local blue = color_blue(style.background)
+        local alpha = color_alpha(style.background) * style.opacity
+        submit_surface_triangle(renderer,x,y,canvas.content_x+shape.canvas_x2+style.translate_x,canvas.content_y+shape.canvas_y2+style.translate_y,canvas.content_x+shape.canvas_x3+style.translate_x,canvas.content_y+shape.canvas_y3+style.translate_y,red,green,blue,alpha,clipX,clipY,clipWidth,clipHeight)
+    elseif shape.canvas_shape == UI.CANVAS_SHAPE_POLYGON or shape.canvas_shape == UI.CANVAS_SHAPE_PATH then
+        submit_canvas_polygon_fill(renderer,canvas,shape,style,clipX,clipY,clipWidth,clipHeight)
+        if canvas_shape_has_stroke(style) then submit_canvas_polygon_stroke(renderer,canvas,shape,style,clipX,clipY,clipWidth,clipHeight) end
+    elseif shape.canvas_shape == UI.CANVAS_SHAPE_POLYLINE then
+        submit_canvas_polygon_stroke(renderer,canvas,shape,style,clipX,clipY,clipWidth,clipHeight)
+    elseif shape.canvas_shape == UI.CANVAS_SHAPE_TEXT then
+        submit_text_at(renderer,style,shape.text,x,y,clipX,clipY,clipWidth,clipHeight)
+    elseif shape.canvas_shape == UI.CANVAS_SHAPE_IMAGE then
+        submit_image(renderer,shape.texture,x,y,shape.canvas_width,shape.canvas_height,style.image_tint,clipX,clipY,clipWidth,clipHeight)
+    end
+end
+
+fn submit_declarative_canvas(renderer:Renderer,canvas:UI.Element,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    local shapeIndex = 0
+    while shapeIndex < canvas.children.length() do
+        local shape = canvas.children.at(shapeIndex)
+        if shape.kind == UI.ELEMENT_CANVAS_SHAPE then submit_canvas_shape(renderer,canvas,shape,clipX,clipY,clipWidth,clipHeight) end
+        shapeIndex = shapeIndex + 1
+    end
+end
+
+fn submit_canvas(renderer:Renderer,element:UI.Element,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    local context = element.canvas_context
+    if context == null then return end
+    local index = 0
+    while index < context.commands.length() do
+        local command = context.commands[index]
+        local x = element.content_x + command.x
+        local y = element.content_y + command.y
+        if command.kind == UI.CANVAS_FILL_RECT or command.kind == UI.CANVAS_ROUNDED_RECT or command.kind == UI.CANVAS_STROKE_RECT or command.kind == UI.CANVAS_STROKE_ROUNDED_RECT then
+            local rectStyle = UI.Style.new()
+            rectStyle.background = command.color
+            rectStyle.background_end = command.color
+            if command.kind == UI.CANVAS_STROKE_RECT or command.kind == UI.CANVAS_STROKE_ROUNDED_RECT then
+                rectStyle.background = 0
+                rectStyle.background_end = 0
+                rectStyle.border_top_width = command.line_width rectStyle.border_right_width = command.line_width rectStyle.border_bottom_width = command.line_width rectStyle.border_left_width = command.line_width
+                rectStyle.border_top_color = command.color rectStyle.border_right_color = command.color rectStyle.border_bottom_color = command.color rectStyle.border_left_color = command.color
+            end
+            rectStyle.radius_top_left = command.radius rectStyle.radius_top_right = command.radius rectStyle.radius_bottom_right = command.radius rectStyle.radius_bottom_left = command.radius
+            prepare_box_rect(renderer,x,y,command.width,command.height)
+            prepare_box_clip(renderer,clipX,clipY,clipWidth,clipHeight)
+            prepare_box_shape(renderer,0.0,0.0,0.0,0.0,0.0,0.0)
+            submit_prepared_box(renderer,rectStyle)
+            rectStyle.destroy()
+        elseif command.kind == UI.CANVAS_CIRCLE or command.kind == UI.CANVAS_STROKE_CIRCLE then
+            local circleStyle = UI.Style.new()
+            if command.kind == UI.CANVAS_CIRCLE then
+                circleStyle.background = command.color circleStyle.background_end = command.color
+            else
+                circleStyle.border_top_width = command.line_width circleStyle.border_right_width = command.line_width circleStyle.border_bottom_width = command.line_width circleStyle.border_left_width = command.line_width
+                circleStyle.border_top_color = command.color circleStyle.border_right_color = command.color circleStyle.border_bottom_color = command.color circleStyle.border_left_color = command.color
+            end
+            prepare_box_rect(renderer,x-command.radius,y-command.radius,command.radius*2.0,command.radius*2.0)
+            prepare_box_clip(renderer,clipX,clipY,clipWidth,clipHeight)
+            prepare_box_shape(renderer,1.0,0.0,0.0,0.0,0.0,0.0)
+            submit_prepared_box(renderer,circleStyle)
+            circleStyle.destroy()
+        elseif command.kind == UI.CANVAS_ELLIPSE or command.kind == UI.CANVAS_STROKE_ELLIPSE then
+            local ellipseStyle = UI.Style.new()
+            if command.kind == UI.CANVAS_ELLIPSE then
+                ellipseStyle.background = command.color ellipseStyle.background_end = command.color
+            else
+                ellipseStyle.border_top_width = command.line_width ellipseStyle.border_right_width = command.line_width ellipseStyle.border_bottom_width = command.line_width ellipseStyle.border_left_width = command.line_width
+                ellipseStyle.border_top_color = command.color ellipseStyle.border_right_color = command.color ellipseStyle.border_bottom_color = command.color ellipseStyle.border_left_color = command.color
+            end
+            prepare_box_rect(renderer,x-command.width,y-command.height,command.width*2.0,command.height*2.0)
+            prepare_box_clip(renderer,clipX,clipY,clipWidth,clipHeight)
+            prepare_box_shape(renderer,3.0,0.0,0.0,0.0,0.0,0.0)
+            submit_prepared_box(renderer,ellipseStyle)
+            ellipseStyle.destroy()
+        elseif command.kind == UI.CANVAS_LINE then
+            local lineStyle = UI.Style.new()
+            lineStyle.background = command.color lineStyle.background_end = command.color
+            local endX = element.content_x + command.x2
+            local endY = element.content_y + command.y2
+            local minX = minimum(x,endX)
+            local minY = minimum(y,endY)
+            local maxX = maximum(x,endX)
+            local maxY = maximum(y,endY)
+            local pad = command.line_width + 2.0
+            prepare_box_rect(renderer,minX-pad,minY-pad,maxX-minX+pad*2.0,maxY-minY+pad*2.0)
+            prepare_box_clip(renderer,clipX,clipY,clipWidth,clipHeight)
+            prepare_box_shape(renderer,2.0,command.line_width,x,y,endX,endY)
+            submit_prepared_box(renderer,lineStyle)
+            lineStyle.destroy()
+        elseif command.kind == UI.CANVAS_TRIANGLE then
+            local red = color_red(command.color)
+            local green = color_green(command.color)
+            local blue = color_blue(command.color)
+            local alpha = color_alpha(command.color)
+            submit_surface_triangle(renderer,x,y,element.content_x+command.x2,element.content_y+command.y2,element.content_x+command.x3,element.content_y+command.y3,red,green,blue,alpha,clipX,clipY,clipWidth,clipHeight)
+        elseif command.kind == UI.CANVAS_TEXT then
+            local textStyle = element.current_style()
+            local previousTextColor = textStyle.text_color
+            local previousFontSize = textStyle.font_size
+            textStyle.text_color = command.color
+            textStyle.font_size = command.font_size
+            submit_text_at(renderer,textStyle,command.text,x,y,clipX,clipY,clipWidth,clipHeight)
+            textStyle.text_color = previousTextColor
+            textStyle.font_size = previousFontSize
+        elseif command.kind == UI.CANVAS_IMAGE then
+            submit_image(renderer,command.texture,x,y,command.width,command.height,command.color,clipX,clipY,clipWidth,clipHeight)
+        end
+        index = index + 1
+    end
+end
+
+fn submit_tree(renderer:Renderer,element:UI.Element,parentClipX:f32,parentClipY:f32,parentClipWidth:f32,parentClipHeight:f32)
+    if element == null or element.hidden then return end
+    if element.kind == UI.ELEMENT_CANVAS_SHAPE then return end
+    local style = element.current_style()
+    if not style.visibility or style.display == UI.DISPLAY_NONE then return end
+    renderer.retained_count = renderer.retained_count + 1
+
+    -- Keep all overlap math inline. The O6 native emitter may keep scalar
+    -- floats in volatile XMM registers across ordinary helper calls, so the
+    -- previous maximum()/minimum() chain could overwrite an earlier bound and
+    -- classify the entire root as offscreen. Sequential branches avoid those
+    -- call boundaries and also avoid constructing a compound float boolean.
+    local parentRight = parentClipX + parentClipWidth
+    local parentBottom = parentClipY + parentClipHeight
+    local visibleLeft = parentClipX
+    local visibleTop = parentClipY
+    local visibleRight = parentRight
+    local visibleBottom = parentBottom
+    if element.x > visibleLeft then visibleLeft = element.x end
+    if element.y > visibleTop then visibleTop = element.y end
+    local elementRight = element.x + element.width
+    local elementBottom = element.y + element.height
+    if elementRight < visibleRight then visibleRight = elementRight end
+    if elementBottom < visibleBottom then visibleBottom = elementBottom end
+
+    local elementVisible = true
+    if visibleRight <= visibleLeft then elementVisible = false end
+    if visibleBottom <= visibleTop then elementVisible = false end
+
+    local clipsChildren = style.overflow_x ~= UI.OVERFLOW_VISIBLE or style.overflow_y ~= UI.OVERFLOW_VISIBLE
+    if not elementVisible then
+        renderer.culled_count = renderer.culled_count + 1
+        -- A clipped/offscreen subtree cannot contribute any pixels. Overflow-
+        -- visible containers may still have children extending into the viewport.
+        if clipsChildren or element.children.length() == 0 then return end
+        local overflowIndex = 0
+        while overflowIndex < element.children.length() do
+            submit_tree(renderer,element.children.at(overflowIndex),parentClipX,parentClipY,parentClipWidth,parentClipHeight)
+            overflowIndex = overflowIndex + 1
+        end
+        return
+    end
+
+    local clipX = parentClipX
+    local clipY = parentClipY
+    local clipRight = parentRight
+    local clipBottom = parentBottom
+    if clipsChildren then
+        clipX = visibleLeft
+        clipY = visibleTop
+        clipRight = visibleRight
+        clipBottom = visibleBottom
+    end
+    local clipWidth = clipRight - clipX
+    local clipHeight = clipBottom - clipY
+    if clipWidth < 0.0 then clipWidth = 0.0 end
+    if clipHeight < 0.0 then clipHeight = 0.0 end
+
+    renderer.element_count = renderer.element_count + 1
+    if renderer.diagnostics_enabled and renderer.diagnostics_frames == 0 and renderer.element_count <= 40 then
+        renderer.diagnostics.stage("LazyUI element")
+        if element.source_tag ~= null then renderer.diagnostics.line(element.source_tag) end
+        if element.id ~= null then renderer.diagnostics.line(element.id) end
+        if element.class_name ~= null then renderer.diagnostics.line(element.class_name) end
+        renderer.diagnostics.number("element.index=",renderer.element_count)
+        renderer.diagnostics.number("element.kind=",element.kind)
+        renderer.diagnostics.number("element.x=",element.x)
+        renderer.diagnostics.number("element.y=",element.y)
+        renderer.diagnostics.number("element.width=",element.width)
+        renderer.diagnostics.number("element.height=",element.height)
+        renderer.diagnostics.number("element.content_x=",element.content_x)
+        renderer.diagnostics.number("element.content_y=",element.content_y)
+        renderer.diagnostics.number("element.content_width=",element.content_width)
+        renderer.diagnostics.number("element.content_height=",element.content_height)
+        renderer.diagnostics.number("style.background=",style.background)
+        renderer.diagnostics.number("style.text_color=",style.text_color)
+        renderer.diagnostics.number("style.opacity_x1000=",style.opacity * 1000.0)
+        renderer.diagnostics.number("style.display=",style.display)
+        renderer.diagnostics.number("style.visibility=",style.visibility)
+        renderer.diagnostics.number("style.font_size_x100=",style.font_size * 100.0)
+        renderer.diagnostics.number("text.present=",element.text ~= null)
+        if element.text ~= null then renderer.diagnostics.number("text.length=",string.length(element.text)) end
+        renderer.diagnostics.number("children=",element.children.length())
+    end
+
+    submit_element_box(renderer,style,element,clipX,clipY,clipWidth,clipHeight)
+    if element.texture ~= 0 then submit_image(renderer,element.texture,element.content_x,element.content_y,element.content_width,element.content_height,style.image_tint,clipX,clipY,clipWidth,clipHeight) end
+    local controlHandledText = submit_control_visual(renderer,element,style,clipX,clipY,clipWidth,clipHeight)
+    if UI.is_select_control(element) and element.open then renderer.select_overlays.push(element) end
+    if element.text ~= null and not controlHandledText then submit_text_at(renderer,style,element.text,element.content_x,element.content_y,clipX,clipY,clipWidth,clipHeight) end
+    if element.kind == UI.ELEMENT_CANVAS then submit_declarative_canvas(renderer,element,clipX,clipY,clipWidth,clipHeight) end
+    if element.canvas_context ~= null then submit_canvas(renderer,element,clipX,clipY,clipWidth,clipHeight) end
+
+    if clipWidth <= 0.0 or clipHeight <= 0.0 then return end
+    local index = 0
+    while index < element.children.length() do
+        submit_tree(renderer,element.children.at(index),clipX,clipY,clipWidth,clipHeight)
+        index = index + 1
+    end
+    submit_scrollbars(renderer,element,style,parentClipX,parentClipY,parentClipWidth,parentClipHeight)
+end
+
+export fn create(fontPath:string,fontPixelHeight:i32) -> Renderer
+    local renderer = Renderer.new()
+    renderer.initialize(fontPath,fontPixelHeight)
+    return renderer
+end

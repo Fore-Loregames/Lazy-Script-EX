@@ -1,0 +1,11 @@
+fn main() -> i32
+    local values:table<f32> = {1.0,2.0,3.0,4.0}
+    local i = 0
+    local total:f32 = 0.0
+    while i < values.count() do
+        total = total + values[i]
+        i = i + 1
+    end
+    if total == 10.0 then return 0 end
+    return 8
+end

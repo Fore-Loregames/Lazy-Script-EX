@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/22_json.exe",
+  "subsystem": "console",
+  "optimization": 6
+}

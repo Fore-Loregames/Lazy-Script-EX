@@ -1,0 +1,35 @@
+use "@LazyScript/bindings/Text/Font.lsx" as Font
+
+fn main() -> i32
+    local glyphs:table<Font.Glyph> = {}
+    local glyph = Font.Glyph.new()
+    glyph.codepoint = 65
+    glyph.advance = 16.5
+    glyph.x0 = -3.0
+    glyph.y0 = -12.0
+    glyph.x1 = 15.0
+    glyph.y1 = 4.0
+    glyph.u0 = 0.1
+    glyph.v0 = 0.2
+    glyph.u1 = 0.3
+    glyph.v1 = 0.4
+
+    glyphs.push(glyph)
+    if glyphs.count() ~= 1 then return 1 end
+    if glyphs.byte_length() ~= Font.Glyph.size() then return 2 end
+    if glyphs.at(0) == glyph then return 3 end
+    glyph.destroy()
+
+    local stored = glyphs.at(0)
+    if stored == null then return 4 end
+    if stored.codepoint ~= 65 then return 5 end
+    if stored.advance < 16.49 or stored.advance > 16.51 then return 6 end
+    if stored.x0 ~= -3.0 or stored.y0 ~= -12.0 or stored.x1 ~= 15.0 or stored.y1 ~= 4.0 then return 7 end
+    if stored.u0 < 0.09 or stored.u0 > 0.11 then return 8 end
+    if stored.v0 < 0.19 or stored.v0 > 0.21 then return 9 end
+    if stored.u1 < 0.29 or stored.u1 > 0.31 then return 10 end
+    if stored.v1 < 0.39 or stored.v1 > 0.41 then return 11 end
+
+    glyphs.destroy()
+    return 0
+end

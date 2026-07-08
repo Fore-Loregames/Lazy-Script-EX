@@ -1,0 +1,420 @@
+use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
+use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
+use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
+
+const EditorProps = {
+    title = "LazyUI Instanced Stress Test"
+    status = "500 retained rows | viewport culled | cached instance buffers"
+    saves = 0
+    inspector_width = 390.0
+    accent = 0
+}
+
+lscss .editor = {
+    width = "100vw"
+    height = "100vh"
+    padding = "12px"
+    gap = "10px"
+    background = "linear-gradient(135deg, #0d111a, #151e2e)"
+    color = "#e8edf8"
+}
+
+lscss #topbar = {
+    height = "52px"
+    padding = "8px 12px"
+    gap = "10px"
+    flex_direction = "row"
+    align_items = "center"
+    background = "#1c2534"
+    border = "1px #36445e"
+    border_radius = "10px"
+    box_shadow = "0 5 18 0 rgba(0,0,0,0.35)"
+}
+
+lscss .workspace = {
+    flex_direction = "row"
+    gap = "10px"
+    flex_grow = 1
+}
+
+lscss .inspector = {
+    width = {props.inspector_width}
+    padding = "12px"
+    gap = "8px"
+    background = "#171f2c"
+    border = "1px #34425b"
+    border_radius = "12px"
+    box_shadow = "0 8 26 0 rgba(0,0,0,0.38)"
+    overflow = "hidden"
+}
+
+lscss .scene-card = {
+    flex_grow = 1
+    padding = "12px"
+    gap = "8px"
+    background = "#111722"
+    border = "1px #2f3b50"
+    border_radius = "12px"
+}
+
+lscss h2, h3, .heading = {
+    font_size = "22px"
+    color = "#f5f8ff"
+}
+
+lscss .panel-title-row = {
+    height = "28px"
+    flex_direction = "row"
+    align_items = "center"
+    gap = "8px"
+}
+
+lscss .row-count = {
+    padding = "4px 8px"
+    background = "#25324a"
+    border = "1px #415272"
+    border_radius = "8px"
+    color = "#9fc0ff"
+    font_size = "12px"
+}
+
+lscss .hierarchy-foldout = {
+    flex_grow = 1
+    gap = "4px"
+    padding = "4px"
+    background = "#101722"
+    border = "1px #2d3a50"
+    border_radius = "8px"
+    overflow = "hidden"
+}
+
+lscss .foldout-header = {
+    height = "30px"
+    padding = "6px 8px"
+    background = "linear-gradient(90deg, #25324a, #1d283a)"
+    border = "1px #425574"
+    border_radius = "6px"
+    color = "#dce8ff"
+    font_size = "14px"
+    cursor = "pointer"
+    hover = {
+        background = "linear-gradient(90deg, #304266, #253653)"
+    }
+}
+
+lscss .hierarchy-list = {
+    flex_grow = 1
+    gap = "1px"
+    padding = "3px 14px 3px 3px"
+    background = "#0d131d"
+    border = "1px #26344a"
+    border_radius = "5px"
+    overflow_x = "hidden"
+    overflow_y = "auto"
+}
+
+lscss .fps-counter = {
+    width = "92px"
+    padding = "6px 10px"
+    background = "#101827"
+    border = "1px #4b6594"
+    border_radius = "8px"
+    color = "#8dffbd"
+    font_size = "14px"
+}
+
+lscss .primary = {
+    padding = "9px 16px"
+    background = "linear-gradient(90deg, #3977ff, #6d4dff)"
+    border = "1px #86a9ff"
+    border_radius = "8px"
+    color = "#ffffff"
+    cursor = "pointer"
+    hover = {
+        background = "linear-gradient(90deg, #4f8bff, #805fff)"
+        box_shadow = "0 0 14 1 rgba(72,128,255,0.55)"
+    }
+    active = {
+        translate_y = "1px"
+        opacity = 0.88
+    }
+}
+
+lscss #save:focus = {
+    outline = "2px #9bb8ff"
+    outline_offset = "2px"
+}
+
+lscss #preview = {
+    width = "100%"
+    height = "420px"
+    background = "#0b1019"
+    border = "1px #35445f"
+    border_radius = "10px"
+    overflow = "hidden"
+}
+
+lscss .canvas-card = {
+    background = "linear-gradient(135deg, #26344c, #151e2e)"
+    border = "3px #6f94dc"
+    border_radius = "18px"
+    box_shadow = "0 10 28 0 rgba(0,0,0,0.35)"
+}
+
+lscss .blue-orb = {
+    background = {props.accent}
+    box_shadow = "0 0 22 2 rgba(68,128,255,0.42)"
+}
+
+lscss .purple-orb = {
+    background = "radial-gradient(#b58cff, #6d37e8)"
+    opacity = 0.88
+}
+
+lscss .green-shape = {
+    background = "#3ad29a"
+    opacity = 0.82
+}
+
+lscss .canvas-title = {
+    color = "#eef4ff"
+    font_size = "24px"
+}
+
+lscss #status = {
+    height = "28px"
+    padding = "5px 10px"
+    background = "#182130"
+    border_radius = "6px"
+    color = "#9db0cc"
+}
+
+lshtml editor_view(props) = {(
+    <ui id="editor-root" class="editor">
+        <toolbar id="topbar">
+            <h2 class="heading">{props.title}</h2>
+            <spacer />
+            <badge id="fps" class="fps-counter">FPS: 0</badge>
+            <button id="save" class="primary" onclick={save_clicked} context={props}>Save Layout</button>
+        </toolbar>
+        <row class="workspace">
+            <inspector class="inspector">
+                <row class="panel-title-row">
+                    <h3 class="heading">Hierarchy</h3>
+                    <spacer />
+                    <badge class="row-count">500 rows</badge>
+                </row>
+                <foldout id="stress-foldout" class="hierarchy-foldout">
+                    <button id="hierarchy-toggle" class="foldout-header" onclick={toggle_hierarchy} context={props}>v Scene Objects - retained stress list</button>
+                    <column id="hierarchy-rows" class="hierarchy-list" />
+                </foldout>
+            </inspector>
+            <scene-view class="scene-card">
+                <h3 class="heading">Scene</h3>
+                <canvas id="preview">
+                    <rect class="canvas-card" x=24 y=24 width=600 height=330 />
+                    <circle class="blue-orb" cx=170 cy=160 r=62 />
+                    <ellipse class="purple-orb" cx=360 cy=160 rx=100 ry=62 />
+                    <polygon class="green-shape" points="90,285 270,225 470,300" />
+                    <canvas-text class="canvas-title" x=55 y=70>LazyUI canvas text</canvas-text>
+                </canvas>
+            </scene-view>
+        </row>
+        <status-bar id="status">{props.status}</status-bar>
+    </ui>
+)}
+
+fn configure_hierarchy_row(row,index)
+    local style = row.style
+    style.width_unit = UI.UNIT_PERCENT
+    style.width = 100.0
+    style.height_unit = UI.UNIT_PX
+    style.height = 22.0
+    style.min_height_unit = UI.UNIT_PX
+    style.min_height = 22.0
+    style.max_height_unit = UI.UNIT_PX
+    style.max_height = 22.0
+    style.flex_shrink = 0.0
+    style.padding_top = 3.0
+    style.padding_right = 6.0
+    style.padding_bottom = 3.0
+    style.padding_left = 8.0 + (index % 4) * 10.0
+    style.font_size = 13.0
+    style.line_height = 16.0
+    style.text_color = UI.rgba(205,218,239,255)
+    style.radius_top_left = 3.0
+    style.radius_top_right = 3.0
+    style.radius_bottom_right = 3.0
+    style.radius_bottom_left = 3.0
+    if index % 2 == 0 then
+        style.background = UI.rgba(26,35,50,255)
+        style.background_end = UI.rgba(26,35,50,255)
+    else
+        style.background = UI.rgba(22,30,44,255)
+        style.background_end = UI.rgba(22,30,44,255)
+    end
+    style.border_bottom_width = 1.0
+    style.border_bottom_color = UI.rgba(44,57,78,255)
+end
+
+fn hierarchy_label(index)
+    local kind = index % 10
+    if kind == 0 then return "v Player Root" end
+    if kind == 1 then return "  Transform" end
+    if kind == 2 then return "  Skinned Mesh Renderer" end
+    if kind == 3 then return "  Animator" end
+    if kind == 4 then return "> Environment Group" end
+    if kind == 5 then return "  Directional Light" end
+    if kind == 6 then return "  Reflection Probe" end
+    if kind == 7 then return "> Gameplay Object" end
+    if kind == 8 then return "  LazyBehavior" end
+    return "  Instanced Hierarchy Row" 
+end
+
+fn populate_hierarchy(root,count)
+    local list = root.find_id(UI.hash("hierarchy-rows"))
+    if list == null then return 0 end
+    local index = 0
+    while index < count do
+        local row = UI.tree_item()
+        row.source_tag = "tree-item"
+        row.set_class("hierarchy-row")
+        configure_hierarchy_row(row,index)
+        -- Text is assigned before insertion, matching the corrected LSHTML
+        -- lowering order and avoiding any post-attach retained-state hazard.
+        row.text = hierarchy_label(index)
+        list.add(row)
+        index = index + 1
+    end
+    return count
+end
+
+fn main()
+    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return fail("GLFW initialization failed.") end
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
+    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
+
+    local window = GLFW.glfwCreateWindow(1280,760,"28 - LazyUI instanced hierarchy stress test",0,0)
+    if window == 0 then GLFW.glfwTerminate() GLFW.lsxUnloadLibraries() return fail("Window creation failed.") end
+    GLFW.glfwMakeContextCurrent(window)
+    -- Uncapped on purpose: this example is a renderer stress test and the FPS
+    -- counter should report actual throughput rather than the monitor refresh.
+    GLFW.glfwSwapInterval(0)
+    if GL.lsxLoadOpenGL() < 1 then return fail("OpenGL initialization failed.") end
+
+    local renderer = UIRenderer.create(null,64)
+    if not renderer.ready then return fail("LazyUI renderer initialization failed.") end
+    renderer.enable_diagnostics()
+
+    local props = EditorProps.new()
+    props.accent = UI.rgba(68,128,255,255)
+    local root = editor_view(props)
+    local populated = populate_hierarchy(root,500)
+    if populated ~= 500 then return fail("Hierarchy stress rows could not be created.") end
+
+    local fps_text = UI.counter_text("FPS: ",32)
+    if fps_text.value == null then return fail("FPS text buffer allocation failed.") end
+    fps_text.set_i64(0)
+    local fps_element = root.find_id(UI.hash("fps"))
+    if fps_element == null then return fail("FPS element was not created.") end
+    fps_element.text = fps_text.value
+    fps_element.mark_layout_dirty()
+
+    local document = UI.document(root)
+    local windowInput = UI.connect_window_input(window,document)
+    local framebuffer = GLFW.FramebufferSize.new()
+    local windowSize = GLFW.WindowSize.new()
+    local cursor = GLFW.CursorPosition.new()
+    local mouse_down = false
+    local frame_count = 0
+    local fps_start = GLFW.glfwGetTime()
+
+    while GLFW.glfwWindowShouldClose(window) == 0 do
+        framebuffer.refresh(window)
+        windowSize.refresh(window)
+        document.resize(framebuffer.width,framebuffer.height)
+        cursor.refresh(window)
+        document.pointer_move_scaled(cursor.x,cursor.y,windowSize.width,windowSize.height)
+
+        local pressed = GLFW.glfwGetMouseButton(window,GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS
+        if pressed and not mouse_down then document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT) end
+        if not pressed and mouse_down then document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT) end
+        mouse_down = pressed
+
+        frame_count = frame_count + 1
+        local now = GLFW.glfwGetTime()
+        if now - fps_start >= 1.0 then
+            fps_text.set_i64(frame_count)
+            fps_element.mark_visual_dirty()
+            frame_count = 0
+            fps_start = now
+        end
+
+        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
+        GL.glClearColor(0.025,0.03,0.045,1.0)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+
+        renderer.begin(framebuffer.width,framebuffer.height)
+        renderer.submit(root)
+        renderer.flush()
+
+        GLFW.glfwSwapBuffers(window)
+        GLFW.glfwPollEvents()
+    end
+
+    windowInput.destroy()
+    cursor.destroy()
+    windowSize.destroy()
+    framebuffer.destroy()
+    document.destroy()
+    fps_text.destroy()
+    props.destroy()
+    renderer.destroy()
+    GLFW.glfwDestroyWindow(window)
+    GLFW.glfwTerminate()
+    GLFW.lsxUnloadLibraries()
+    return 0
+end
+
+fn toggle_hierarchy(element,event,props)
+    local list = element.parent.find_id(UI.hash("hierarchy-rows"))
+    if list == null then return 0 end
+    list.hidden = not list.hidden
+    list.mark_layout_dirty()
+    if list.hidden then
+        element.text = "> Scene Objects - 500 rows hidden"
+        element.mark_layout_dirty()
+        props.status = "Hierarchy collapsed | retained rows remain allocated"
+    else
+        element.text = "v Scene Objects - retained stress list"
+        element.mark_layout_dirty()
+        props.status = "Hierarchy expanded | 500 retained | only viewport rows submitted"
+    end
+    local root = element.parent.parent.parent.parent
+    local status_element = root.find_id(UI.hash("status"))
+    if status_element ~= null then
+        status_element.text = props.status
+        status_element.mark_layout_dirty()
+    end
+    return 0
+end
+
+fn save_clicked(element,event,props)
+    props.saves = props.saves + 1
+    props.status = "Layout saved | stress tree retained"
+    local root = element.parent.parent
+    local status_element = root.find_id(UI.hash("status"))
+    if status_element ~= null then
+        status_element.text = props.status
+        status_element.mark_layout_dirty()
+    end
+    return 0
+end
+
+fn fail(message)
+    Win32.MessageBoxA(0,message,"LazyUI",Win32.MB_OK+Win32.MB_ICONERROR)
+    return 1
+end

@@ -1,0 +1,405 @@
+-- LazyScriptEX native Windows threading and synchronization.
+-- thread.start() compiles LSX function labels directly into CreateThread entry pointers.
+
+export const WAIT_OBJECT_0 = 0
+export const WAIT_ABANDONED = 128
+export const WAIT_TIMEOUT = 258
+export const WAIT_FAILED = 4294967295
+export const INFINITE = 4294967295
+
+export const THREAD_PRIORITY_IDLE = -15
+export const THREAD_PRIORITY_LOWEST = -2
+export const THREAD_PRIORITY_BELOW_NORMAL = -1
+export const THREAD_PRIORITY_NORMAL = 0
+export const THREAD_PRIORITY_ABOVE_NORMAL = 1
+export const THREAD_PRIORITY_HIGHEST = 2
+export const THREAD_PRIORITY_TIME_CRITICAL = 15
+
+extern "KERNEL32.dll" fn CreateMutexA(attributes:ptr, initialOwner:i32, name:string) -> handle
+extern "KERNEL32.dll" fn ReleaseMutex(mutex:handle) -> i32
+extern "KERNEL32.dll" fn CreateSemaphoreA(attributes:ptr, initialCount:i32, maximumCount:i32, name:string) -> handle
+extern "KERNEL32.dll" fn ReleaseSemaphore(semaphore:handle, releaseCount:i32, previousCount:ptr) -> i32
+extern "KERNEL32.dll" fn CreateEventA(attributes:ptr, manualReset:i32, initialState:i32, name:string) -> handle
+extern "KERNEL32.dll" fn SetEvent(event:handle) -> i32
+extern "KERNEL32.dll" fn ResetEvent(event:handle) -> i32
+extern "KERNEL32.dll" fn SetThreadAffinityMask(thread:handle, affinityMask:u64) -> u64
+extern "KERNEL32.dll" fn GetCurrentProcessorNumber() -> u32
+
+extern "KERNEL32.dll" fn InitializeCriticalSectionEx(section:ptr, spinCount:u32, flags:u32) -> i32
+extern "KERNEL32.dll" fn EnterCriticalSection(section:ptr) -> void
+extern "KERNEL32.dll" fn TryEnterCriticalSection(section:ptr) -> i32
+extern "KERNEL32.dll" fn LeaveCriticalSection(section:ptr) -> void
+extern "KERNEL32.dll" fn DeleteCriticalSection(section:ptr) -> void
+
+extern "KERNEL32.dll" fn AcquireSRWLockExclusive(lock:ptr) -> void
+extern "KERNEL32.dll" fn TryAcquireSRWLockExclusive(lock:ptr) -> i32
+extern "KERNEL32.dll" fn ReleaseSRWLockExclusive(lock:ptr) -> void
+extern "KERNEL32.dll" fn AcquireSRWLockShared(lock:ptr) -> void
+extern "KERNEL32.dll" fn TryAcquireSRWLockShared(lock:ptr) -> i32
+extern "KERNEL32.dll" fn ReleaseSRWLockShared(lock:ptr) -> void
+extern "KERNEL32.dll" fn SleepConditionVariableSRW(condition:ptr, lock:ptr, milliseconds:u32, flags:u32) -> i32
+extern "KERNEL32.dll" fn SleepConditionVariableCS(condition:ptr, section:ptr, milliseconds:u32) -> i32
+extern "KERNEL32.dll" fn WakeConditionVariable(condition:ptr) -> void
+extern "KERNEL32.dll" fn WakeAllConditionVariable(condition:ptr) -> void
+
+extern "KERNEL32.dll" fn TlsAlloc() -> u32
+extern "KERNEL32.dll" fn TlsFree(index:u32) -> i32
+extern "KERNEL32.dll" fn TlsSetValue(index:u32, value:ptr) -> i32
+extern "KERNEL32.dll" fn TlsGetValue(index:u32) -> ptr
+
+export const Thread = {
+    handle:handle = 0,
+
+    start = fn(entry:fnptr, context:ptr)
+        local value = Thread.new()
+        value.handle = thread.start(entry,context)
+        return value
+    end,
+
+    start_with_stack = fn(entry:fnptr, context:ptr, stackBytes:i64)
+        local value = Thread.new()
+        value.handle = thread.start_with_stack(entry,context,stackBytes)
+        return value
+    end,
+
+    valid = fn()
+        return self.handle ~= 0
+    end,
+
+    join = fn()
+        if self.handle == 0 then return false end
+        return thread.join(self.handle)
+    end,
+
+    wait = fn(milliseconds:i64)
+        if self.handle == 0 then return WAIT_FAILED end
+        return thread.wait(self.handle,milliseconds)
+    end,
+
+    is_finished = fn()
+        if self.handle == 0 then return true end
+        return thread.is_finished(self.handle)
+    end,
+
+    exit_code = fn()
+        if self.handle == 0 then return -1 end
+        return thread.exit_code(self.handle)
+    end,
+
+    id = fn()
+        if self.handle == 0 then return 0 end
+        return thread.id(self.handle)
+    end,
+
+    set_priority = fn(priority:i32)
+        if self.handle == 0 then return false end
+        return thread.set_priority(self.handle,priority)
+    end,
+
+    set_affinity = fn(mask:u64)
+        if self.handle == 0 or mask == 0 then return false end
+        return SetThreadAffinityMask(self.handle,mask) ~= 0
+    end,
+
+    join_and_close = fn()
+        if not self.join() then return false end
+        return self.close()
+    end,
+
+    close = fn()
+        if self.handle == 0 then return true end
+        local closed = thread.close(self.handle)
+        if closed then self.handle = 0 end
+        return closed
+    end
+}
+
+export const Mutex = {
+    handle:handle = 0,
+
+    create = fn(initialOwner:bool)
+        local value = Mutex.new()
+        value.handle = CreateMutexA(null,initialOwner,null)
+        return value
+    end,
+
+    lock = fn()
+        if self.handle == 0 then return false end
+        local result = thread.wait(self.handle,INFINITE)
+        return result == WAIT_OBJECT_0 or result == WAIT_ABANDONED
+    end,
+
+    try_lock = fn()
+        if self.handle == 0 then return false end
+        local result = thread.wait(self.handle,0)
+        return result == WAIT_OBJECT_0 or result == WAIT_ABANDONED
+    end,
+
+    unlock = fn()
+        if self.handle == 0 then return false end
+        return ReleaseMutex(self.handle) ~= 0
+    end,
+
+    close = fn()
+        if self.handle == 0 then return true end
+        local closed = thread.close(self.handle)
+        if closed then self.handle = 0 end
+        return closed
+    end
+}
+
+export const Semaphore = {
+    handle:handle = 0,
+
+    create = fn(initialCount:i32, maximumCount:i32)
+        local value = Semaphore.new()
+        value.handle = CreateSemaphoreA(null,initialCount,maximumCount,null)
+        return value
+    end,
+
+    wait = fn(milliseconds:i64)
+        if self.handle == 0 then return WAIT_FAILED end
+        return thread.wait(self.handle,milliseconds)
+    end,
+
+    acquire = fn()
+        return self.wait(INFINITE) == WAIT_OBJECT_0
+    end,
+
+    try_acquire = fn()
+        return self.wait(0) == WAIT_OBJECT_0
+    end,
+
+    release = fn(count:i32)
+        if self.handle == 0 then return false end
+        return ReleaseSemaphore(self.handle,count,null) ~= 0
+    end,
+
+    close = fn()
+        if self.handle == 0 then return true end
+        local closed = thread.close(self.handle)
+        if closed then self.handle = 0 end
+        return closed
+    end
+}
+
+export const Event = {
+    handle:handle = 0,
+
+    create = fn(manualReset:bool, initialState:bool)
+        local value = Event.new()
+        value.handle = CreateEventA(null,manualReset,initialState,null)
+        return value
+    end,
+
+    set = fn()
+        if self.handle == 0 then return false end
+        return SetEvent(self.handle) ~= 0
+    end,
+
+    reset = fn()
+        if self.handle == 0 then return false end
+        return ResetEvent(self.handle) ~= 0
+    end,
+
+    wait = fn(milliseconds:i64)
+        if self.handle == 0 then return WAIT_FAILED end
+        return thread.wait(self.handle,milliseconds)
+    end,
+
+    close = fn()
+        if self.handle == 0 then return true end
+        local closed = thread.close(self.handle)
+        if closed then self.handle = 0 end
+        return closed
+    end
+}
+
+-- Fast in-process lock. The opaque Windows structure remains inside this object.
+export const CriticalSection = {
+    storage = {},
+    initialized:bool = false,
+
+    create = fn(spinCount:u32)
+        local value = CriticalSection.new()
+        value.storage = {}
+        value.storage.resize(64)
+        value.initialized = InitializeCriticalSectionEx(value.storage,spinCount,0) ~= 0
+        return value
+    end,
+
+    lock = fn()
+        if self.initialized then EnterCriticalSection(self.storage) end
+    end,
+
+    try_lock = fn()
+        if not self.initialized then return false end
+        return TryEnterCriticalSection(self.storage) ~= 0
+    end,
+
+    unlock = fn()
+        if self.initialized then LeaveCriticalSection(self.storage) end
+    end,
+
+    close = fn()
+        if self.initialized then DeleteCriticalSection(self.storage) self.initialized = false end
+        if self.storage ~= 0 then self.storage.destroy() self.storage = null end
+    end
+}
+
+-- Eight-byte Windows SRW lock: cheap exclusive/shared synchronization for game systems.
+export const RWLock = {
+    state:u64 = 0,
+
+    lock = fn()
+        AcquireSRWLockExclusive(self)
+    end,
+
+    try_lock = fn()
+        return TryAcquireSRWLockExclusive(self) ~= 0
+    end,
+
+    unlock = fn()
+        ReleaseSRWLockExclusive(self)
+    end,
+
+    lock_shared = fn()
+        AcquireSRWLockShared(self)
+    end,
+
+    try_lock_shared = fn()
+        return TryAcquireSRWLockShared(self) ~= 0
+    end,
+
+    unlock_shared = fn()
+        ReleaseSRWLockShared(self)
+    end
+}
+
+-- Native Windows condition variable. Pair it with RWLock or CriticalSection.
+export const ConditionVariable = {
+    state:u64 = 0,
+
+    wait = fn(lock:RWLock, milliseconds:i64)
+        return SleepConditionVariableSRW(self,lock,milliseconds,0) ~= 0
+    end,
+
+    wait_shared = fn(lock:RWLock, milliseconds:i64)
+        return SleepConditionVariableSRW(self,lock,milliseconds,1) ~= 0
+    end,
+
+    wait_critical = fn(lock:CriticalSection, milliseconds:i64)
+        if not lock.initialized then return false end
+        return SleepConditionVariableCS(self,lock.storage,milliseconds) ~= 0
+    end,
+
+    wake_one = fn()
+        WakeConditionVariable(self)
+    end,
+
+    wake_all = fn()
+        WakeAllConditionVariable(self)
+    end
+}
+
+export const AtomicI32 = {
+    value:i32 = 0,
+
+    load = fn()
+        return atomic.i32_load(self)
+    end,
+
+    store = fn(value:i32)
+        atomic.i32_store(self,value)
+    end,
+
+    exchange = fn(value:i32)
+        return atomic.i32_exchange(self,value)
+    end,
+
+    add = fn(value:i32)
+        return atomic.i32_add(self,value)
+    end,
+
+    increment = fn()
+        return atomic.i32_increment(self)
+    end,
+
+    decrement = fn()
+        return atomic.i32_decrement(self)
+    end,
+
+    compare_exchange = fn(exchange:i32, comparand:i32)
+        return atomic.i32_compare_exchange(self,exchange,comparand)
+    end
+}
+
+export const AtomicI64 = {
+    value:i64 = 0,
+
+    load = fn()
+        return atomic.i64_load(self)
+    end,
+
+    store = fn(value:i64)
+        atomic.i64_store(self,value)
+    end,
+
+    exchange = fn(value:i64)
+        return atomic.i64_exchange(self,value)
+    end,
+
+    add = fn(value:i64)
+        return atomic.i64_add(self,value)
+    end,
+
+    increment = fn()
+        return atomic.i64_increment(self)
+    end,
+
+    decrement = fn()
+        return atomic.i64_decrement(self)
+    end,
+
+    compare_exchange = fn(exchange:i64, comparand:i64)
+        return atomic.i64_compare_exchange(self,exchange,comparand)
+    end
+}
+
+export const ThreadLocal = {
+    index:u32 = 4294967295,
+
+    create = fn()
+        local value = ThreadLocal.new()
+        value.index = TlsAlloc()
+        return value
+    end,
+
+    valid = fn()
+        return self.index ~= 4294967295
+    end,
+
+    set = fn(value:ptr)
+        if not self.valid() then return false end
+        return TlsSetValue(self.index,value) ~= 0
+    end,
+
+    get = fn()
+        if not self.valid() then return null end
+        return TlsGetValue(self.index)
+    end,
+
+    close = fn()
+        if not self.valid() then return true end
+        local released = TlsFree(self.index) ~= 0
+        if released then self.index = 4294967295 end
+        return released
+    end
+}
+
+export fn current_id() return thread.current_id() end
+export fn current_handle() return thread.current_handle() end
+export fn yield() return thread.yield() end
+export fn cpu_count() return thread.cpu_count() end
+export fn current_processor() return GetCurrentProcessorNumber() end
+export fn exit(code:u32) thread.exit(code) end

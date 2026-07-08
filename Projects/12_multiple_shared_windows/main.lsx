@@ -1,0 +1,48 @@
+use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
+use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+
+fn fail(message)
+    Win32.MessageBoxA(0, message, "LazyScriptEX Native GameKit", Win32.MB_OK + Win32.MB_ICONERROR)
+    return 1
+end
+
+fn main()
+    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return fail("GLFW failed.") end
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
+    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
+    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
+    local first = GLFW.glfwCreateWindow(640,480,"12A - First GLFW window",0,0)
+    if first == 0 then return fail("First window failed.") end
+    GLFW.glfwMakeContextCurrent(first)
+    if GL.lsxLoadOpenGL() < 1 then return fail("OpenGL loading failed.") end
+    local second = GLFW.glfwCreateWindow(640,480,"12B - Shared context",0,first)
+    if second == 0 then GLFW.glfwDestroyWindow(first) GLFW.glfwTerminate() return fail("Shared window failed.") end
+
+    local first_size = GLFW.FramebufferSize.new()
+    local second_size = GLFW.FramebufferSize.new()
+    while GLFW.glfwWindowShouldClose(first) == 0 and GLFW.glfwWindowShouldClose(second) == 0 do
+        GLFW.glfwMakeContextCurrent(first)
+        first_size.refresh(first)
+        GL.glViewport(0,0,first_size.width,first_size.height)
+        GL.glClearColor(0.35,0.06,0.09,1)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        GLFW.glfwSwapBuffers(first)
+
+        GLFW.glfwMakeContextCurrent(second)
+        second_size.refresh(second)
+        GL.glViewport(0,0,second_size.width,second_size.height)
+        GL.glClearColor(0.04,0.12,0.38,1)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        GLFW.glfwSwapBuffers(second)
+        GLFW.glfwPollEvents()
+    end
+
+    second_size.destroy()
+    first_size.destroy()
+    GLFW.glfwDestroyWindow(second)
+    GLFW.glfwDestroyWindow(first)
+    GLFW.glfwTerminate()
+    GLFW.lsxUnloadLibraries()
+    return 0
+end

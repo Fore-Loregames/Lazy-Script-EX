@@ -1,0 +1,156 @@
+-- Internal C ABI for the GLM 1.0.2 native bridge.
+-- Engine code should import GLM.lsx instead of this file.
+
+export extern "LSXMath.dll" fn _lsxGLMReady() -> i32
+export extern "LSXMath.dll" fn _lsxGLMVersionMajor() -> i32
+export extern "LSXMath.dll" fn _lsxGLMVersionMinor() -> i32
+export extern "LSXMath.dll" fn _lsxGLMVersionPatch() -> i32
+
+export extern "LSXMath.dll" fn _lsxGLMPi() -> f32
+export extern "LSXMath.dll" fn _lsxGLMTwoPi() -> f32
+export extern "LSXMath.dll" fn _lsxGLMHalfPi() -> f32
+export extern "LSXMath.dll" fn _lsxGLMEpsilon() -> f32
+export extern "LSXMath.dll" fn _lsxGLMRadians(value:f32) -> f32
+export extern "LSXMath.dll" fn _lsxGLMDegrees(value:f32) -> f32
+export extern "LSXMath.dll" fn _lsxGLMClamp(value:f32, minimum:f32, maximum:f32) -> f32
+export extern "LSXMath.dll" fn _lsxGLMMix(a:f32, b:f32, amount:f32) -> f32
+export extern "LSXMath.dll" fn _lsxGLMStep(edge:f32, value:f32) -> f32
+export extern "LSXMath.dll" fn _lsxGLMSmoothstep(edge0:f32, edge1:f32, value:f32) -> f32
+export extern "LSXMath.dll" fn _lsxGLMFract(value:f32) -> f32
+export extern "LSXMath.dll" fn _lsxGLMMod(value:f32, divisor:f32) -> f32
+export extern "LSXMath.dll" fn _lsxGLMSign(value:f32) -> f32
+export extern "LSXMath.dll" fn _lsxGLMInverseSqrt(value:f32) -> f32
+
+export extern "LSXMath.dll" fn _lsxGLMVec2Dot(a:ptr, b:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMVec2Length(a:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMVec2Distance(a:ptr, b:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMVec2Normalize(a:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMVec2Reflect(incident:ptr, normal:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMVec2Refract(incident:ptr, normal:ptr, eta:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMVec2Faceforward(normal:ptr, incident:ptr, reference:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMVec2Angle(a:ptr, b:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMVec2Rotate(a:ptr, angle:f32, output:ptr) -> void
+
+export extern "LSXMath.dll" fn _lsxGLMVec3Dot(a:ptr, b:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMVec3Length(a:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMVec3Distance(a:ptr, b:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMVec3Cross(a:ptr, b:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMVec3Normalize(a:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMVec3Reflect(incident:ptr, normal:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMVec3Refract(incident:ptr, normal:ptr, eta:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMVec3Faceforward(normal:ptr, incident:ptr, reference:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMVec3Angle(a:ptr, b:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMVec3Rotate(a:ptr, angle:f32, axis:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMVec3Orthonormalize(a:ptr, reference:ptr, output:ptr) -> void
+
+export extern "LSXMath.dll" fn _lsxGLMVec4Dot(a:ptr, b:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMVec4Length(a:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMVec4Distance(a:ptr, b:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMVec4Normalize(a:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMVec4Reflect(incident:ptr, normal:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMVec4Refract(incident:ptr, normal:ptr, eta:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMVec4Faceforward(normal:ptr, incident:ptr, reference:ptr, output:ptr) -> void
+
+export extern "LSXMath.dll" fn _lsxGLMMat2Identity(output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat2Zero(output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat2Add(a:ptr, b:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat2Sub(a:ptr, b:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat2Mul(a:ptr, b:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat2MulScalar(a:ptr, scalar:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat2Transpose(a:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat2Inverse(a:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat2Determinant(a:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMMat2Transform(a:ptr, vector:ptr, output:ptr) -> void
+
+export extern "LSXMath.dll" fn _lsxGLMMat3Identity(output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat3Zero(output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat3Add(a:ptr, b:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat3Sub(a:ptr, b:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat3Mul(a:ptr, b:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat3MulScalar(a:ptr, scalar:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat3Transpose(a:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat3Inverse(a:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat3Determinant(a:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMMat3Transform(a:ptr, vector:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat3FromMat4(a:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat3NormalFromMat4(a:ptr, output:ptr) -> void
+
+export extern "LSXMath.dll" fn _lsxGLMMat4Identity(output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4Zero(output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4Add(a:ptr, b:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4Sub(a:ptr, b:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4Mul(a:ptr, b:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4MulScalar(a:ptr, scalar:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4Transpose(a:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4Inverse(a:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4AffineInverse(a:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4Determinant(a:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMMat4TransformVec4(a:ptr, vector:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4TransformPoint(a:ptr, vector:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4TransformDirection(a:ptr, vector:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4FromMat3(a:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4Translate(a:ptr, vector:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4Rotate(a:ptr, angle:f32, axis:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4Scale(a:ptr, vector:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4TRS(translation:ptr, rotation:ptr, scale:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4TRSInverse(translation:ptr, rotation:ptr, scale:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4OrthoRHNO(left:f32, right:f32, bottom:f32, top:f32, nearPlane:f32, farPlane:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4OrthoRHZO(left:f32, right:f32, bottom:f32, top:f32, nearPlane:f32, farPlane:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4OrthoLHNO(left:f32, right:f32, bottom:f32, top:f32, nearPlane:f32, farPlane:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4OrthoLHZO(left:f32, right:f32, bottom:f32, top:f32, nearPlane:f32, farPlane:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4PerspectiveRHNO(fovY:f32, aspect:f32, nearPlane:f32, farPlane:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4PerspectiveRHZO(fovY:f32, aspect:f32, nearPlane:f32, farPlane:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4PerspectiveLHNO(fovY:f32, aspect:f32, nearPlane:f32, farPlane:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4PerspectiveLHZO(fovY:f32, aspect:f32, nearPlane:f32, farPlane:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4InfinitePerspectiveRH(fovY:f32, aspect:f32, nearPlane:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4InfinitePerspectiveLH(fovY:f32, aspect:f32, nearPlane:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4LookAtRH(eye:ptr, center:ptr, up:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4LookAtLH(eye:ptr, center:ptr, up:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4ProjectNO(objectPoint:ptr, model:ptr, projection:ptr, viewport:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4ProjectZO(objectPoint:ptr, model:ptr, projection:ptr, viewport:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4UnProjectNO(windowPoint:ptr, model:ptr, projection:ptr, viewport:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4UnProjectZO(windowPoint:ptr, model:ptr, projection:ptr, viewport:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4PickMatrix(center:ptr, delta:ptr, viewport:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4Interpolate(a:ptr, b:ptr, amount:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMMat4Decompose(input:ptr, scale:ptr, rotation:ptr, translation:ptr, skew:ptr, perspective:ptr) -> i32
+
+export extern "LSXMath.dll" fn _lsxGLMQuatIdentity(output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatFromComponents(x:f32, y:f32, z:f32, w:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatAngleAxis(angle:f32, axis:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatFromEuler(eulerRadians:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatFromTwoVectors(fromDirection:ptr, toDirection:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatLookAtRH(direction:ptr, up:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatLookAtLH(direction:ptr, up:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatConjugate(value:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatInverse(value:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatNormalize(value:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatAdd(a:ptr, b:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatSub(a:ptr, b:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatMul(a:ptr, b:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatMulScalar(value:ptr, scalar:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatDot(a:ptr, b:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMQuatLength(value:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMQuatLerp(a:ptr, b:ptr, amount:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatMix(a:ptr, b:ptr, amount:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatSlerp(a:ptr, b:ptr, amount:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatRotateVec3(value:ptr, vector:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatRotateVec4(value:ptr, vector:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatToMat3(value:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatToMat4(value:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatFromMat3(value:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatFromMat4(value:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatEulerAngles(value:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMQuatPitch(value:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMQuatYaw(value:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMQuatRoll(value:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMQuatAngle(value:ptr) -> f32
+export extern "LSXMath.dll" fn _lsxGLMQuatAxis(value:ptr, output:ptr) -> void
+
+export extern "LSXMath.dll" fn _lsxGLMDualQuatIdentity(output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMDualQuatFromRotationTranslation(rotation:ptr, translation:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMDualQuatNormalize(value:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMDualQuatInverse(value:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMDualQuatMul(a:ptr, b:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMDualQuatLerp(a:ptr, b:ptr, amount:f32, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMDualQuatTransformPoint(value:ptr, point:ptr, output:ptr) -> void
+export extern "LSXMath.dll" fn _lsxGLMDualQuatToMat4(value:ptr, output:ptr) -> void

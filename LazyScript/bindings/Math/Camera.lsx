@@ -1,0 +1,125 @@
+use "GLM.lsx" as GLM
+
+-- Camera helper built entirely on the wrapped GLM API. It owns no native
+-- pointer and can be used by an engine without exposing the C++ layer.
+
+export const PERSPECTIVE = 0
+export const ORTHOGRAPHIC = 1
+
+export const Camera = {
+    position:GLM.Vec3 = null,
+    target:GLM.Vec3 = null,
+    up:GLM.Vec3 = null,
+    projection_mode:i32 = PERSPECTIVE,
+    handedness:i32 = GLM.RIGHT_HANDED,
+    depth_range:i32 = GLM.DEPTH_NEGATIVE_ONE_TO_ONE,
+    field_of_view:f32 = 1.0471975512,
+    aspect:f32 = 1.7777777778,
+    near_plane:f32 = 0.1,
+    far_plane:f32 = 1000.0,
+    ortho_height:f32 = 10.0,
+
+    set_position = fn(x:f32,y:f32,z:f32) self.position.set(x,y,z) end,
+    set_target = fn(x:f32,y:f32,z:f32) self.target.set(x,y,z) end,
+    set_up = fn(x:f32,y:f32,z:f32) self.up.set(x,y,z) end,
+    set_aspect_from_size = fn(width:i32,height:i32)
+        if height>0 then self.aspect=(1.0*width)/height end
+    end,
+    set_direction = fn(x:f32,y:f32,z:f32)
+        local direction=GLM.vec3(x,y,z)
+        local next=self.position.add(direction)
+        self.target.set(next.x,next.y,next.z)
+        direction.destroy() next.destroy()
+    end,
+    translate = fn(delta:GLM.Vec3)
+        local nextPosition=self.position.add(delta)
+        local nextTarget=self.target.add(delta)
+        self.position.set(nextPosition.x,nextPosition.y,nextPosition.z)
+        self.target.set(nextTarget.x,nextTarget.y,nextTarget.z)
+        nextPosition.destroy() nextTarget.destroy()
+    end,
+    set_perspective = fn(fovDegrees:f32,aspect:f32,nearPlane:f32,farPlane:f32)
+        self.projection_mode=PERSPECTIVE
+        self.field_of_view=GLM.radians(fovDegrees)
+        self.aspect=aspect self.near_plane=nearPlane self.far_plane=farPlane
+    end,
+    set_orthographic = fn(height:f32,aspect:f32,nearPlane:f32,farPlane:f32)
+        self.projection_mode=ORTHOGRAPHIC
+        self.ortho_height=height self.aspect=aspect self.near_plane=nearPlane self.far_plane=farPlane
+    end,
+    forward = fn() -> GLM.Vec3
+        local delta=self.target.sub(self.position)
+        local result=delta.normalized()
+        delta.destroy()
+        return result
+    end,
+    right = fn() -> GLM.Vec3
+        local f=self.forward()
+        local crossed=f.cross(self.up)
+        local result=crossed.normalized()
+        crossed.destroy()
+        if self.handedness==GLM.LEFT_HANDED then
+            result.destroy()
+            crossed=self.up.cross(f)
+            result=crossed.normalized()
+            crossed.destroy()
+        end
+        f.destroy()
+        return result
+    end,
+    view = fn() -> GLM.Mat4
+        if self.handedness==GLM.LEFT_HANDED then return GLM.look_at_lh(self.position,self.target,self.up) end
+        return GLM.look_at_rh(self.position,self.target,self.up)
+    end,
+    projection = fn() -> GLM.Mat4
+        if self.projection_mode==ORTHOGRAPHIC then
+            local halfHeight=self.ortho_height*0.5
+            local halfWidth=halfHeight*self.aspect
+            return GLM.ortho(-halfWidth,halfWidth,-halfHeight,halfHeight,self.near_plane,self.far_plane,self.handedness,self.depth_range)
+        end
+        return GLM.perspective(self.field_of_view,self.aspect,self.near_plane,self.far_plane,self.handedness,self.depth_range)
+    end,
+    view_projection = fn() -> GLM.Mat4
+        local view=self.view()
+        local projection=self.projection()
+        local result=projection.multiply(view)
+        view.destroy() projection.destroy()
+        return result
+    end,
+    world_to_screen = fn(point:GLM.Vec3,viewport:GLM.Vec4) -> GLM.Vec3
+        local view=self.view()
+        local projection=self.projection()
+        local result=GLM.project(point,view,projection,viewport,self.depth_range)
+        view.destroy() projection.destroy()
+        return result
+    end,
+    screen_to_world = fn(point:GLM.Vec3,viewport:GLM.Vec4) -> GLM.Vec3
+        local view=self.view()
+        local projection=self.projection()
+        local result=GLM.unproject(point,view,projection,viewport,self.depth_range)
+        view.destroy() projection.destroy()
+        return result
+    end,
+    orbit = fn(yawRadians:f32,pitchRadians:f32,distance:f32)
+        local euler=GLM.vec3(pitchRadians,yawRadians,0.0)
+        local rotation=GLM.quat_euler(euler)
+        local baseOffset=GLM.vec3(0.0,0.0,distance)
+        local offset=rotation.rotate(baseOffset)
+        local next=self.target.add(offset)
+        self.position.set(next.x,next.y,next.z)
+        euler.destroy() rotation.destroy() baseOffset.destroy() offset.destroy() next.destroy()
+    end,
+    destroy = fn()
+        if self.position ~= 0 then self.position.destroy() self.position=null end
+        if self.target ~= 0 then self.target.destroy() self.target=null end
+        if self.up ~= 0 then self.up.destroy() self.up=null end
+    end
+}
+
+export fn create() -> Camera
+    local result=Camera.new()
+    result.position=GLM.vec3(0.0,0.0,3.0)
+    result.target=GLM.vec3(0.0,0.0,0.0)
+    result.up=GLM.vec3(0.0,1.0,0.0)
+    return result
+end

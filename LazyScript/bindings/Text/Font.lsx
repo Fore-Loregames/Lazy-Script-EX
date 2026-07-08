@@ -1,0 +1,412 @@
+use "FreeType.lsx" as FreeType
+use "../OpenGL/OpenGL46.lsx" as GL
+use "../OpenGL/TextureUpload.lsx" as TextureUpload
+
+-- FreeType-backed SDF atlas convenience layer. FreeType itself generates each
+-- SDF glyph; this file only packs the returned glyph bitmaps into one texture
+-- and builds one batched vertex table.
+
+export const Glyph = {
+    codepoint:i32 = 0,
+    advance:f32 = 0,
+    x0:f32 = 0,
+    y0:f32 = 0,
+    x1:f32 = 0,
+    y1:f32 = 0,
+    u0:f32 = 0,
+    v0:f32 = 0,
+    u1:f32 = 0,
+    v1:f32 = 0
+}
+
+
+export const Atlas = {
+    pixels = {},
+    glyphs = {},
+    width:i32 = 0,
+    height:i32 = 0,
+    first_codepoint:i32 = 0,
+    glyph_count:i32 = 0,
+    line_height:f32 = 0,
+    error_message:string = null,
+
+    valid = fn() -> bool
+        return self.pixels ~= 0 and self.pixels.length() > 0 and self.glyphs ~= 0 and self.glyphs.length() == self.glyph_count and self.width > 0 and self.height > 0
+    end,
+
+    error = fn() -> string
+        if self.error_message ~= null then return self.error_message end
+        if self.valid() then return "No FreeType atlas error" end
+        return "FreeType SDF atlas generation failed"
+    end,
+
+    glyph = fn(codepoint:i32) -> Glyph
+        local empty = Glyph.new()
+        local index = codepoint - self.first_codepoint
+        if index < 0 or index >= self.glyph_count then return empty end
+        empty.destroy()
+        return self.glyphs[index]
+    end,
+
+    destroy = fn()
+        if self.pixels ~= 0 then self.pixels.destroy() self.pixels = null end
+        if self.glyphs ~= 0 then self.glyphs.destroy() self.glyphs = null end
+        self.width = 0
+        self.height = 0
+        self.first_codepoint = 0
+        self.glyph_count = 0
+        self.line_height = 0
+        self.error_message = null
+    end
+}
+
+export const TextMesh = {
+    vertices = {},
+    width:f32 = 0,
+    height:f32 = 0,
+
+    valid = fn() -> bool
+        return self.vertices ~= 0 and self.vertices.length() > 0
+    end,
+
+    destroy = fn()
+        if self.vertices ~= 0 then self.vertices.destroy() self.vertices = null end
+        self.width = 0
+        self.height = 0
+    end
+}
+
+
+export const TextInstances = {
+    quads = {},
+    width:f32 = 0,
+    height:f32 = 0,
+
+    valid = fn() -> bool
+        return self.quads ~= 0 and self.quads.length() > 0
+    end,
+
+    destroy = fn()
+        if self.quads ~= 0 then self.quads.destroy() self.quads = null end
+        self.width = 0
+        self.height = 0
+    end
+}
+
+export const Texture = {
+    id:u32 = 0,
+    ok:bool = false,
+    error_message:string = null,
+
+    valid = fn() -> bool
+        return self.ok and self.id ~= 0
+    end,
+
+    bind = fn(unit:i32)
+        GL.glActiveTexture(GL.GL_TEXTURE0 + unit)
+        GL.glBindTexture(GL.GL_TEXTURE_2D,self.id)
+    end,
+
+    error = fn() -> string
+        if self.error_message ~= null then return self.error_message end
+        if self.valid() then return "No SDF texture error" end
+        return "OpenGL SDF texture upload failed"
+    end,
+
+    destroy = fn()
+        if self.id ~= 0 then GL.deleteTexture(self.id) self.id = 0 end
+        self.ok = false
+        self.error_message = null
+    end
+}
+
+export fn ready() -> bool
+    return FreeType.ready()
+end
+
+export fn load(path:string, faceName:string, pixelHeight:i32) -> FreeType.Face
+    return FreeType.load(path,pixelHeight)
+end
+
+export fn load_file(path:string, faceName:string, pixelHeight:i32) -> FreeType.Face
+    return FreeType.load(path,pixelHeight)
+end
+
+export fn system(faceName:string, pixelHeight:i32) -> FreeType.Face
+    if faceName == "Arial" then return FreeType.load("C:/Windows/Fonts/arial.ttf",pixelHeight) end
+    if faceName == "Consolas" then return FreeType.load("C:/Windows/Fonts/consola.ttf",pixelHeight) end
+    return FreeType.load("C:/Windows/Fonts/segoeui.ttf",pixelHeight)
+end
+
+export fn create_ascii_atlas(face:FreeType.Face) -> Atlas
+    return create_atlas(face,32,95,10,10,16)
+end
+
+export fn create_atlas(face:FreeType.Face, firstCodepoint:i32, glyphCount:i32, columns:i32, rows:i32, padding:i32) -> Atlas
+    local result = Atlas.new()
+    if not face.valid() then result.error_message = face.error() return result end
+    if glyphCount <= 0 or columns <= 0 or rows <= 0 or columns * rows < glyphCount then
+        result.error_message = "Invalid SDF atlas grid"
+        return result
+    end
+
+    local cell = face.pixel_height + padding * 2
+    result.width = cell * columns
+    result.height = cell * rows
+    result.first_codepoint = firstCodepoint
+    result.glyph_count = glyphCount
+    result.line_height = face.line_height()
+    if not result.pixels.resize_bytes(result.width * result.height) then
+        result.error_message = "Could not allocate SDF atlas pixels"
+        return result
+    end
+
+    local index:i32 = 0
+    while index < glyphCount do
+        local codepoint = firstCodepoint + index
+        if not face.load_char(codepoint,FreeType.RENDER_SDF) then
+            result.error_message = face.error()
+            return result
+        end
+
+        local glyph = Glyph.new()
+        local bitmapWidth = face.bitmap_width()
+        local bitmapRows = face.bitmap_rows()
+        local column = index % columns
+        local row = index / columns
+        local destinationX = column * cell + (cell - bitmapWidth) / 2
+        local destinationY = row * cell + (cell - bitmapRows) / 2
+        if not face.copy_bitmap(result.pixels.byte_data(),result.width,result.height,destinationX,destinationY) then
+            result.error_message = "FreeType glyph did not fit in the SDF atlas"
+            return result
+        end
+
+        glyph.codepoint = codepoint
+        glyph.advance = face.advance_x()
+        glyph.x0 = face.bitmap_left()
+        glyph.y0 = 0 - face.bitmap_top()
+        glyph.x1 = glyph.x0 + bitmapWidth
+        glyph.y1 = glyph.y0 + bitmapRows
+        glyph.u0 = destinationX * 1.0 / result.width
+        glyph.v0 = destinationY * 1.0 / result.height
+        glyph.u1 = (destinationX + bitmapWidth) * 1.0 / result.width
+        glyph.v1 = (destinationY + bitmapRows) * 1.0 / result.height
+        result.glyphs.push(glyph)
+        glyph.destroy()
+        index = index + 1
+    end
+    return result
+end
+
+fn push_vertex(vertices, x:f32, y:f32, u:f32, v:f32)
+    vertices.push(x)
+    vertices.push(y)
+    vertices.push(u)
+    vertices.push(v)
+end
+
+fn push_quad(vertices, x0:f32, y0:f32, x1:f32, y1:f32, u0:f32, v0:f32, u1:f32, v1:f32)
+    push_vertex(vertices,x0,y0,u0,v0)
+    push_vertex(vertices,x1,y0,u1,v0)
+    push_vertex(vertices,x1,y1,u1,v1)
+    push_vertex(vertices,x0,y0,u0,v0)
+    push_vertex(vertices,x1,y1,u1,v1)
+    push_vertex(vertices,x0,y1,u0,v1)
+end
+
+export fn build_text(face:FreeType.Face, atlas:Atlas, text:string, x:f32, y:f32, scale:f32) -> TextMesh
+    local result = TextMesh.new()
+    if not face.valid() or not atlas.valid() or text == null or scale <= 0 then return result end
+    result.vertices.reserve(string.length(text) * 24)
+    local penX = x
+    local penY = y + face.ascender() * scale
+    local startX = x
+    local maximumX = x
+    local previous:i32 = 0
+    local index:i64 = 0
+    while index < string.length(text) do
+        local codepoint = string.byte_at(text,index)
+        if codepoint == 10 then
+            if penX > maximumX then maximumX = penX end
+            penX = startX
+            penY = penY + atlas.line_height * scale
+            previous = 0
+        elseif codepoint >= atlas.first_codepoint and codepoint < atlas.first_codepoint + atlas.glyph_count then
+            if previous ~= 0 then penX = penX + face.kerning(previous,codepoint) * scale end
+            local glyph = atlas.glyphs[codepoint - atlas.first_codepoint]
+            local x0 = penX + glyph.x0 * scale
+            local y0 = penY + glyph.y0 * scale
+            local x1 = penX + glyph.x1 * scale
+            local y1 = penY + glyph.y1 * scale
+            if glyph.x1 > glyph.x0 and glyph.y1 > glyph.y0 then
+                push_quad(result.vertices,x0,y0,x1,y1,glyph.u0,glyph.v0,glyph.u1,glyph.v1)
+            end
+            penX = penX + glyph.advance * scale
+            previous = codepoint
+        end
+        index = index + 1
+    end
+    if penX > maximumX then maximumX = penX end
+    result.width = maximumX - startX
+    result.height = penY - y + atlas.line_height * scale
+    return result
+end
+
+
+fn push_instance_quad(quads, x0:f32, y0:f32, x1:f32, y1:f32, u0:f32, v0:f32, u1:f32, v1:f32)
+    quads.push(x0)
+    quads.push(y0)
+    quads.push(x1 - x0)
+    quads.push(y1 - y0)
+    quads.push(u0)
+    quads.push(v0)
+    quads.push(u1)
+    quads.push(v1)
+end
+
+export fn build_text_instances(face:FreeType.Face, atlas:Atlas, text:string, x:f32, y:f32, scale:f32) -> TextInstances
+    local result = TextInstances.new()
+    if not face.valid() or not atlas.valid() or text == null or scale <= 0 then return result end
+    result.quads.reserve(string.length(text) * 8)
+    local penX = x
+    local penY = y + face.ascender() * scale
+    local startX = x
+    local maximumX = x
+    local previous:i32 = 0
+    local index:i64 = 0
+    while index < string.length(text) do
+        local codepoint = string.byte_at(text,index)
+        if codepoint == 10 then
+            if penX > maximumX then maximumX = penX end
+            penX = startX
+            penY = penY + atlas.line_height * scale
+            previous = 0
+        elseif codepoint >= atlas.first_codepoint and codepoint < atlas.first_codepoint + atlas.glyph_count then
+            if previous ~= 0 then penX = penX + face.kerning(previous,codepoint) * scale end
+            local glyph = atlas.glyphs[codepoint - atlas.first_codepoint]
+            local x0 = penX + glyph.x0 * scale
+            local y0 = penY + glyph.y0 * scale
+            local x1 = penX + glyph.x1 * scale
+            local y1 = penY + glyph.y1 * scale
+            if glyph.x1 > glyph.x0 and glyph.y1 > glyph.y0 then
+                push_instance_quad(result.quads,x0,y0,x1,y1,glyph.u0,glyph.v0,glyph.u1,glyph.v1)
+            end
+            penX = penX + glyph.advance * scale
+            previous = codepoint
+        end
+        index = index + 1
+    end
+    if penX > maximumX then maximumX = penX end
+    result.width = maximumX - startX
+    result.height = penY - y + atlas.line_height * scale
+    return result
+end
+
+export fn measure_text_range(face:FreeType.Face,atlas:Atlas,text:string,start:i64,finish:i64,scale:f32) -> f32
+    if not face.valid() or not atlas.valid() or text == null or scale <= 0.0 then return 0.0 end
+    local length = string.length(text)
+    if start < 0 then start = 0 end
+    if finish > length then finish = length end
+    if finish <= start then return 0.0 end
+    local width:f32 = 0.0
+    local maximumWidth:f32 = 0.0
+    local previous:i32 = 0
+    local index:i64 = start
+    while index < finish do
+        local codepoint = string.byte_at(text,index)
+        if codepoint == 10 then
+            if width > maximumWidth then maximumWidth = width end
+            width = 0.0
+            previous = 0
+        elseif codepoint >= atlas.first_codepoint and codepoint < atlas.first_codepoint + atlas.glyph_count then
+            if previous ~= 0 then width = width + face.kerning(previous,codepoint) * scale end
+            local glyphItem = atlas.glyphs[codepoint - atlas.first_codepoint]
+            width = width + glyphItem.advance * scale
+            previous = codepoint
+        end
+        index = index + 1
+    end
+    if width > maximumWidth then maximumWidth = width end
+    return maximumWidth
+end
+
+-- Append final colored/clipped glyph instance records directly into an
+-- existing renderer batch. This avoids allocating a TextInstances object and
+-- temporary quad table for every label on every frame.
+export fn append_text_instances(face:FreeType.Face,atlas:Atlas,text:string,x:f32,y:f32,scale:f32,output,red:f32,green:f32,blue:f32,alpha:f32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32) -> i64
+    if not face.valid() or not atlas.valid() or text == null or scale <= 0.0 then return 0 end
+    local penX = x
+    local penY = y + face.ascender() * scale
+    local startX = x
+    local previous:i32 = 0
+    local appended:i64 = 0
+    local length = string.length(text)
+    local index:i64 = 0
+    while index < length do
+        local codepoint = string.byte_at(text,index)
+        if codepoint == 10 then
+            penX = startX
+            penY = penY + atlas.line_height * scale
+            previous = 0
+        elseif codepoint >= atlas.first_codepoint and codepoint < atlas.first_codepoint + atlas.glyph_count then
+            if previous ~= 0 then penX = penX + face.kerning(previous,codepoint) * scale end
+            local glyphItem = atlas.glyphs[codepoint - atlas.first_codepoint]
+            local x0 = penX + glyphItem.x0 * scale
+            local y0 = penY + glyphItem.y0 * scale
+            local x1 = penX + glyphItem.x1 * scale
+            local y1 = penY + glyphItem.y1 * scale
+            if glyphItem.x1 > glyphItem.x0 and glyphItem.y1 > glyphItem.y0 then
+                -- The text shader consumes rect.xy as the glyph origin and
+                -- rect.zw as its size. Do not upload x1/y1 here: absolute end
+                -- coordinates make every later glyph wider/taller and cause the
+                -- overlapping, oversized text seen in the LazyUI stress test.
+                output.push(x0)
+                output.push(y0)
+                output.push(x1 - x0)
+                output.push(y1 - y0)
+                output.push(glyphItem.u0)
+                output.push(glyphItem.v0)
+                output.push(glyphItem.u1)
+                output.push(glyphItem.v1)
+                output.push(red)
+                output.push(green)
+                output.push(blue)
+                output.push(alpha)
+                output.push(clipX)
+                output.push(clipY)
+                output.push(clipWidth)
+                output.push(clipHeight)
+                appended = appended + 1
+            end
+            penX = penX + glyphItem.advance * scale
+            previous = codepoint
+        end
+        index = index + 1
+    end
+    return appended
+end
+
+
+export fn upload_atlas(atlas:Atlas) -> Texture
+    local result = Texture.new()
+    if not atlas.valid() then result.error_message = atlas.error() return result end
+    while GL.glGetError() ~= GL.GL_NO_ERROR do end
+    result.id = GL.createTexture()
+    if result.id == 0 then result.error_message = "OpenGL texture creation failed" return result end
+    GL.glBindTexture(GL.GL_TEXTURE_2D,result.id)
+    GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT,1)
+    GL.glTexParameteri(GL.GL_TEXTURE_2D,GL.GL_TEXTURE_WRAP_S,GL.GL_CLAMP_TO_EDGE)
+    GL.glTexParameteri(GL.GL_TEXTURE_2D,GL.GL_TEXTURE_WRAP_T,GL.GL_CLAMP_TO_EDGE)
+    GL.glTexParameteri(GL.GL_TEXTURE_2D,GL.GL_TEXTURE_MIN_FILTER,GL.GL_LINEAR)
+    GL.glTexParameteri(GL.GL_TEXTURE_2D,GL.GL_TEXTURE_MAG_FILTER,GL.GL_LINEAR)
+    local errorCode = TextureUpload.r8(atlas.width,atlas.height,atlas.pixels.byte_data())
+    GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT,4)
+    if errorCode ~= GL.GL_NO_ERROR then
+        GL.deleteTexture(result.id)
+        result.id = 0
+        result.error_message = TextureUpload.error_text(errorCode)
+        return result
+    end
+    result.ok = true
+    return result
+end

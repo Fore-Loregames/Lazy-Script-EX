@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/lazyui-editor-workspace.exe",
+  "subsystem": "console",
+  "optimization": 6
+}

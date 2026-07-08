@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/26_media_self_test.exe",
+  "subsystem": "console",
+  "optimization": 6
+}

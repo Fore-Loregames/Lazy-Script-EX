@@ -1,0 +1,929 @@
+use "../System/File.lsx" as File
+
+-- Compact native JSON DOM for engine configuration, save data, HTTP payloads,
+-- editor metadata, and asset manifests. Parsing and writing are implemented in
+-- LSX over packed objects and tables; no VM or managed JSON runtime exists.
+
+export const JSON_NULL = 0
+export const JSON_BOOL = 1
+export const JSON_INTEGER = 2
+export const JSON_NUMBER = 3
+export const JSON_STRING = 4
+export const JSON_ARRAY = 5
+export const JSON_OBJECT = 6
+
+export const ERROR_NONE = 0
+export const ERROR_UNEXPECTED_END = 1
+export const ERROR_UNEXPECTED_TOKEN = 2
+export const ERROR_EXPECTED_COLON = 3
+export const ERROR_EXPECTED_SEPARATOR = 4
+export const ERROR_INVALID_ESCAPE = 5
+export const ERROR_INVALID_UNICODE = 6
+export const ERROR_INVALID_NUMBER = 7
+export const ERROR_TRAILING_DATA = 8
+export const ERROR_FILE = 9
+export const ERROR_WRONG_TYPE = 10
+
+const Node = {
+    kind:i32 = JSON_NULL,
+    boolean:bool = false,
+    integer:i64 = 0,
+    number:f32 = 0.0,
+    string_offset:i64 = -1,
+    string_length:i64 = 0,
+    first:i64 = -1,
+    count:i64 = 0
+}
+
+const Member = {
+    key_offset:i64 = -1,
+    key_length:i64 = 0,
+    value:i64 = -1
+}
+
+export const Text = {
+    data = {},
+    bytes:i64 = 0,
+
+    value = fn() -> string
+        if self.data == 0 then return null end
+        return string.from_utf8(self.data.data())
+    end,
+
+    destroy = fn()
+        if self.data ~= 0 then self.data.destroy() self.data = null end
+        self.bytes = 0
+    end
+}
+
+export const Document = {
+    source = {},
+    source_bytes:i64 = 0,
+    strings = {},
+    nodes = {},
+    children = {},
+    members = {},
+    root:i64 = -1,
+    position:i64 = 0,
+    error:i32 = ERROR_NONE,
+    error_offset:i64 = -1,
+    file_error:u32 = 0,
+    valid:bool = false,
+    last_string_length:i64 = 0,
+
+    _fail = fn(code:i32)
+        if self.error == ERROR_NONE then
+            self.error = code
+            self.error_offset = self.position
+        end
+        return -1
+    end,
+
+    _peek = fn() -> u8
+        if self.position >= self.source_bytes then return 0 end
+        return self.source[self.position]
+    end,
+
+    _skip_space = fn()
+        local reading:bool = true
+        while reading and self.position < self.source_bytes do
+            local c = self.source[self.position]
+            if c == 32 or c == 9 or c == 10 or c == 13 then
+                self.position = self.position + 1
+            else
+                reading = false
+            end
+        end
+    end,
+
+    _new_node = fn(kind:i32)
+        local node = Node.new()
+        node.kind = kind
+        node.first = -1
+        node.count = 0
+        self.nodes.push(node)
+        node.destroy()
+        return self.nodes.length() - 1
+    end,
+
+    _append_child = fn(parent_index:i64, value_index:i64)
+        local parent = self.nodes[parent_index]
+        if parent.count == 0 then
+            parent.first = self.children.length()
+        elseif parent.first + parent.count ~= self.children.length() then
+            local new_first = self.children.length()
+            local copy_index:i64 = 0
+            while copy_index < parent.count do
+                self.children.push(self.children[parent.first + copy_index])
+                copy_index = copy_index + 1
+            end
+            parent.first = new_first
+        end
+        self.children.push(value_index)
+        parent.count = parent.count + 1
+    end,
+
+    _append_member_offset = fn(parent_index:i64, key_offset:i64, key_length:i64, value_index:i64)
+        local parent = self.nodes[parent_index]
+        if parent.count == 0 then
+            parent.first = self.members.length()
+        elseif parent.first + parent.count ~= self.members.length() then
+            local new_first = self.members.length()
+            local copy_index:i64 = 0
+            while copy_index < parent.count do
+                self.members.push(self.members[parent.first + copy_index])
+                copy_index = copy_index + 1
+            end
+            parent.first = new_first
+        end
+        local member = Member.new()
+        member.key_offset = key_offset
+        member.key_length = key_length
+        member.value = value_index
+        self.members.push(member)
+        member.destroy()
+        parent.count = parent.count + 1
+    end,
+
+    _append_utf8 = fn(codepoint:i64)
+        if codepoint <= 0x7F then
+            self.strings.push(codepoint)
+        elseif codepoint <= 0x7FF then
+            self.strings.push(0xC0 + codepoint / 64)
+            self.strings.push(0x80 + codepoint % 64)
+        elseif codepoint <= 0xFFFF then
+            self.strings.push(0xE0 + codepoint / 4096)
+            self.strings.push(0x80 + codepoint / 64 % 64)
+            self.strings.push(0x80 + codepoint % 64)
+        else
+            self.strings.push(0xF0 + codepoint / 262144)
+            self.strings.push(0x80 + codepoint / 4096 % 64)
+            self.strings.push(0x80 + codepoint / 64 % 64)
+            self.strings.push(0x80 + codepoint % 64)
+        end
+    end,
+
+    _hex = fn(c:u8)
+        if c >= 48 and c <= 57 then return c - 48 end
+        if c >= 65 and c <= 70 then return c - 55 end
+        if c >= 97 and c <= 102 then return c - 87 end
+        return -1
+    end,
+
+    _read_hex4 = fn()
+        if self.position + 4 > self.source_bytes then return self._fail(ERROR_UNEXPECTED_END) end
+        local value:i64 = 0
+        local index:i64 = 0
+        while index < 4 do
+            local digit = self._hex(self.source[self.position])
+            if digit < 0 then return self._fail(ERROR_INVALID_UNICODE) end
+            value = value * 16 + digit
+            self.position = self.position + 1
+            index = index + 1
+        end
+        return value
+    end,
+
+    _parse_string = fn()
+        if self._peek() ~= 34 then return self._fail(ERROR_UNEXPECTED_TOKEN) end
+        self.position = self.position + 1
+        local offset = self.strings.length()
+        local complete:bool = false
+        while not complete do
+            if self.position >= self.source_bytes then return self._fail(ERROR_UNEXPECTED_END) end
+            local c = self.source[self.position]
+            self.position = self.position + 1
+            if c == 34 then
+                complete = true
+            elseif c == 92 then
+                if self.position >= self.source_bytes then return self._fail(ERROR_UNEXPECTED_END) end
+                local escape = self.source[self.position]
+                self.position = self.position + 1
+                if escape == 34 or escape == 92 or escape == 47 then
+                    self.strings.push(escape)
+                elseif escape == 98 then
+                    self.strings.push(8)
+                elseif escape == 102 then
+                    self.strings.push(12)
+                elseif escape == 110 then
+                    self.strings.push(10)
+                elseif escape == 114 then
+                    self.strings.push(13)
+                elseif escape == 116 then
+                    self.strings.push(9)
+                elseif escape == 117 then
+                    local codepoint = self._read_hex4()
+                    if codepoint < 0 then return -1 end
+                    if codepoint >= 0xD800 and codepoint <= 0xDBFF then
+                        if self.position + 6 > self.source_bytes then return self._fail(ERROR_INVALID_UNICODE) end
+                        if self.source[self.position] ~= 92 or self.source[self.position + 1] ~= 117 then return self._fail(ERROR_INVALID_UNICODE) end
+                        self.position = self.position + 2
+                        local low = self._read_hex4()
+                        if low < 0xDC00 or low > 0xDFFF then return self._fail(ERROR_INVALID_UNICODE) end
+                        codepoint = 0x10000 + (codepoint - 0xD800) * 1024 + low - 0xDC00
+                    elseif codepoint >= 0xDC00 and codepoint <= 0xDFFF then
+                        return self._fail(ERROR_INVALID_UNICODE)
+                    end
+                    self._append_utf8(codepoint)
+                else
+                    return self._fail(ERROR_INVALID_ESCAPE)
+                end
+            elseif c < 32 then
+                return self._fail(ERROR_INVALID_ESCAPE)
+            else
+                self.strings.push(c)
+            end
+        end
+        self.last_string_length = self.strings.length() - offset
+        self.strings.push(0)
+        return offset
+    end,
+
+    _match_true = fn()
+        if self.position + 4 > self.source_bytes then return false end
+        if self.source[self.position] ~= 116 or self.source[self.position + 1] ~= 114 or self.source[self.position + 2] ~= 117 or self.source[self.position + 3] ~= 101 then return false end
+        self.position = self.position + 4
+        return true
+    end,
+
+    _match_false = fn()
+        if self.position + 5 > self.source_bytes then return false end
+        if self.source[self.position] ~= 102 or self.source[self.position + 1] ~= 97 or self.source[self.position + 2] ~= 108 or self.source[self.position + 3] ~= 115 or self.source[self.position + 4] ~= 101 then return false end
+        self.position = self.position + 5
+        return true
+    end,
+
+    _match_null = fn()
+        if self.position + 4 > self.source_bytes then return false end
+        if self.source[self.position] ~= 110 or self.source[self.position + 1] ~= 117 or self.source[self.position + 2] ~= 108 or self.source[self.position + 3] ~= 108 then return false end
+        self.position = self.position + 4
+        return true
+    end,
+
+    _parse_number = fn()
+        local negative:bool = false
+        if self._peek() == 45 then negative = true self.position = self.position + 1 end
+        if self.position >= self.source_bytes then return self._fail(ERROR_INVALID_NUMBER) end
+
+        local integer:i64 = 0
+        local first = self.source[self.position]
+        if first == 48 then
+            self.position = self.position + 1
+            if self.position < self.source_bytes then
+                local after_zero = self.source[self.position]
+                if after_zero >= 48 and after_zero <= 57 then return self._fail(ERROR_INVALID_NUMBER) end
+            end
+        elseif first >= 49 and first <= 57 then
+            local digits:bool = true
+            while digits and self.position < self.source_bytes do
+                local c = self.source[self.position]
+                if c >= 48 and c <= 57 then
+                    integer = integer * 10 + c - 48
+                    self.position = self.position + 1
+                else
+                    digits = false
+                end
+            end
+        else
+            return self._fail(ERROR_INVALID_NUMBER)
+        end
+
+        local value:f32 = integer
+        local decimal:bool = false
+        if self.position < self.source_bytes and self.source[self.position] == 46 then
+            decimal = true
+            self.position = self.position + 1
+            if self.position >= self.source_bytes or self.source[self.position] < 48 or self.source[self.position] > 57 then return self._fail(ERROR_INVALID_NUMBER) end
+            local scale:f32 = 0.1
+            local fraction:bool = true
+            while fraction and self.position < self.source_bytes do
+                local fraction_char = self.source[self.position]
+                if fraction_char >= 48 and fraction_char <= 57 then
+                    value = value + (fraction_char - 48) * scale
+                    scale = scale * 0.1
+                    self.position = self.position + 1
+                else
+                    fraction = false
+                end
+            end
+        end
+
+        local exponent:i64 = 0
+        local exponent_negative:bool = false
+        if self.position < self.source_bytes and (self.source[self.position] == 101 or self.source[self.position] == 69) then
+            decimal = true
+            self.position = self.position + 1
+            if self.position < self.source_bytes and self.source[self.position] == 45 then exponent_negative = true self.position = self.position + 1
+            elseif self.position < self.source_bytes and self.source[self.position] == 43 then self.position = self.position + 1 end
+            if self.position >= self.source_bytes or self.source[self.position] < 48 or self.source[self.position] > 57 then return self._fail(ERROR_INVALID_NUMBER) end
+            local exp_digits:bool = true
+            while exp_digits and self.position < self.source_bytes do
+                local exponent_char = self.source[self.position]
+                if exponent_char >= 48 and exponent_char <= 57 then
+                    exponent = exponent * 10 + exponent_char - 48
+                    if exponent > 38 then return self._fail(ERROR_INVALID_NUMBER) end
+                    self.position = self.position + 1
+                else
+                    exp_digits = false
+                end
+            end
+        end
+
+        local exp_index:i64 = 0
+        while exp_index < exponent do
+            if exponent_negative then value = value / 10.0 else value = value * 10.0 end
+            exp_index = exp_index + 1
+        end
+        if negative then integer = -integer value = -value end
+
+        local node_index:i64 = 0
+        if decimal then
+            node_index = self._new_node(JSON_NUMBER)
+            local number_node = self.nodes[node_index]
+            number_node.number = value
+        else
+            node_index = self._new_node(JSON_INTEGER)
+            local integer_node = self.nodes[node_index]
+            integer_node.integer = integer
+            integer_node.number = value
+        end
+        return node_index
+    end,
+
+    _parse_array = fn()
+        self.position = self.position + 1
+        local array_index = self._new_node(JSON_ARRAY)
+        self._skip_space()
+        if self._peek() == 93 then self.position = self.position + 1 return array_index end
+
+        local complete:bool = false
+        while not complete do
+            local child = self._parse_value()
+            if child < 0 then return -1 end
+            self._append_child(array_index,child)
+            self._skip_space()
+            local c = self._peek()
+            if c == 93 then
+                self.position = self.position + 1
+                complete = true
+            elseif c == 44 then
+                self.position = self.position + 1
+                self._skip_space()
+            else
+                return self._fail(ERROR_EXPECTED_SEPARATOR)
+            end
+        end
+        return array_index
+    end,
+
+    _parse_object = fn()
+        self.position = self.position + 1
+        local object_index = self._new_node(JSON_OBJECT)
+        self._skip_space()
+        if self._peek() == 125 then self.position = self.position + 1 return object_index end
+
+        local complete:bool = false
+        while not complete do
+            if self._peek() ~= 34 then return self._fail(ERROR_UNEXPECTED_TOKEN) end
+            local key_offset = self._parse_string()
+            if key_offset < 0 then return -1 end
+            local key_length = self.last_string_length
+            self._skip_space()
+            if self._peek() ~= 58 then return self._fail(ERROR_EXPECTED_COLON) end
+            self.position = self.position + 1
+            self._skip_space()
+            local child = self._parse_value()
+            if child < 0 then return -1 end
+            self._append_member_offset(object_index,key_offset,key_length,child)
+            self._skip_space()
+            local c = self._peek()
+            if c == 125 then
+                self.position = self.position + 1
+                complete = true
+            elseif c == 44 then
+                self.position = self.position + 1
+                self._skip_space()
+            else
+                return self._fail(ERROR_EXPECTED_SEPARATOR)
+            end
+        end
+        return object_index
+    end,
+
+    _parse_value = fn()
+        self._skip_space()
+        if self.position >= self.source_bytes then return self._fail(ERROR_UNEXPECTED_END) end
+        local c = self._peek()
+        if c == 123 then return self._parse_object() end
+        if c == 91 then return self._parse_array() end
+        if c == 34 then
+            local offset = self._parse_string()
+            if offset < 0 then return -1 end
+            local index = self._new_node(JSON_STRING)
+            local node = self.nodes[index]
+            node.string_offset = offset
+            node.string_length = self.last_string_length
+            return index
+        end
+        if c == 116 then
+            if not self._match_true() then return self._fail(ERROR_UNEXPECTED_TOKEN) end
+            local bool_index = self._new_node(JSON_BOOL)
+            local bool_node = self.nodes[bool_index]
+            bool_node.boolean = true
+            return bool_index
+        end
+        if c == 102 then
+            if not self._match_false() then return self._fail(ERROR_UNEXPECTED_TOKEN) end
+            return self._new_node(JSON_BOOL)
+        end
+        if c == 110 then
+            if not self._match_null() then return self._fail(ERROR_UNEXPECTED_TOKEN) end
+            return self._new_node(JSON_NULL)
+        end
+        if c == 45 or (c >= 48 and c <= 57) then return self._parse_number() end
+        return self._fail(ERROR_UNEXPECTED_TOKEN)
+    end,
+
+    parse = fn()
+        self.position = 0
+        self.error = ERROR_NONE
+        self.error_offset = -1
+        self.valid = false
+        self.root = -1
+        self.strings.clear()
+        self.nodes.clear()
+        self.children.clear()
+        self.members.clear()
+        self._skip_space()
+        self.root = self._parse_value()
+        if self.root < 0 then return false end
+        self._skip_space()
+        if self.position ~= self.source_bytes then self._fail(ERROR_TRAILING_DATA) return false end
+        self.valid = true
+        return true
+    end,
+
+    type_of = fn(index:i64)
+        if index < 0 or index >= self.nodes.length() then return -1 end
+        local node = self.nodes[index]
+        return node.kind
+    end,
+
+    count = fn(index:i64)
+        if index < 0 or index >= self.nodes.length() then return 0 end
+        local node = self.nodes[index]
+        return node.count
+    end,
+
+    at = fn(index:i64, child_index:i64)
+        if index < 0 or index >= self.nodes.length() then return -1 end
+        local node = self.nodes[index]
+        if node.kind ~= JSON_ARRAY or child_index < 0 or child_index >= node.count then return -1 end
+        return self.children[node.first + child_index]
+    end,
+
+    _key_equals = fn(member_index:i64, key:string)
+        local member = self.members[member_index]
+        local length = string.length(key)
+        if length ~= member.key_length then return false end
+        local index:i64 = 0
+        while index < length do
+            if self.strings[member.key_offset + index] ~= string.byte_at(key,index) then return false end
+            index = index + 1
+        end
+        return true
+    end,
+
+    _find_member = fn(object_index:i64, key:string)
+        if object_index < 0 or object_index >= self.nodes.length() then return -1 end
+        local node = self.nodes[object_index]
+        if node.kind ~= JSON_OBJECT then return -1 end
+        local index:i64 = 0
+        while index < node.count do
+            local member_index = node.first + index
+            if self._key_equals(member_index,key) then return member_index end
+            index = index + 1
+        end
+        return -1
+    end,
+
+    get = fn(object_index:i64, key:string)
+        local member_index = self._find_member(object_index,key)
+        if member_index < 0 then return -1 end
+        local member = self.members[member_index]
+        return member.value
+    end,
+
+    has = fn(object_index:i64, key:string)
+        return self._find_member(object_index,key) >= 0
+    end,
+
+    key_at = fn(object_index:i64, member_position:i64) -> string
+        if object_index < 0 or object_index >= self.nodes.length() then return null end
+        local node = self.nodes[object_index]
+        if node.kind ~= JSON_OBJECT or member_position < 0 or member_position >= node.count then return null end
+        local member = self.members[node.first + member_position]
+        return string.from_utf8(self.strings.data_at(member.key_offset))
+    end,
+
+    value_at = fn(object_index:i64, member_position:i64)
+        if object_index < 0 or object_index >= self.nodes.length() then return -1 end
+        local node = self.nodes[object_index]
+        if node.kind ~= JSON_OBJECT or member_position < 0 or member_position >= node.count then return -1 end
+        local member = self.members[node.first + member_position]
+        return member.value
+    end,
+
+    as_bool = fn(index:i64)
+        if self.type_of(index) ~= JSON_BOOL then return false end
+        local node = self.nodes[index]
+        return node.boolean
+    end,
+
+    as_i64 = fn(index:i64)
+        local kind = self.type_of(index)
+        if kind == JSON_INTEGER then local integer_node = self.nodes[index] return integer_node.integer end
+        if kind == JSON_NUMBER then local number_node = self.nodes[index] local converted:i64 = number_node.number return converted end
+        if kind == JSON_BOOL then if self.as_bool(index) then return 1 else return 0 end end
+        return 0
+    end,
+
+    as_f32 = fn(index:i64)
+        local kind = self.type_of(index)
+        if kind == JSON_NUMBER or kind == JSON_INTEGER then local node = self.nodes[index] return node.number end
+        if kind == JSON_BOOL then if self.as_bool(index) then return 1.0 else return 0.0 end end
+        return 0.0
+    end,
+
+    as_string = fn(index:i64) -> string
+        if self.type_of(index) ~= JSON_STRING then return null end
+        local node = self.nodes[index]
+        return string.from_utf8(self.strings.data_at(node.string_offset))
+    end,
+
+    get_bool = fn(object_index:i64, key:string, fallback:bool)
+        local index = self.get(object_index,key)
+        if self.type_of(index) ~= JSON_BOOL then return fallback end
+        return self.as_bool(index)
+    end,
+
+    get_i64 = fn(object_index:i64, key:string, fallback:i64)
+        local index = self.get(object_index,key)
+        local kind = self.type_of(index)
+        if kind ~= JSON_INTEGER and kind ~= JSON_NUMBER then return fallback end
+        return self.as_i64(index)
+    end,
+
+    get_f32 = fn(object_index:i64, key:string, fallback:f32)
+        local index = self.get(object_index,key)
+        local kind = self.type_of(index)
+        if kind ~= JSON_INTEGER and kind ~= JSON_NUMBER then return fallback end
+        return self.as_f32(index)
+    end,
+
+    get_string = fn(object_index:i64, key:string, fallback:string) -> string
+        local index = self.get(object_index,key)
+        if self.type_of(index) ~= JSON_STRING then return fallback end
+        return self.as_string(index)
+    end,
+
+    root_bool = fn(key:string, fallback:bool)
+        return self.get_bool(self.root,key,fallback)
+    end,
+
+    root_i64 = fn(key:string, fallback:i64)
+        return self.get_i64(self.root,key,fallback)
+    end,
+
+    root_f32 = fn(key:string, fallback:f32)
+        return self.get_f32(self.root,key,fallback)
+    end,
+
+    root_string = fn(key:string, fallback:string) -> string
+        return self.get_string(self.root,key,fallback)
+    end,
+
+    _store_string = fn(value:string)
+        local offset = self.strings.length()
+        local length = string.length(value)
+        local index:i64 = 0
+        while index < length do
+            self.strings.push(string.byte_at(value,index))
+            index = index + 1
+        end
+        self.strings.push(0)
+        self.last_string_length = length
+        return offset
+    end,
+
+    make_null = fn()
+        return self._new_node(JSON_NULL)
+    end,
+
+    make_bool = fn(value:bool)
+        local index = self._new_node(JSON_BOOL)
+        local node = self.nodes[index]
+        node.boolean = value
+        return index
+    end,
+
+    make_i64 = fn(value:i64)
+        local index = self._new_node(JSON_INTEGER)
+        local node = self.nodes[index]
+        node.integer = value
+        node.number = value
+        return index
+    end,
+
+    make_number = fn(value:f32)
+        local index = self._new_node(JSON_NUMBER)
+        local node = self.nodes[index]
+        node.number = value
+        return index
+    end,
+
+    make_string = fn(value:string)
+        local offset = self._store_string(value)
+        local index = self._new_node(JSON_STRING)
+        local node = self.nodes[index]
+        node.string_offset = offset
+        node.string_length = self.last_string_length
+        return index
+    end,
+
+    make_array = fn()
+        return self._new_node(JSON_ARRAY)
+    end,
+
+    make_object = fn()
+        return self._new_node(JSON_OBJECT)
+    end,
+
+    set_root = fn(index:i64)
+        if index < 0 or index >= self.nodes.length() then return false end
+        self.root = index
+        self.valid = true
+        return true
+    end,
+
+    array_add = fn(array_index:i64, value_index:i64)
+        if self.type_of(array_index) ~= JSON_ARRAY or value_index < 0 or value_index >= self.nodes.length() then return false end
+        self._append_child(array_index,value_index)
+        return true
+    end,
+
+    object_set = fn(object_index:i64, key:string, value_index:i64)
+        if self.type_of(object_index) ~= JSON_OBJECT or value_index < 0 or value_index >= self.nodes.length() then return false end
+        local existing = self._find_member(object_index,key)
+        if existing >= 0 then
+            local member = self.members[existing]
+            member.value = value_index
+            return true
+        end
+        local offset = self._store_string(key)
+        self._append_member_offset(object_index,offset,self.last_string_length,value_index)
+        return true
+    end,
+
+    object_set_bool = fn(object_index:i64, key:string, value:bool)
+        return self.object_set(object_index,key,self.make_bool(value))
+    end,
+
+    object_set_i64 = fn(object_index:i64, key:string, value:i64)
+        return self.object_set(object_index,key,self.make_i64(value))
+    end,
+
+    object_set_number = fn(object_index:i64, key:string, value:f32)
+        return self.object_set(object_index,key,self.make_number(value))
+    end,
+
+    object_set_string = fn(object_index:i64, key:string, value:string)
+        return self.object_set(object_index,key,self.make_string(value))
+    end,
+
+    _emit_ascii = fn(output, value:string)
+        local length = string.length(value)
+        local index:i64 = 0
+        while index < length do
+            output.push(string.byte_at(value,index))
+            index = index + 1
+        end
+    end,
+
+    _emit_i64 = fn(output, value:i64)
+        if value == 0 then output.push(48) return end
+        local negative = value < 0
+        local working = value
+        if working > 0 then working = -working end
+        local digits = {}
+        while working < 0 do
+            local digit = -(working % 10)
+            digits.push(48 + digit)
+            working = working / 10
+        end
+        if negative then output.push(45) end
+        local index = digits.length() - 1
+        while index >= 0 do
+            output.push(digits[index])
+            index = index - 1
+        end
+        digits.destroy()
+    end,
+
+    _emit_f32 = fn(output, value:f32)
+        if value < 0.0 then output.push(45) value = -value end
+        local whole:i64 = value
+        self._emit_i64(output,whole)
+        local fraction:f32 = value - whole
+        if fraction < 0.000001 then return end
+        local digits = {}
+        local index:i64 = 0
+        while index < 6 do
+            fraction = fraction * 10.0
+            local digit:i64 = fraction
+            if digit < 0 then digit = 0 end
+            if digit > 9 then digit = 9 end
+            digits.push(48 + digit)
+            fraction = fraction - digit
+            index = index + 1
+        end
+        local last = digits.length() - 1
+        while last >= 0 and digits[last] == 48 do last = last - 1 end
+        if last >= 0 then
+            output.push(46)
+            index = 0
+            while index <= last do output.push(digits[index]) index = index + 1 end
+        end
+        digits.destroy()
+    end,
+
+    _hex_char = fn(value:i64)
+        if value < 10 then return 48 + value end
+        return 55 + value
+    end,
+
+    _emit_stored_string = fn(output, offset:i64, length:i64)
+        output.push(34)
+        local index:i64 = 0
+        while index < length do
+            local c = self.strings[offset + index]
+            if c == 34 or c == 92 then
+                output.push(92)
+                output.push(c)
+            elseif c == 8 then self._emit_ascii(output,"\\b")
+            elseif c == 12 then self._emit_ascii(output,"\\f")
+            elseif c == 10 then self._emit_ascii(output,"\\n")
+            elseif c == 13 then self._emit_ascii(output,"\\r")
+            elseif c == 9 then self._emit_ascii(output,"\\t")
+            elseif c < 32 then
+                self._emit_ascii(output,"\\u00")
+                output.push(self._hex_char(c / 16))
+                output.push(self._hex_char(c % 16))
+            else
+                output.push(c)
+            end
+            index = index + 1
+        end
+        output.push(34)
+    end,
+
+    _emit_node = fn(output, index:i64)
+        if index < 0 or index >= self.nodes.length() then self._emit_ascii(output,"null") return end
+        local node = self.nodes[index]
+        if node.kind == JSON_NULL then
+            self._emit_ascii(output,"null")
+        elseif node.kind == JSON_BOOL then
+            if node.boolean then self._emit_ascii(output,"true") else self._emit_ascii(output,"false") end
+        elseif node.kind == JSON_INTEGER then
+            self._emit_i64(output,node.integer)
+        elseif node.kind == JSON_NUMBER then
+            self._emit_f32(output,node.number)
+        elseif node.kind == JSON_STRING then
+            self._emit_stored_string(output,node.string_offset,node.string_length)
+        elseif node.kind == JSON_ARRAY then
+            output.push(91)
+            local array_item:i64 = 0
+            while array_item < node.count do
+                if array_item > 0 then output.push(44) end
+                self._emit_node(output,self.children[node.first + array_item])
+                array_item = array_item + 1
+            end
+            output.push(93)
+        elseif node.kind == JSON_OBJECT then
+            output.push(123)
+            local object_item:i64 = 0
+            while object_item < node.count do
+                if object_item > 0 then output.push(44) end
+                local member = self.members[node.first + object_item]
+                self._emit_stored_string(output,member.key_offset,member.key_length)
+                output.push(58)
+                self._emit_node(output,member.value)
+                object_item = object_item + 1
+            end
+            output.push(125)
+        else
+            self._emit_ascii(output,"null")
+        end
+    end,
+
+    stringify = fn() -> Text
+        local text:Text = Text.new()
+        if self.root >= 0 then self._emit_node(text.data,self.root) else self._emit_ascii(text.data,"null") end
+        text.bytes = text.data.length()
+        text.data.push(0)
+        return text
+    end,
+
+    save = fn(path:string) -> File.WriteResult
+        local text:Text = self.stringify()
+        local result = File.write_bytes(path,text.data,text.bytes)
+        text.destroy()
+        return result
+    end,
+
+    error_name = fn() -> string
+        if self.error == ERROR_NONE then return "none" end
+        if self.error == ERROR_UNEXPECTED_END then return "unexpected end of JSON" end
+        if self.error == ERROR_UNEXPECTED_TOKEN then return "unexpected JSON token" end
+        if self.error == ERROR_EXPECTED_COLON then return "expected ':' after object key" end
+        if self.error == ERROR_EXPECTED_SEPARATOR then return "expected ',' or closing bracket" end
+        if self.error == ERROR_INVALID_ESCAPE then return "invalid JSON string escape" end
+        if self.error == ERROR_INVALID_UNICODE then return "invalid JSON Unicode escape" end
+        if self.error == ERROR_INVALID_NUMBER then return "invalid JSON number" end
+        if self.error == ERROR_TRAILING_DATA then return "trailing data after JSON value" end
+        if self.error == ERROR_FILE then return "file operation failed" end
+        return "JSON error"
+    end,
+
+    destroy = fn()
+        if self.source ~= 0 then self.source.destroy() self.source = null end
+        if self.strings ~= 0 then self.strings.destroy() self.strings = null end
+        if self.nodes ~= 0 then self.nodes.destroy() self.nodes = null end
+        if self.children ~= 0 then self.children.destroy() self.children = null end
+        if self.members ~= 0 then self.members.destroy() self.members = null end
+        self.valid = false
+        self.root = -1
+    end
+}
+
+export fn parse_text(value:string) -> Document
+    local document:Document = Document.new()
+    document.source[0] = 0
+    document.strings[0] = 0
+    document.source_bytes = string.length(value)
+    document.source.resize(document.source_bytes + 1)
+    local index:i64 = 0
+    while index < document.source_bytes do
+        document.source[index] = string.byte_at(value,index)
+        index = index + 1
+    end
+    document.source[document.source_bytes] = 0
+    document.parse()
+    return document
+end
+
+export fn parse_bytes(value, count:i64) -> Document
+    local document:Document = Document.new()
+    document.source[0] = 0
+    document.strings[0] = 0
+    if count < 0 or count > value.length() then document.error = ERROR_UNEXPECTED_END return document end
+    document.source_bytes = count
+    document.source.resize(count + 1)
+    local index:i64 = 0
+    while index < count do document.source[index] = value[index] index = index + 1 end
+    document.source[count] = 0
+    document.parse()
+    return document
+end
+
+export fn load(path:string) -> Document
+    local loaded = File.read_bytes(path)
+    local document:Document = Document.new()
+    if not loaded.ok then
+        document.error = ERROR_FILE
+        document.file_error = loaded.error
+        loaded.destroy()
+        return document
+    end
+    document.source.destroy()
+    document.source = loaded.data
+    document.source_bytes = loaded.bytes
+    loaded.data = null
+    loaded.destroy()
+    document.parse()
+    return document
+end
+
+export fn object() -> Document
+    local document:Document = Document.new()
+    document.root = document.make_object()
+    document.valid = true
+    return document
+end
+
+export fn array() -> Document
+    local document:Document = Document.new()
+    document.root = document.make_array()
+    document.valid = true
+    return document
+end

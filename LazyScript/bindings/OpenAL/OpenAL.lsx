@@ -1,0 +1,276 @@
+-- OpenAL 1.1, ALC 1.1 and EFX forwarding bindings.
+export extern "LSXGameKit.dll" fn lsxHasOpenAL() -> i32
+export AL_FALSE = 0x0
+export AL_TRUE = 0x1
+export AL_NONE = 0x0
+export AL_SOURCE_RELATIVE = 0x202
+export AL_CONE_INNER_ANGLE = 0x1001
+export AL_CONE_OUTER_ANGLE = 0x1002
+export AL_PITCH = 0x1003
+export AL_POSITION = 0x1004
+export AL_DIRECTION = 0x1005
+export AL_VELOCITY = 0x1006
+export AL_LOOPING = 0x1007
+export AL_BUFFER = 0x1009
+export AL_GAIN = 0x100A
+export AL_MIN_GAIN = 0x100D
+export AL_MAX_GAIN = 0x100E
+export AL_ORIENTATION = 0x100F
+export AL_SOURCE_STATE = 0x1010
+export AL_INITIAL = 0x1011
+export AL_PLAYING = 0x1012
+export AL_PAUSED = 0x1013
+export AL_STOPPED = 0x1014
+export AL_BUFFERS_QUEUED = 0x1015
+export AL_BUFFERS_PROCESSED = 0x1016
+export AL_REFERENCE_DISTANCE = 0x1020
+export AL_ROLLOFF_FACTOR = 0x1021
+export AL_CONE_OUTER_GAIN = 0x1022
+export AL_MAX_DISTANCE = 0x1023
+export AL_SEC_OFFSET = 0x1024
+export AL_SAMPLE_OFFSET = 0x1025
+export AL_BYTE_OFFSET = 0x1026
+export AL_SOURCE_TYPE = 0x1027
+export AL_STATIC = 0x1028
+export AL_STREAMING = 0x1029
+export AL_UNDETERMINED = 0x1030
+export AL_FORMAT_MONO8 = 0x1100
+export AL_FORMAT_MONO16 = 0x1101
+export AL_FORMAT_STEREO8 = 0x1102
+export AL_FORMAT_STEREO16 = 0x1103
+export AL_FREQUENCY = 0x2001
+export AL_BITS = 0x2002
+export AL_CHANNELS = 0x2003
+export AL_SIZE = 0x2004
+export AL_UNUSED = 0x2010
+export AL_PENDING = 0x2011
+export AL_PROCESSED = 0x2012
+export AL_NO_ERROR = 0x0
+export AL_INVALID_NAME = 0xA001
+export AL_INVALID_ENUM = 0xA002
+export AL_INVALID_VALUE = 0xA003
+export AL_INVALID_OPERATION = 0xA004
+export AL_OUT_OF_MEMORY = 0xA005
+export AL_VENDOR = 0xB001
+export AL_VERSION = 0xB002
+export AL_RENDERER = 0xB003
+export AL_EXTENSIONS = 0xB004
+export AL_DOPPLER_FACTOR = 0xC000
+export AL_DOPPLER_VELOCITY = 0xC001
+export AL_SPEED_OF_SOUND = 0xC003
+export AL_DISTANCE_MODEL = 0xD000
+export AL_INVERSE_DISTANCE = 0xD001
+export AL_INVERSE_DISTANCE_CLAMPED = 0xD002
+export AL_LINEAR_DISTANCE = 0xD003
+export AL_LINEAR_DISTANCE_CLAMPED = 0xD004
+export AL_EXPONENT_DISTANCE = 0xD005
+export AL_EXPONENT_DISTANCE_CLAMPED = 0xD006
+export ALC_FALSE = 0x0
+export ALC_TRUE = 0x1
+export ALC_FREQUENCY = 0x1007
+export ALC_REFRESH = 0x1008
+export ALC_SYNC = 0x1009
+export ALC_MONO_SOURCES = 0x1010
+export ALC_STEREO_SOURCES = 0x1011
+export ALC_NO_ERROR = 0x0
+export ALC_INVALID_DEVICE = 0xA001
+export ALC_INVALID_CONTEXT = 0xA002
+export ALC_INVALID_ENUM = 0xA003
+export ALC_INVALID_VALUE = 0xA004
+export ALC_OUT_OF_MEMORY = 0xA005
+export ALC_MAJOR_VERSION = 0x1000
+export ALC_MINOR_VERSION = 0x1001
+export ALC_ATTRIBUTES_SIZE = 0x1002
+export ALC_ALL_ATTRIBUTES = 0x1003
+export ALC_DEFAULT_DEVICE_SPECIFIER = 0x1004
+export ALC_DEVICE_SPECIFIER = 0x1005
+export ALC_EXTENSIONS = 0x1006
+export ALC_CAPTURE_DEVICE_SPECIFIER = 0x310
+export ALC_CAPTURE_DEFAULT_DEVICE_SPECIFIER = 0x311
+export ALC_CAPTURE_SAMPLES = 0x312
+export AL_DIRECT_FILTER = 0x20005
+export AL_AUXILIARY_SEND_FILTER = 0x20006
+export AL_EFFECTSLOT_EFFECT = 0x1
+export AL_EFFECTSLOT_GAIN = 0x2
+export AL_EFFECTSLOT_AUXILIARY_SEND_AUTO = 0x3
+export AL_EFFECT_TYPE = 0x8001
+export AL_EFFECT_NULL = 0x0
+export AL_EFFECT_REVERB = 0x1
+export AL_EFFECT_CHORUS = 0x2
+export AL_EFFECT_DISTORTION = 0x3
+export AL_EFFECT_ECHO = 0x4
+export AL_EFFECT_FLANGER = 0x5
+export AL_EFFECT_FREQUENCY_SHIFTER = 0x6
+export AL_EFFECT_VOCAL_MORPHER = 0x7
+export AL_EFFECT_PITCH_SHIFTER = 0x8
+export AL_EFFECT_RING_MODULATOR = 0x9
+export AL_EFFECT_AUTOWAH = 0xA
+export AL_EFFECT_COMPRESSOR = 0xB
+export AL_EFFECT_EQUALIZER = 0xC
+export AL_EFFECT_EAXREVERB = 0x8000
+export AL_FILTER_TYPE = 0x8001
+export AL_FILTER_NULL = 0x0
+export AL_FILTER_LOWPASS = 0x1
+export AL_FILTER_HIGHPASS = 0x2
+export AL_FILTER_BANDPASS = 0x3
+export AL_LOWPASS_GAIN = 0x1
+export AL_LOWPASS_GAINHF = 0x2
+export AL_HIGHPASS_GAIN = 0x1
+export AL_HIGHPASS_GAINLF = 0x2
+export AL_BANDPASS_GAIN = 0x1
+export AL_BANDPASS_GAINLF = 0x2
+export AL_BANDPASS_GAINHF = 0x3
+export extern "LSXGameKit.dll" fn alEnable(capability: i32) -> void
+export extern "LSXGameKit.dll" fn alDisable(capability: i32) -> void
+export extern "LSXGameKit.dll" fn alIsEnabled(capability: i32) -> u32
+export extern "LSXGameKit.dll" fn alGetString(param: i32) -> string
+export extern "LSXGameKit.dll" fn alGetBooleanv(param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetIntegerv(param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetFloatv(param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetDoublev(param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetBoolean(param: i32) -> u32
+export extern "LSXGameKit.dll" fn alGetInteger(param: i32) -> i32
+export extern "LSXGameKit.dll" fn alGetFloat(param: i32) -> f32
+export extern "LSXGameKit.dll" fn alGetDouble(param: i32) -> f32
+export extern "LSXGameKit.dll" fn alGetError() -> i32
+export extern "LSXGameKit.dll" fn alIsExtensionPresent(extname: string) -> u32
+export extern "LSXGameKit.dll" fn alGetProcAddress(fname: string) -> ptr
+export extern "LSXGameKit.dll" fn alGetEnumValue(ename: string) -> i32
+export extern "LSXGameKit.dll" fn alListenerf(param: i32, value: f32) -> void
+export extern "LSXGameKit.dll" fn alListener3f(param: i32, v1: f32, v2: f32, v3: f32) -> void
+export extern "LSXGameKit.dll" fn alListenerfv(param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alListeneri(param: i32, value: i32) -> void
+export extern "LSXGameKit.dll" fn alListener3i(param: i32, v1: i32, v2: i32, v3: i32) -> void
+export extern "LSXGameKit.dll" fn alListeneriv(param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetListenerf(param: i32, value: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetListener3f(param: i32, v1: ptr, v2: ptr, v3: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetListenerfv(param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetListeneri(param: i32, value: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetListener3i(param: i32, v1: ptr, v2: ptr, v3: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetListeneriv(param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGenSources(n: i32, sources: ptr) -> void
+export extern "LSXGameKit.dll" fn alDeleteSources(n: i32, sources: ptr) -> void
+export extern "LSXGameKit.dll" fn alIsSource(source: u32) -> u32
+export extern "LSXGameKit.dll" fn alSourcef(source: u32, param: i32, value: f32) -> void
+export extern "LSXGameKit.dll" fn alSource3f(source: u32, param: i32, v1: f32, v2: f32, v3: f32) -> void
+export extern "LSXGameKit.dll" fn alSourcefv(source: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alSourcei(source: u32, param: i32, value: i32) -> void
+export extern "LSXGameKit.dll" fn alSource3i(source: u32, param: i32, v1: i32, v2: i32, v3: i32) -> void
+export extern "LSXGameKit.dll" fn alSourceiv(source: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetSourcef(source: u32, param: i32, value: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetSource3f(source: u32, param: i32, v1: ptr, v2: ptr, v3: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetSourcefv(source: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetSourcei(source: u32, param: i32, value: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetSource3i(source: u32, param: i32, v1: ptr, v2: ptr, v3: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetSourceiv(source: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alSourcePlayv(n: i32, sources: ptr) -> void
+export extern "LSXGameKit.dll" fn alSourceStopv(n: i32, sources: ptr) -> void
+export extern "LSXGameKit.dll" fn alSourceRewindv(n: i32, sources: ptr) -> void
+export extern "LSXGameKit.dll" fn alSourcePausev(n: i32, sources: ptr) -> void
+export extern "LSXGameKit.dll" fn alSourcePlay(source: u32) -> void
+export extern "LSXGameKit.dll" fn alSourceStop(source: u32) -> void
+export extern "LSXGameKit.dll" fn alSourceRewind(source: u32) -> void
+export extern "LSXGameKit.dll" fn alSourcePause(source: u32) -> void
+export extern "LSXGameKit.dll" fn alSourceQueueBuffers(source: u32, nb: i32, buffers: ptr) -> void
+export extern "LSXGameKit.dll" fn alSourceUnqueueBuffers(source: u32, nb: i32, buffers: ptr) -> void
+export extern "LSXGameKit.dll" fn alGenBuffers(n: i32, buffers: ptr) -> void
+export extern "LSXGameKit.dll" fn alDeleteBuffers(n: i32, buffers: ptr) -> void
+export extern "LSXGameKit.dll" fn alIsBuffer(buffer: u32) -> u32
+export extern "LSXGameKit.dll" fn alBufferData(buffer: u32, format: i32, data: ptr, size: i32, freq: i32) -> void
+export extern "LSXGameKit.dll" fn alBufferf(buffer: u32, param: i32, value: f32) -> void
+export extern "LSXGameKit.dll" fn alBuffer3f(buffer: u32, param: i32, v1: f32, v2: f32, v3: f32) -> void
+export extern "LSXGameKit.dll" fn alBufferfv(buffer: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alBufferi(buffer: u32, param: i32, value: i32) -> void
+export extern "LSXGameKit.dll" fn alBuffer3i(buffer: u32, param: i32, v1: i32, v2: i32, v3: i32) -> void
+export extern "LSXGameKit.dll" fn alBufferiv(buffer: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetBufferf(buffer: u32, param: i32, value: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetBuffer3f(buffer: u32, param: i32, v1: ptr, v2: ptr, v3: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetBufferfv(buffer: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetBufferi(buffer: u32, param: i32, value: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetBuffer3i(buffer: u32, param: i32, v1: ptr, v2: ptr, v3: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetBufferiv(buffer: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alDopplerFactor(value: f32) -> void
+export extern "LSXGameKit.dll" fn alDopplerVelocity(value: f32) -> void
+export extern "LSXGameKit.dll" fn alSpeedOfSound(value: f32) -> void
+export extern "LSXGameKit.dll" fn alDistanceModel(distanceModel: i32) -> void
+export extern "LSXGameKit.dll" fn alcCreateContext(device: ptr, attrlist: ptr) -> ptr
+export extern "LSXGameKit.dll" fn alcMakeContextCurrent(context: ptr) -> u32
+export extern "LSXGameKit.dll" fn alcProcessContext(context: ptr) -> void
+export extern "LSXGameKit.dll" fn alcSuspendContext(context: ptr) -> void
+export extern "LSXGameKit.dll" fn alcDestroyContext(context: ptr) -> void
+export extern "LSXGameKit.dll" fn alcGetCurrentContext() -> ptr
+export extern "LSXGameKit.dll" fn alcGetContextsDevice(context: ptr) -> ptr
+export extern "LSXGameKit.dll" fn alcOpenDevice(devicename: string) -> ptr
+export extern "LSXGameKit.dll" fn alcCloseDevice(device: ptr) -> u32
+export extern "LSXGameKit.dll" fn alcGetError(device: ptr) -> i32
+export extern "LSXGameKit.dll" fn alcIsExtensionPresent(device: ptr, extname: string) -> u32
+export extern "LSXGameKit.dll" fn alcGetProcAddress(device: ptr, funcname: string) -> ptr
+export extern "LSXGameKit.dll" fn alcGetEnumValue(device: ptr, enumname: string) -> i32
+export extern "LSXGameKit.dll" fn alcGetString(device: ptr, param: i32) -> string
+export extern "LSXGameKit.dll" fn alcGetIntegerv(device: ptr, param: i32, size: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alcCaptureOpenDevice(devicename: string, frequency: u32, format: i32, buffersize: i32) -> ptr
+export extern "LSXGameKit.dll" fn alcCaptureCloseDevice(device: ptr) -> u32
+export extern "LSXGameKit.dll" fn alcCaptureStart(device: ptr) -> void
+export extern "LSXGameKit.dll" fn alcCaptureStop(device: ptr) -> void
+export extern "LSXGameKit.dll" fn alcCaptureSamples(device: ptr, buffer: ptr, samples: i32) -> void
+export extern "LSXGameKit.dll" fn alGenEffects(n: i32, effects: ptr) -> void
+export extern "LSXGameKit.dll" fn alDeleteEffects(n: i32, effects: ptr) -> void
+export extern "LSXGameKit.dll" fn alIsEffect(effect: u32) -> u32
+export extern "LSXGameKit.dll" fn alEffecti(effect: u32, param: i32, value: i32) -> void
+export extern "LSXGameKit.dll" fn alEffectiv(effect: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alEffectf(effect: u32, param: i32, value: f32) -> void
+export extern "LSXGameKit.dll" fn alEffectfv(effect: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetEffecti(effect: u32, param: i32, value: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetEffectiv(effect: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetEffectf(effect: u32, param: i32, value: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetEffectfv(effect: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGenFilters(n: i32, filters: ptr) -> void
+export extern "LSXGameKit.dll" fn alDeleteFilters(n: i32, filters: ptr) -> void
+export extern "LSXGameKit.dll" fn alIsFilter(filter: u32) -> u32
+export extern "LSXGameKit.dll" fn alFilteri(filter: u32, param: i32, value: i32) -> void
+export extern "LSXGameKit.dll" fn alFilteriv(filter: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alFilterf(filter: u32, param: i32, value: f32) -> void
+export extern "LSXGameKit.dll" fn alFilterfv(filter: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetFilteri(filter: u32, param: i32, value: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetFilteriv(filter: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetFilterf(filter: u32, param: i32, value: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetFilterfv(filter: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGenAuxiliaryEffectSlots(n: i32, slots: ptr) -> void
+export extern "LSXGameKit.dll" fn alDeleteAuxiliaryEffectSlots(n: i32, slots: ptr) -> void
+export extern "LSXGameKit.dll" fn alIsAuxiliaryEffectSlot(slot: u32) -> u32
+export extern "LSXGameKit.dll" fn alAuxiliaryEffectSloti(slot: u32, param: i32, value: i32) -> void
+export extern "LSXGameKit.dll" fn alAuxiliaryEffectSlotiv(slot: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alAuxiliaryEffectSlotf(slot: u32, param: i32, value: f32) -> void
+export extern "LSXGameKit.dll" fn alAuxiliaryEffectSlotfv(slot: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetAuxiliaryEffectSloti(slot: u32, param: i32, value: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetAuxiliaryEffectSlotiv(slot: u32, param: i32, values: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetAuxiliaryEffectSlotf(slot: u32, param: i32, value: ptr) -> void
+export extern "LSXGameKit.dll" fn alGetAuxiliaryEffectSlotfv(slot: u32, param: i32, values: ptr) -> void
+
+-- Scalar resource helpers for common OpenAL pointer-output calls.
+extern "LSXGameKit.dll" fn _lsxAlCreateBuffer() -> u32
+extern "LSXGameKit.dll" fn _lsxAlCreateSource() -> u32
+extern "LSXGameKit.dll" fn _lsxAlCreateEffect() -> u32
+extern "LSXGameKit.dll" fn _lsxAlCreateFilter() -> u32
+extern "LSXGameKit.dll" fn _lsxAlCreateAuxiliaryEffectSlot() -> u32
+extern "LSXGameKit.dll" fn _lsxAlDeleteBuffer(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxAlDeleteSource(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxAlDeleteEffect(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxAlDeleteFilter(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxAlDeleteAuxiliaryEffectSlot(value: u32) -> void
+extern "LSXGameKit.dll" fn _lsxAlGetSourceInteger(source: u32, pname: u32) -> i32
+extern "LSXGameKit.dll" fn _lsxAlGetBufferInteger(buffer: u32, pname: u32) -> i32
+
+export fn createBuffer() return _lsxAlCreateBuffer() end
+export fn createSource() return _lsxAlCreateSource() end
+export fn createEffect() return _lsxAlCreateEffect() end
+export fn createFilter() return _lsxAlCreateFilter() end
+export fn createAuxiliaryEffectSlot() return _lsxAlCreateAuxiliaryEffectSlot() end
+export fn deleteBuffer(value) _lsxAlDeleteBuffer(value) end
+export fn deleteSource(value) _lsxAlDeleteSource(value) end
+export fn deleteEffect(value) _lsxAlDeleteEffect(value) end
+export fn deleteFilter(value) _lsxAlDeleteFilter(value) end
+export fn deleteAuxiliaryEffectSlot(value) _lsxAlDeleteAuxiliaryEffectSlot(value) end
+export fn getSourceInteger(source, pname) return _lsxAlGetSourceInteger(source, pname) end
+export fn getBufferInteger(buffer, pname) return _lsxAlGetBufferInteger(buffer, pname) end
+

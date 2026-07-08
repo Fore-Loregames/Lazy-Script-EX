@@ -1,0 +1,21 @@
+use "GLM.lsx" as GLM
+use "../OpenGL/OpenGL46.lsx" as GL
+
+-- Direct GLM/OpenGL bridge. Matrices are already column-major, so transpose is
+-- false for ordinary GLSL uniforms.
+
+export fn uniform_mat2(location:i32, value:GLM.Mat2)
+    GL.glUniformMatrix2fv(location,1,GL.GL_FALSE,value.data)
+end
+
+export fn uniform_mat3(location:i32, value:GLM.Mat3)
+    GL.glUniformMatrix3fv(location,1,GL.GL_FALSE,value.data)
+end
+
+export fn uniform_mat4(location:i32, value:GLM.Mat4)
+    GL.glUniformMatrix4fv(location,1,GL.GL_FALSE,value.data)
+end
+
+export fn uniform_mat4_transposed(location:i32, value:GLM.Mat4)
+    GL.glUniformMatrix4fv(location,1,GL.GL_TRUE,value.data)
+end

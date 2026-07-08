@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/inline-record-tables-o0.exe",
+  "subsystem": "console",
+  "optimization": 0
+}
