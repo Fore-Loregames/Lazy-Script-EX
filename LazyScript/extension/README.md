@@ -23,6 +23,7 @@ Do not open the `.vsix` with Microsoft Visual Studio's VSIX installer. This exte
 ## Features
 
 - Syntax highlighting for LSX, LSHTML, and LSCSS
+- Dedicated LSX file icon in the Explorer, tabs, search results, and other language-aware views
 - Compiler diagnostics while typing and on save
 - Exact error ranges in the Problems panel
 - Beginner-oriented hints for common compiler errors
