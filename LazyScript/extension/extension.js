@@ -969,6 +969,55 @@ function importEntryForAlias(record, alias, caseInsensitive = false) {
   return null;
 }
 
+function levenshteinDistance(left, right) {
+  const a = String(left || '').toLowerCase();
+  const b = String(right || '').toLowerCase();
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  const current = new Array(b.length + 1);
+  for (let i = 1; i <= a.length; i++) {
+    current[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const substitution = previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1);
+      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, substitution);
+    }
+    for (let j = 0; j <= b.length; j++) previous[j] = current[j];
+  }
+  return previous[b.length];
+}
+
+function completionImportEntryForAlias(record, typedAlias) {
+  const exact = importEntryForAlias(record, typedAlias, true);
+  if (exact) return { ...exact, matchKind: exact.exact ? 'exact' : 'case' };
+
+  const typed = String(typedAlias || '').toLowerCase();
+  if (typed.length < 3) return null;
+  let best = null;
+  for (const [declaredAlias, imp] of record.imports) {
+    const declared = declaredAlias.toLowerCase();
+    let score = -1;
+
+    // Recover common qualifier mistakes without polluting ordinary completion:
+    // duplicated prefixes (WindowWindowManagerMod), partial aliases, and small typos.
+    if (typed.endsWith(declared)) score = 1000 - (typed.length - declared.length);
+    else if (declared.endsWith(typed)) score = 900 - (declared.length - typed.length);
+    else if (typed.includes(declared)) score = 800 - (typed.length - declared.length);
+    else if (declared.includes(typed)) score = 700 - (declared.length - typed.length);
+    else {
+      const distance = levenshteinDistance(typed, declared);
+      const allowed = Math.max(2, Math.floor(declared.length * 0.25));
+      if (distance <= allowed) score = 600 - distance * 10 - Math.abs(typed.length - declared.length);
+    }
+
+    if (score >= 0 && (!best || score > best.score)) {
+      best = { alias: declaredAlias, import: imp, exact: false, matchKind: 'fuzzy', score };
+    }
+  }
+  return best;
+}
+
 function symbolByName(symbols, name, caseInsensitive = false) {
   const exact = (symbols || []).find(symbol => symbol.name === name);
   if (exact || !caseInsensitive) return exact || null;
@@ -978,7 +1027,7 @@ function symbolByName(symbols, name, caseInsensitive = false) {
 
 function importedCompletionTarget(record, chain) {
   if (!Array.isArray(chain) || chain.length < 1) return null;
-  const aliasEntry = importEntryForAlias(record, chain[0], true);
+  const aliasEntry = completionImportEntryForAlias(record, chain[0]);
   if (!aliasEntry) return null;
   const target = indexedFile(resolveImport(aliasEntry.import.spec, record.uri.fsPath));
   if (!target) return { matchedImport: true, alias: aliasEntry.alias, record: null, parent: null, symbols: [] };
@@ -2347,5 +2396,5 @@ function deactivate() {
 }
 module.exports = {
   activate, deactivate, parseText, resolveImport, chainContext, inferTypeFromInitializer,
-  _test: { index, loadRecordSync, importedSymbol, importedCompletionTarget, importEntryForAlias, symbolByName, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, HoverProvider, DocumentFormattingProvider, DocumentRangeFormattingProvider, OnTypeFormattingProvider, formatLsxText, collectVisibleScopeSymbols, completionForScopeSymbol, completionForSelfMember, currentIdentifierRange, shouldAutoTriggerSuggestions, desiredIndentAtLine, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs }
+  _test: { index, loadRecordSync, importedSymbol, importedCompletionTarget, importEntryForAlias, completionImportEntryForAlias, levenshteinDistance, symbolByName, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, HoverProvider, DocumentFormattingProvider, DocumentRangeFormattingProvider, OnTypeFormattingProvider, formatLsxText, collectVisibleScopeSymbols, completionForScopeSymbol, completionForSelfMember, currentIdentifierRange, shouldAutoTriggerSuggestions, desiredIndentAtLine, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs }
 };

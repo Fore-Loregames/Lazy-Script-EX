@@ -359,6 +359,21 @@ assert(importedModuleItems.some(item => (item.label.label || item.label) === 'St
 assert(!importedModuleItems.some(item => (item.label.label || item.label) === 'localOnly'), 'module alias completion leaked current-file fields');
 assert(!importedModuleItems.some(item => (item.label.label || item.label) === 'self'), 'module alias completion leaked current-scope variables');
 
+// A duplicated qualifier prefix is a common editing mistake. IntelliSense must
+// keep browsing the imported file rather than falling back to current locals.
+const duplicatedAliasSource = importedCompletionSource.replace('ServiceMod.', 'ServiceServiceMod.');
+const duplicatedAliasDoc = {
+  ...mockDocument(duplicatedAliasSource),
+  uri: { fsPath: path.join(sourceDir, 'DuplicatedAliasCompletion.lsx') }
+};
+fs.writeFileSync(duplicatedAliasDoc.uri.fsPath, duplicatedAliasSource);
+const duplicatedAliasColumn = '        ServiceServiceMod.'.length;
+const duplicatedAliasItems = new extension._test.CompletionProvider().provideCompletionItems(duplicatedAliasDoc, new Position(4, duplicatedAliasColumn));
+assert(duplicatedAliasItems.some(item => (item.label.label || item.label) === 'StaticService'), 'duplicated module alias completion is missing the imported exported object');
+const duplicatedStaticService = duplicatedAliasItems.find(item => (item.label.label || item.label) === 'StaticService');
+assert(duplicatedStaticService.additionalTextEdits?.[0]?.newText === 'ServiceMod', 'duplicated module alias completion did not repair the qualifier');
+assert(!duplicatedAliasItems.some(item => (item.label.label || item.label) === 'localOnly'), 'duplicated module alias completion fell back to current-file symbols');
+
 const importedMemberSource = importedCompletionSource.replace('ServiceMod.', 'servicemod.StaticService.');
 const importedMemberDoc = {
   ...mockDocument(importedMemberSource),
