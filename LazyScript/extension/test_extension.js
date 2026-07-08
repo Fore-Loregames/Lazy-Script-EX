@@ -11,10 +11,11 @@ class Location { constructor(uri, range) { this.uri = uri; this.range = range; }
 class CompletionItem { constructor(label, kind) { this.label = label; this.kind = kind; } }
 class MarkdownString { constructor(value = '') { this.value = value; } appendCodeblock(value) { this.value += value; } appendMarkdown(value) { this.value += value; } }
 class SnippetString { constructor(value = '') { this.value = value; } }
+class TextEdit { static replace(range, newText) { return { range, newText }; } }
 const toolkit = path.resolve(__dirname, '..', '..');
 const configurationValues = {};
 const vscodeMock = {
-  Position, Range, Location, CompletionItem, MarkdownString, SnippetString,
+  Position, Range, Location, CompletionItem, MarkdownString, SnippetString, TextEdit,
   Uri: { file: fsPath => ({ fsPath: path.resolve(fsPath) }) },
   SymbolKind: { Function:1, Method:2, Constant:3, Struct:4, Field:5, Module:6, Variable:7 },
   CompletionItemKind: { Function:1, Method:2, Constant:3, Class:4, Struct:5, Field:6, Module:7, Variable:8, Keyword:9, Property:10, Folder:11, File:12 },
@@ -108,13 +109,19 @@ assert(uiRecord.symbols.some(symbol => symbol.name === 'inspector' && symbol.kin
 function mockDocument(text) {
   const lines = text.split('\n');
   return {
-    getText: () => text,
+    getText: range => {
+      if (!range) return text;
+      const start = (() => { let value = 0; for (let i = 0; i < range.start.line; i++) value += lines[i].length + 1; return value + range.start.character; })();
+      const end = (() => { let value = 0; for (let i = 0; i < range.end.line; i++) value += lines[i].length + 1; return value + range.end.character; })();
+      return text.slice(start, end);
+    },
     offsetAt(position) {
       let offset = 0;
       for (let i = 0; i < position.line; i++) offset += lines[i].length + 1;
       return offset + position.character;
     },
-    lineAt(line) { return { text: lines[line] || '' }; },
+    lineAt(line) { const value = lines[line] || ''; return { text: value, range: new Range(new Position(line, 0), new Position(line, value.length)) }; },
+    lineCount: lines.length,
     getWordRangeAtPosition() { return null; },
     uri: { fsPath: uiSource }
   };
@@ -223,6 +230,26 @@ for (const expected of ['self', 'width', 'height', 'title', 'requestedWidth', 'r
 const localProviderItems = new extension._test.CompletionProvider().provideCompletionItems(localCompletionDoc, localPosition);
 assert(localProviderItems.some(item => (item.label.label || item.label) === 'width'), 'function parameter completion is missing width');
 assert(localProviderItems.some(item => (item.label.label || item.label) === 'requestedWidth'), 'local variable completion is missing requestedWidth');
+
+assert(extension._test.shouldAutoTriggerSuggestions(localCompletionDoc, localPosition, 't'), 'automatic local suggestion trigger did not activate inside an object method');
+const exactUserSource = `use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
+export static const WindowManager = {
+    windowHandle = 0
+    CreateWindow = fn(width,height,title)
+        self.windowHandle = GLFW.glfwCreateWindow(widt,720,title,0,0)
+    end
+}
+`;
+const exactUserDoc = { ...mockDocument(exactUserSource), uri: { fsPath: path.join(sourceDir, 'ExactWindowManager.lsx') } };
+const exactLine = 4;
+const exactCharacter = exactUserSource.split('\n')[exactLine].indexOf('widt') + 4;
+const exactItems = new extension._test.CompletionProvider().provideCompletionItems(exactUserDoc, new Position(exactLine, exactCharacter));
+for (const expected of ['width', 'height', 'title']) {
+  assert(exactItems.some(item => (item.label.label || item.label) === expected), `exact function-call completion is missing ${expected}`);
+}
+const exactWidth = exactItems.find(item => (item.label.label || item.label) === 'width');
+assert(exactWidth.range && exactWidth.range.start.character === exactCharacter - 4, 'parameter completion does not replace the currently typed identifier');
+assert(exactItems.some(item => (item.label.label || item.label) === 'self.windowHandle'), 'current object fields are not offered as self.field suggestions');
 const selfCompletionDoc = {
   ...mockDocument(localCompletionSource.replace('            wid', '            self.')),
   uri: { fsPath: path.join(sourceDir, 'WindowManagerSelf.lsx') }
@@ -251,6 +278,22 @@ assert(formatted.includes('        if width > 0 then'), 'formatter did not inden
 assert(formatted.includes('            self.windowHandle = GLFW.glfwCreateWindow('), 'formatter did not indent code inside the if block');
 assert(formatted.includes('                width,'), 'formatter did not indent multiline arguments');
 assert(formatted.includes('            )\n        end\n    end\n}'), 'formatter did not align closing delimiters and end statements');
+
+const spacingFormatted = extension._test.formatLsxText(`fn main()
+local width=1280
+if width==1280 then
+local ok=true
+end
+end
+`, { insertSpaces: true, tabSize: 4 });
+assert(spacingFormatted.includes('local width = 1280'), 'formatter did not normalize assignment spacing');
+assert(spacingFormatted.includes('if width == 1280 then'), 'formatter did not normalize comparison spacing');
+const markupFormatted = extension._test.formatLsxText(`lshtml view() = {(
+<button id="save" onclick={save}>Save</button>
+)}
+`, { insertSpaces: true, tabSize: 4 });
+assert(markupFormatted.includes('id="save"'), 'formatter changed LSHTML attribute syntax');
+assert(!markupFormatted.includes('id = "save"'), 'formatter inserted LSX assignment spacing into LSHTML markup');
 
 const snippetsText = fs.readFileSync(path.join(__dirname, 'snippets', 'lazyscriptex.json'), 'utf8');
 const snippets = JSON.parse(snippetsText);
@@ -294,4 +337,4 @@ const staticMethodHover = extension._test.markdownForSymbol(staticServiceRecord,
 assert(staticMethodHover.value.includes('Static object'), 'static method hover does not explain direct singleton calls');
 assert(staticMethodHover.value.includes('Do not create it with `.new()`'), 'static method hover does not warn against .new()');
 
-console.log('LazyScriptEX extension navigation, local-scope completion, formatting, static objects, LSHTML/LSCSS, and inferred member tests passed.');
+console.log('LazyScriptEX extension navigation, forced local-scope completion, formatting, static objects, LSHTML/LSCSS, and inferred member tests passed.');

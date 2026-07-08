@@ -1,8 +1,8 @@
 {
   "name": "lazyscriptex-native-gamekit",
   "displayName": "LazyScriptEX Native GameKit",
-  "description": "Native LazyScriptEX tooling with static-object support, local-scope IntelliSense, import-path completion, formatting, beginner API hovers, exact compiler ranges, LSHTML/LSCSS, and O6 compilation.",
-  "version": "0.18.4",
+  "description": "Native LazyScriptEX tooling with reliable local-variable and parameter IntelliSense, automatic scope suggestions, import-path completion, built-in formatting, static objects, beginner API hovers, exact compiler ranges, LSHTML/LSCSS, and O6 compilation.",
+  "version": "0.18.5",
   "publisher": "nissyokugames",
   "license": "MIT",
   "engines": {
@@ -292,8 +292,34 @@
         "lazyscriptex.format.enable": {
           "type": "boolean",
           "default": true,
-          "description": "Enable the built-in LSX document formatter. Use Format Document or VS Code editor.formatOnSave."
+          "description": "Enable the built-in LSX document, selection, on-type, and format-on-save formatter."
+        },
+        "lazyscriptex.completion.autoTrigger": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically open IntelliSense while typing inside an LSX function so parameters, locals, loop variables, self, and object members are always visible."
+        },
+        "lazyscriptex.completion.autoTriggerDelay": {
+          "type": "number",
+          "default": 35,
+          "minimum": 0,
+          "maximum": 500,
+          "description": "Milliseconds to wait before opening LSX local-scope IntelliSense after typing an identifier character."
         }
+      }
+    },
+    "configurationDefaults": {
+      "[lazyscriptex]": {
+        "editor.defaultFormatter": "nissyokugames.lazyscriptex-native-gamekit",
+        "editor.quickSuggestions": {
+          "other": true,
+          "comments": false,
+          "strings": false
+        },
+        "editor.suggestOnTriggerCharacters": true,
+        "editor.formatOnSave": true,
+        "editor.formatOnType": true,
+        "editor.wordBasedSuggestions": "currentDocument"
       }
     }
   },

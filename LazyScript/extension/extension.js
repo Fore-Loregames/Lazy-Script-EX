@@ -18,6 +18,7 @@ let projectConfigs = [];
 const diagnosticFiles = new Map();
 const checkTimers = new Map();
 let lastCheckGeneration = 0;
+let suggestionTimer;
 
 const KEYWORDS = [
   'use','as','export','extern','fn','const','static','lshtml','lscss','local','return','if','then','else','elseif','end','while','do','for','in','break','continue',
@@ -757,6 +758,56 @@ function stripCodeForScope(raw, state = { blockComment: false }) {
   return out;
 }
 
+
+function currentIdentifierRange(document, position) {
+  const line = document.lineAt(position.line).text || '';
+  let start = Math.min(position.character, line.length);
+  let end = start;
+  while (start > 0 && /[A-Za-z0-9_]/.test(line[start - 1])) start--;
+  while (end < line.length && /[A-Za-z0-9_]/.test(line[end])) end++;
+  return new vscode.Range(new vscode.Position(position.line, start), new vscode.Position(position.line, end));
+}
+
+function linePrefixIsCode(document, position) {
+  const line = document.lineAt(position.line).text.slice(0, position.character);
+  let quote = '';
+  let escaped = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    const next = line[i + 1] || '';
+    if (quote) {
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\') { escaped = true; continue; }
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '-' && next === '-') return false;
+    if (ch === '"' || ch === "'") quote = ch;
+  }
+  return !quote;
+}
+
+function shouldAutoTriggerSuggestions(document, position, insertedText) {
+  if (!insertedText || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(insertedText)) return false;
+  if (!linePrefixIsCode(document, position)) return false;
+  const line = document.lineAt(position.line).text.slice(0, position.character);
+  if (/^\s*use\s+"/.test(line)) return false;
+  if (insideLshtml(document, position) || insideLscss(document, position)) return false;
+  return collectVisibleScopeSymbols(document, position).length > 0 || Boolean(enclosingObjectAt(activeRecord(document), position.line));
+}
+
+function scheduleSuggestionPopup(document, position, insertedText) {
+  if (!vscode.workspace.getConfiguration('lazyscriptex').get('completion.autoTrigger', true)) return;
+  if (!shouldAutoTriggerSuggestions(document, position, insertedText)) return;
+  if (suggestionTimer) clearTimeout(suggestionTimer);
+  const delay = vscode.workspace.getConfiguration('lazyscriptex').get('completion.autoTriggerDelay', 35);
+  suggestionTimer = setTimeout(() => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.uri.fsPath !== document.uri.fsPath) return;
+    vscode.commands.executeCommand('editor.action.triggerSuggest');
+  }, Math.max(0, Number(delay) || 0));
+}
+
 function makeScopeSymbol(name, kind, line, column, extra = {}) {
   const label = kind === 'parameter' ? 'parameter' : kind === 'loop' ? 'loop variable' : 'local variable';
   return {
@@ -876,7 +927,7 @@ function enclosingObjectAt(record, line) {
     .sort((a, b) => (a.endLine - a.line) - (b.endLine - b.line))[0] || null;
 }
 
-function completionForScopeSymbol(symbol) {
+function completionForScopeSymbol(symbol, range = null) {
   const item = new vscode.CompletionItem(symbol.name, vscode.CompletionItemKind.Variable);
   const label = symbol.scopeKind === 'parameter' ? 'Function parameter' : symbol.scopeKind === 'loop' ? 'Loop variable' : 'Local variable';
   item.detail = `${label}: ${symbol.name}${symbol.type ? ` (${symbol.type})` : ' (inferred)'}`;
@@ -885,7 +936,20 @@ function completionForScopeSymbol(symbol) {
   md.appendMarkdown(`\n${symbol.documentation || label}.`);
   item.documentation = md;
   item.insertText = symbol.name;
+  item.filterText = symbol.name;
+  if (range) item.range = range;
+  item.preselect = symbol.scopeKind === 'parameter' || symbol.scopeKind === 'local';
   item.sortText = `00_${String(999 - (symbol.depth || 0)).padStart(3, '0')}_${symbol.name}`;
+  return item;
+}
+
+function completionForSelfMember(record, object, member, range = null) {
+  const item = completionFor(record, member, 'self.', object);
+  item.label = { label: `self.${member.name}`, description: object.staticObject ? 'static object field/method' : 'current object field/method' };
+  item.filterText = `${member.name} self.${member.name}`;
+  item.insertText = member.kind === 'method' ? new vscode.SnippetString(`self.${snippetForCallable(member).value || member.name}`) : `self.${member.name}`;
+  if (range) item.range = range;
+  item.sortText = `01_${member.name}`;
   return item;
 }
 
@@ -1361,7 +1425,7 @@ function countMatches(text, regex) {
 }
 
 
-function normalizeLsxLineSpacing(raw, state) {
+function normalizeLsxLineSpacing(raw, state, options = {}) {
   let out = '';
   let quote = '';
   let escaped = false;
@@ -1397,6 +1461,24 @@ function normalizeLsxLineSpacing(raw, state) {
     if (ch === '"' || ch === "'") {
       quote = ch;
       out += ch;
+      continue;
+    }
+    if (!options.markup && ch === '=') {
+      let operator = '=';
+      if (next === '=') { operator = '=='; i++; }
+      const previous = raw[i - (operator.length === 2 ? 1 : 0) - 1] || '';
+      if (previous === '<' || previous === '>' || previous === '!' || previous === '=') {
+        out += operator;
+        continue;
+      }
+      out = out.replace(/[ \t]+$/g, '') + ` ${operator} `;
+      while (i + 1 < raw.length && /[ \t]/.test(raw[i + 1])) i++;
+      continue;
+    }
+    if (!options.markup && (ch === '<' || ch === '>' || ch === '!') && next === '=') {
+      out = out.replace(/[ \t]+$/g, '') + ` ${ch}= `;
+      i++;
+      while (i + 1 < raw.length && /[ \t]/.test(raw[i + 1])) i++;
       continue;
     }
     if (ch === ',') {
@@ -1494,7 +1576,8 @@ function formatLsxText(text, options = {}) {
       continue;
     }
 
-    const formattedContent = normalizeLsxLineSpacing(trimmed, spacingState);
+    const looksLikeMarkup = lshtmlDepth > 0 || /^(?:<|\)\}|\{\()/.test(trimmed);
+    const formattedContent = normalizeLsxLineSpacing(trimmed, spacingState, { markup: looksLikeMarkup });
     const codeRaw = formatCodeView(formattedContent, state);
     const code = codeRaw.trim();
     const lshtmlStart = /^(?:export\s+)?lshtml\b.*=\s*\{\(\s*$/.test(code);
@@ -1542,6 +1625,46 @@ class DocumentFormattingProvider {
     const lastLine = Math.max(0, document.lineCount - 1);
     const end = document.lineAt(lastLine).range?.end || new vscode.Position(lastLine, document.lineAt(lastLine).text.length);
     return [vscode.TextEdit.replace(new vscode.Range(start, end), formatted)];
+  }
+}
+
+
+class DocumentRangeFormattingProvider {
+  provideDocumentRangeFormattingEdits(document, range, options) {
+    if (!vscode.workspace.getConfiguration('lazyscriptex').get('format.enable', true)) return [];
+    const startLine = Math.max(0, range.start.line);
+    const endLine = Math.min(document.lineCount - 1, range.end.line);
+    const start = new vscode.Position(startLine, 0);
+    const end = document.lineAt(endLine).range.end;
+    const expandedRange = new vscode.Range(start, end);
+    const original = document.getText(expandedRange);
+    const formatted = formatLsxText(original, options).replace(/\r?\n$/, '');
+    if (formatted === original) return [];
+    return [vscode.TextEdit.replace(expandedRange, formatted)];
+  }
+}
+
+function desiredIndentAtLine(document, line, options) {
+  const lines = document.getText().replace(/\r\n/g, '\n').split('\n');
+  const synthetic = [...lines.slice(0, line), '__LSX_CURSOR__'].join('\n');
+  const formatted = formatLsxText(synthetic, options).split(/\r?\n/);
+  const cursorLine = formatted.find(value => value.includes('__LSX_CURSOR__')) || '__LSX_CURSOR__';
+  return cursorLine.slice(0, cursorLine.indexOf('__LSX_CURSOR__'));
+}
+
+class OnTypeFormattingProvider {
+  provideOnTypeFormattingEdits(document, position, ch, options) {
+    if (!vscode.workspace.getConfiguration('lazyscriptex').get('format.enable', true)) return [];
+    const lineNumber = Math.max(0, Math.min(position.line, document.lineCount - 1));
+    const line = document.lineAt(lineNumber).text;
+    const existingIndent = (line.match(/^\s*/) || [''])[0];
+    let desiredIndent = desiredIndentAtLine(document, lineNumber, options);
+    if (ch === '}' && /^\s*}/.test(line)) {
+      const formatted = formatLsxText(document.getText(), options).split(/\r?\n/)[lineNumber] || line;
+      desiredIndent = (formatted.match(/^\s*/) || [''])[0];
+    }
+    if (existingIndent === desiredIndent) return [];
+    return [vscode.TextEdit.replace(new vscode.Range(new vscode.Position(lineNumber, 0), new vscode.Position(lineNumber, existingIndent.length)), desiredIndent)];
   }
 }
 
@@ -1598,11 +1721,21 @@ class CompletionProvider {
       }
     }
     const items = KEYWORDS.map(keyword => new vscode.CompletionItem(keyword, vscode.CompletionItemKind.Keyword));
+    const replacementRange = currentIdentifierRange(document, position);
     const addedNames = new Set();
     for (const sym of scopeSymbols.sort((a, b) => (b.depth || 0) - (a.depth || 0))) {
       if (addedNames.has(sym.name)) continue;
-      items.push(completionForScopeSymbol(sym));
+      items.push(completionForScopeSymbol(sym, replacementRange));
       addedNames.add(sym.name);
+    }
+    const currentObject = enclosingObjectAt(record, position.line);
+    if (currentObject) {
+      for (const member of currentObject.members.filter(member => !member.name.startsWith('_'))) {
+        const key = `self.${member.name}`;
+        if (addedNames.has(key)) continue;
+        items.push(completionForSelfMember(record, currentObject, member, replacementRange));
+        addedNames.add(key);
+      }
     }
     for (const sym of record.symbols) {
       if (sym.kind === 'variable' || addedNames.has(sym.name)) continue;
@@ -2120,6 +2253,8 @@ async function activate(context) {
   context.subscriptions.push(vscode.languages.registerDocumentSymbolProvider(selector, new DocumentSymbolProvider()));
   context.subscriptions.push(vscode.languages.registerWorkspaceSymbolProvider(new WorkspaceSymbolProvider()));
   context.subscriptions.push(vscode.languages.registerDocumentFormattingEditProvider(selector, new DocumentFormattingProvider()));
+  context.subscriptions.push(vscode.languages.registerDocumentRangeFormattingEditProvider(selector, new DocumentRangeFormattingProvider()));
+  context.subscriptions.push(vscode.languages.registerOnTypeFormattingEditProvider(selector, new OnTypeFormattingProvider(), '\n', '}'));
   context.subscriptions.push(vscode.languages.registerCodeActionsProvider(selector, new ImportCodeActionProvider(), { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }));
 
   watcher = vscode.workspace.createFileSystemWatcher('**/*.lsx');
@@ -2132,6 +2267,11 @@ async function activate(context) {
     if (event.document.languageId === LANGUAGE) {
       activeRecord(event.document);
       scheduleCheck(event.document);
+      for (const change of event.contentChanges || []) {
+        if (!change.text || change.text.length > 32 || /\r|\n/.test(change.text)) continue;
+        const position = new vscode.Position(change.range.start.line, change.range.start.character + change.text.length);
+        scheduleSuggestionPopup(event.document, position, change.text);
+      }
     }
   }));
   context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(doc => {
@@ -2149,6 +2289,7 @@ async function activate(context) {
 }
 
 function deactivate() {
+  if (suggestionTimer) clearTimeout(suggestionTimer);
   for (const external of externalWatchers) external.dispose?.();
   externalWatchers = [];
   for (const timer of checkTimers.values()) clearTimeout(timer);
@@ -2156,5 +2297,5 @@ function deactivate() {
 }
 module.exports = {
   activate, deactivate, parseText, resolveImport, chainContext, inferTypeFromInitializer,
-  _test: { index, loadRecordSync, importedSymbol, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, HoverProvider, DocumentFormattingProvider, formatLsxText, collectVisibleScopeSymbols, completionForScopeSymbol, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs }
+  _test: { index, loadRecordSync, importedSymbol, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, HoverProvider, DocumentFormattingProvider, DocumentRangeFormattingProvider, OnTypeFormattingProvider, formatLsxText, collectVisibleScopeSymbols, completionForScopeSymbol, completionForSelfMember, currentIdentifierRange, shouldAutoTriggerSuggestions, desiredIndentAtLine, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs }
 };

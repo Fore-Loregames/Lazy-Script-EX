@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-set "VSIX=%~dp0LazyScriptEX-Native-GameKit-0.18.4.vsix"
+set "VSIX=%~dp0LazyScriptEX-Native-GameKit-0.18.5.vsix"
 set "CODE_CLI="
 
 if not exist "%VSIX%" (
@@ -46,7 +46,7 @@ if not defined CODE_CLI (
   exit /b 1
 )
 
-echo Installing LazyScriptEX Native GameKit 0.18.4 into Visual Studio Code...
+echo Installing LazyScriptEX Native GameKit 0.18.5 into Visual Studio Code...
 echo Using: %CODE_CLI%
 echo.
 call "%CODE_CLI%" --install-extension "%VSIX%" --force
@@ -60,7 +60,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo SUCCESS: LazyScriptEX Native GameKit 0.18.4 is installed.
+echo SUCCESS: LazyScriptEX Native GameKit 0.18.5 is installed.
 echo Restart Visual Studio Code, then open the toolkit root folder.
 pause
 exit /b 0

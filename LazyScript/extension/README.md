@@ -66,27 +66,19 @@ Default shortcuts:
 
 ## Local completion and formatting
 
-Completion follows the active LSX scope. Inside a function or object method, IntelliSense includes:
+The extension provides scope-aware completion for function parameters, `local` variables, loop variables, `self`, and the fields and methods on the current object. It automatically opens the suggestion list while you type inside a function, so values such as `width`, `height`, `window`, and `framebuffer` appear without switching files or manually pressing `Ctrl+Space`. Values from unrelated functions do not leak into the current list.
 
-- inferred function parameters such as `width`, `height`, and `title`;
-- `local` variables declared before the cursor;
-- `for ... in` loop variables;
-- `self` inside object methods;
-- object fields and methods after typing `self.`;
-- members inferred from locally created objects.
+The extension is registered as the default formatter for `.lsx` files. **Format Document** (`Shift+Alt+F`), **Format Selection**, format-on-type indentation, and format-on-save are supported. The formatter corrects indentation for functions, static objects, `if`/`elseif`/`else`, loops, multiline calls, LSHTML tags, and LSCSS blocks. It also normalizes assignment/comparison spacing and spaces after commas without changing strings, comments, or HTML attributes.
 
-Use **Format Document** from the Command Palette or press VS Code's normal format shortcut, `Shift+Alt+F`. The formatter corrects indentation for functions, objects, `if`/`elseif`/`else`, loops, multiline calls, LSHTML tags, and LSCSS blocks. It also adds readable spaces after commas without changing strings or comments.
-
-To format whenever you save, enable VS Code's standard setting:
+Formatting on save is enabled for LSX by default. To disable it only for LSX in a workspace:
 
 ```json
-{
-  "[lazyscriptex]": {
-    "editor.defaultFormatter": "nissyokugames.lazyscriptex-native-gamekit",
-    "editor.formatOnSave": true
-  }
+"[lazyscriptex]": {
+    "editor.formatOnSave": false
 }
 ```
+
+Automatic local suggestions can be changed with `lazyscriptex.completion.autoTrigger` and `lazyscriptex.completion.autoTriggerDelay`.
 
 ## Diagnostics
 
@@ -189,7 +181,9 @@ Then imports can use `@Engine/...` or `@Shared/...` from any source depth. Share
 | `lazyscriptex.moduleRoots` | Extra `@Name` roots available to IntelliSense and compiler checks |
 | `lazyscriptex.recursiveIndex` | Recursively index workspace, LazyScript, and configured roots |
 | `lazyscriptex.exclude` | Glob excluded from indexing |
-| `lazyscriptex.format.enable` | Enables the built-in LSX document formatter |
+| `lazyscriptex.format.enable` | Enables document, selection, on-type, and save formatting |
+| `lazyscriptex.completion.autoTrigger` | Automatically opens local-scope IntelliSense while typing |
+| `lazyscriptex.completion.autoTriggerDelay` | Delay before the local-variable suggestion list opens |
 
 ## Testing the extension
 
