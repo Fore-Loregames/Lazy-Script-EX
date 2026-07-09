@@ -91,7 +91,7 @@ assert(!`${bundledBehaviorCheck.stdout}
 ${bundledBehaviorCheck.stderr}`.includes("unknown module or API namespace 'behavior'"), 'bundled extension compiler still treats local behavior values as namespaces');
 const bundledVersion = cp.spawnSync(process.execPath, [bundledCompilerPath, '--version'], { encoding: 'utf8' });
 assert.strictEqual(bundledVersion.status, 0, bundledVersion.stderr);
-assert.strictEqual(bundledVersion.stdout.trim(), '0.18.10', 'extension did not bundle compiler 0.18.10');
+assert.strictEqual(bundledVersion.stdout.trim(), '0.18.16', 'extension did not bundle compiler 0.18.16');
 
 const runtimeTypeDir = path.join(sourceDir, 'RuntimeTypes');
 fs.mkdirSync(runtimeTypeDir, { recursive: true });
@@ -483,6 +483,159 @@ const markupFormatted = extension._test.formatLsxText(`lshtml view() = {(
 assert(markupFormatted.includes('id="save"'), 'formatter changed LSHTML attribute syntax');
 assert(!markupFormatted.includes('id = "save"'), 'formatter inserted LSX assignment spacing into LSHTML markup');
 
+
+const compactStatementsFormatted = extension._test.formatLsxText(`export static const Color = {
+_Clamp255 = fn(value)
+if value < 0 then return 0 end
+if value > 255 then return 255 end
+return value
+end
+Hex = fn(value) return self.RGBA(0, 0, 0, 255) end
+}
+`, { insertSpaces: true, tabSize: 4 });
+assert(compactStatementsFormatted.includes(`    _Clamp255 = fn(value)
+        if value < 0 then
+            return 0
+        end
+        if value > 255 then
+            return 255
+        end
+        return value
+    end`), `formatter did not expand compact if statements:\n${compactStatementsFormatted}`);
+assert(compactStatementsFormatted.includes(`    Hex = fn(value)
+        return self.RGBA(0, 0, 0, 255)
+    end`), `formatter did not expand a compact function:\n${compactStatementsFormatted}`);
+
+const pastedColorFormatted = extension._test.formatLsxText(`export static const Color = {
+    RGBA = fn(red, green, blue, alpha)
+red = self._Clamp255(red)
+return red +
+green * 256 +
+blue * 65536 +
+alpha * 16777216
+end
+
+Hex = fn(value)
+if value == null then return self.RGBA(0, 0, 0, 255) end
+local length=string.length(value)
+if length < 4 then return self.RGBA(0, 0, 0, 255) end
+end
+}
+`, { insertSpaces: true, tabSize: 4 });
+assert(pastedColorFormatted.includes(`    RGBA = fn(red, green, blue, alpha)
+        red = self._Clamp255(red)
+        return red +
+            green * 256 +
+            blue * 65536 +
+            alpha * 16777216
+    end`), `external paste continuation indentation is wrong:\n${pastedColorFormatted}`);
+assert(pastedColorFormatted.includes(`    Hex = fn(value)
+        if value == null then
+            return self.RGBA(0, 0, 0, 255)
+        end
+        local length = string.length(value)
+        if length < 4 then
+            return self.RGBA(0, 0, 0, 255)
+        end
+    end`), `external paste block formatting is wrong:\n${pastedColorFormatted}`);
+
+
+// A block header can span multiple physical lines. The formatter must wait for
+// the final `then`/`do` before opening the body; otherwise the matching `end`
+// incorrectly closes the surrounding branch and pulls the rest of a long
+// function back toward column zero.
+const multilineConditionFormatted = extension._test.formatLsxText(`export static const Color = {
+Hex = fn(value)
+if length == 4 or length == 5 then
+return 1
+elseif length == 7 or length == 9 then
+if redHigh < 0 or redLow < 0 or
+greenHigh < 0 or greenLow < 0 or
+blueHigh < 0 or blueLow < 0 then
+return 0
+end
+red = redHigh * 16 + redLow
+else
+return -1
+end
+return red
+end
+Red = fn(value)
+return value / 255.0
+end
+}
+`, { insertSpaces: true, tabSize: 4 });
+assert(multilineConditionFormatted.includes(`        elseif length == 7 or length == 9 then
+            if redHigh < 0 or redLow < 0 or
+                greenHigh < 0 or greenLow < 0 or
+                blueHigh < 0 or blueLow < 0 then
+                return 0
+            end
+            red = redHigh * 16 + redLow
+        else
+            return -1
+        end
+        return red
+    end
+    Red = fn(value)
+        return value / 255.0
+    end
+}`), `multiline if formatting pulled the rest of the function to column zero:
+${multilineConditionFormatted}`);
+
+// Formatting a pasted or selected multiline fragment must use the surrounding
+// object/function depth. The old range formatter started every fragment at
+// column zero, which is why code pasted from outside VS Code was flattened.
+const pasteContextSource = `export static const Color = {
+    Hex = fn(value)
+local length=string.length(value)
+if length < 4 then
+return 0
+end
+    end
+}
+`;
+const pasteContextDoc = mockDocument(pasteContextSource);
+const pasteRange = new Range(new Position(2, 0), new Position(5, 3));
+const pasteEdits = new extension._test.DocumentRangeFormattingProvider().provideDocumentRangeFormattingEdits(
+  pasteContextDoc,
+  pasteRange,
+  { insertSpaces: true, tabSize: 4 },
+);
+assert.strictEqual(pasteEdits.length, 1, 'contextual paste/range formatting produced no edit');
+assert.strictEqual(
+  pasteEdits[0].newText,
+  '        local length = string.length(value)\n        if length < 4 then\n            return 0\n        end',
+  `pasted LSX block lost its surrounding indentation:\n${pasteEdits[0].newText}`,
+);
+
+const extensionPackage = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+assert.strictEqual(extensionPackage.contributes.configurationDefaults['[lazyscriptex]']['editor.formatOnPaste'], true, 'LSX external paste formatting must be enabled');
+assert.strictEqual(extensionPackage.contributes.configurationDefaults['[lazyscriptex]']['editor.acceptSuggestionOnEnter'], 'smart', 'LSX Enter must use normal VS Code smart completion acceptance');
+const popupEnterBindings = extensionPackage.contributes.keybindings.filter(binding =>
+  binding.key === 'enter' &&
+  binding.command === 'lazyscriptex.enterWithoutCompletion' &&
+  binding.when.includes('suggestWidgetVisible &&')
+);
+assert.strictEqual(popupEnterBindings.length, 1, 'LSX must contribute one popup-autocomplete newline fallback');
+assert(popupEnterBindings[0].when.includes('!suggestWidgetHasFocusedSuggestion'), 'LSX Enter fallback must only run when no completion was deliberately selected');
+assert(!extensionPackage.contributes.keybindings.some(binding =>
+  binding.key === 'enter' &&
+  binding.command === 'lazyscriptex.enterWithoutCompletion' &&
+  binding.when.includes('suggestWidgetVisible &&') &&
+  !binding.when.includes('!suggestWidgetHasFocusedSuggestion')
+), 'LSX Enter still overrides acceptance of a selected completion');
+assert(extensionPackage.contributes.keybindings.some(binding =>
+  binding.key === 'enter' &&
+  binding.command === 'lazyscriptex.enterWithoutCompletion' &&
+  binding.when.includes('inlineSuggestionVisible')
+), 'LSX Enter keybinding does not bypass unselected inline autocomplete');
+const extensionSourceForEnter = fs.readFileSync(path.join(__dirname, 'extension.js'), 'utf8');
+assert(extensionSourceForEnter.includes("executeCommand('hideSuggestWidget')"), 'Enter command does not explicitly close popup autocomplete');
+assert(extensionSourceForEnter.includes("executeCommand('editor.action.inlineSuggest.hide')"), 'Enter command does not explicitly close inline autocomplete');
+assert(extensionSourceForEnter.includes("executeCommand('type', { text: '\\n' })"), 'Enter command does not type a normal newline');
+assert(!grammarText.includes('|<>|'), 'syntax grammar still advertises unsupported <>');
+
 const snippetsText = fs.readFileSync(path.join(__dirname, 'snippets', 'lazyscriptex.json'), 'utf8');
 const snippets = JSON.parse(snippetsText);
 const canvasSnippet = snippets['Declarative LazyUI canvas'];
@@ -580,5 +733,50 @@ const importedSetValue = importedMemberItems.find(item => (item.label.label || i
 assert(importedSetValue.additionalTextEdits?.[0]?.newText === 'ServiceMod.StaticService', 'imported completion did not correct the qualifier to its declared case');
 assert(!importedMemberItems.some(item => (item.label.label || item.label) === 'localOnly'), 'imported object completion leaked current-file fields');
 assert(!importedMemberItems.some(item => (item.label.label || item.label) === 'Run'), 'imported object completion leaked the current object method');
+
+
+// Nested named tables inside a static object are real compiler-visible object
+// shapes. IntelliSense must keep their members nested instead of flattening
+// Left/Right onto Input or treating MouseButton as an empty growable table.
+const nestedInputPath = path.join(sourceDir, 'NestedInput.lsx');
+fs.writeFileSync(nestedInputPath, `use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
+
+export static const Input = {
+    MouseButton = {
+        Button1 = GLFW.GLFW_MOUSE_BUTTON_1
+        Left = GLFW.GLFW_MOUSE_BUTTON_LEFT
+        Right = GLFW.GLFW_MOUSE_BUTTON_RIGHT
+        Middle = GLFW.GLFW_MOUSE_BUTTON_MIDDLE
+    }
+}
+`);
+const nestedInputRecord = extension._test.loadRecordSync(nestedInputPath);
+const nestedInputObject = nestedInputRecord.exports.find(symbol => symbol.name === 'Input');
+const nestedMouseButton = nestedInputObject?.members?.find(member => member.name === 'MouseButton');
+assert(nestedMouseButton?.members?.some(member => member.name === 'Left'), 'nested static-object parser did not attach Left to MouseButton');
+assert(!nestedInputObject?.members?.some(member => member.name === 'Left'), 'nested static-object parser flattened Left onto Input');
+
+const nestedInputConsumerSource = `use "NestedInput.lsx" as InputMod
+fn main()
+    InputMod.Input.MouseButton.
+    return 0
+end
+`;
+const nestedInputConsumerDoc = {
+  ...mockDocument(nestedInputConsumerSource),
+  uri: { fsPath: path.join(sourceDir, 'NestedInputConsumer.lsx') }
+};
+fs.writeFileSync(nestedInputConsumerDoc.uri.fsPath, nestedInputConsumerSource);
+const nestedInputItems = new extension._test.CompletionProvider().provideCompletionItems(
+  nestedInputConsumerDoc,
+  new Position(2, '    InputMod.Input.MouseButton.'.length)
+);
+for (const expected of ['Button1', 'Left', 'Right', 'Middle']) {
+  assert(nestedInputItems.some(item => (item.label.label || item.label) === expected), `nested Input.MouseButton completion is missing ${expected}`);
+}
+assert(!nestedInputItems.some(item => (item.label.label || item.label) === 'push'), 'nested closed object was mistaken for a growable table');
+const nestedConsumerRecord = extension._test.loadRecordSync(nestedInputConsumerDoc.uri.fsPath);
+const nestedLeft = extension._test.resolveChain(nestedConsumerRecord, ['InputMod', 'Input', 'MouseButton', 'Left']);
+assert.strictEqual(nestedLeft?.symbol?.name, 'Left', 'nested imported hover/navigation did not resolve MouseButton.Left');
 
 console.log('LazyScriptEX extension runtime object types, navigation, local and imported-module completion, formatting, static objects, LSHTML/LSCSS, and inferred member tests passed.');

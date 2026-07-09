@@ -302,6 +302,19 @@ export static const WindowManager = {
 }
 ```
 
+Named nested groups may be declared directly inside the static object. They are initialized with the singleton and remain visible to completion across module boundaries:
+
+```lsx
+export static const Input = {
+    MouseButton = {
+        Left = GLFW.GLFW_MOUSE_BUTTON_LEFT
+        Right = GLFW.GLFW_MOUSE_BUTTON_RIGHT
+    }
+}
+```
+
+No constructor or `StartInput()` assignment pass is required for these constant groups.
+
 Imported static objects are called directly through the module export:
 
 ```lsx

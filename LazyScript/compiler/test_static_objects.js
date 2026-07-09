@@ -68,6 +68,51 @@ for (const level of ['0', '6']) {
   assert(fs.existsSync(output) && fs.statSync(output).size > 4096, `static object O${level} executable was not generated`);
 }
 
+
+write('Bindings.lsx', `
+export const MOUSE_LEFT = 0
+export const MOUSE_RIGHT = 1
+export const KEY_A = 65
+`);
+
+write('Input.lsx', `
+use "Bindings.lsx" as Native
+
+export static const Input = {
+    MouseButton = {
+        Left = Native.MOUSE_LEFT
+        Right = Native.MOUSE_RIGHT
+    }
+
+    Key = {
+        A = Native.KEY_A
+    }
+}
+`);
+
+const nestedStatic = write('nested-static-main.lsx', `
+use "Input.lsx" as InputMod
+
+fn main()
+    if InputMod.Input.MouseButton.Left != 0 then
+        return 1
+    end
+    if InputMod.Input.MouseButton.Right != 1 then
+        return 2
+    end
+    if InputMod.Input.Key.A != 65 then
+        return 3
+    end
+    return 0
+end
+`);
+run(['check', nestedStatic, '--diagnostics=json']);
+for (const level of ['0', '6']) {
+  const output = path.join(temp, `nested-static-o${level}.exe`);
+  run(['build', nestedStatic, '-o', output, '--opt', level]);
+  assert(fs.existsSync(output) && fs.statSync(output).size > 4096, `nested static object O${level} executable was not generated`);
+}
+
 const invalidNew = write('invalid-new.lsx', `
 use "WindowManager.lsx" as WindowManagerMod
 fn main()

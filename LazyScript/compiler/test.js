@@ -1539,6 +1539,103 @@ end
 `);
 run(['build', pushOnly, '-o', path.join(temp, 'push-only.exe'), '--opt', '4']);
 
+// A lifecycle method on the enclosing object must not make an untyped
+// parameter or table-loop item collapse to self. Scene.Start and
+// GameObject.Start intentionally share a name; go.tag must still identify
+// GameObject and specialize the empty gameObjects table without annotations.
+write('scene-peer-inference/GameObject.lsx', `
+export const GameObject = {
+    name = "GameObject"
+    tag = "Default"
+    Start = fn() end
+}
+`);
+const scenePeerInference = write('scene-peer-inference/Scene.lsx', `
+use "GameObject.lsx" as GameObject
+export const Scene = {
+    name = "Scene"
+    gameObjects = {}
+
+    AddGameObject = fn(go)
+        self.gameObjects.push(go)
+        go.Start()
+    end
+
+    Start = fn() end
+
+    FindGameObjectByTag = fn(goTag)
+        for go in self.gameObjects do
+            if go.tag == goTag then
+                return go
+            end
+        end
+        return null
+    end
+}
+`);
+run(['check', scenePeerInference]);
+
+// A for-loop item is the element yielded by its collection. Standalone API
+// checks may not have a project call site yet, so unresolved generic items must
+// stay deferred rather than becoming ptr/i64 and producing a false member error.
+const standaloneLoopItem = write('standalone-loop-item/Scene.lsx', `
+export const Scene = {
+    gameObjects = {}
+
+    AddGameObject = fn(go)
+        self.gameObjects.push(go)
+        go.Start()
+    end
+
+    FindGameObjectByTag = fn(goTag)
+        for go in self.gameObjects do
+            if go.tag == goTag then
+                return go
+            end
+        end
+        return null
+    end
+}
+`);
+run(['check', standaloneLoopItem]);
+
+// Once a project call site supplies the collection element, the same loop item
+// must resolve to that concrete object for a real build rather than remaining
+// a deferred editor-only placeholder.
+write('loop-item-project/Engine/GameObject.lsx', `
+export const GameObject = {
+    tag = "Default"
+    Start = fn() end
+}
+`);
+write('loop-item-project/Engine/Scene.lsx', `
+export const Scene = {
+    gameObjects = {}
+    AddGameObject = fn(go)
+        self.gameObjects.push(go)
+        go.Start()
+    end
+    FindGameObjectByTag = fn(goTag)
+        for go in self.gameObjects do
+            if go.tag == goTag then return go end
+        end
+        return null
+    end
+}
+`);
+const loopItemProject = write('loop-item-project/main.lsx', `
+use "Engine/GameObject.lsx" as GO
+use "Engine/Scene.lsx" as SceneMod
+fn main()
+    local scene = SceneMod.Scene.new()
+    local go = GO.GameObject.new()
+    scene.AddGameObject(go)
+    if scene.FindGameObjectByTag("Default") == go then return 0 end
+    return 1
+end
+`);
+run(['build', loopItemProject, '-o', path.join(temp, 'loop-item-project.exe'), '--opt', '4']);
+
 // Unknown fields must be diagnosed instead of silently compiling invalid engine data access.
 const badField = write('bad-field.lsx', `
 const Point = {
@@ -1967,6 +2064,103 @@ fs.writeFileSync(circularBorrowConfig, JSON.stringify({
 }, null, 2));
 run(['build', circularBorrowConfig]);
 
+
+// Anonymous record tables returned by a function retain one compiler-owned
+// identity across modules. Assigning that result into an inferred object field
+// must not create an alias-qualified duplicate type.
+write('cross-module-record-return/Engine/Color.lsx', `
+export static const Color = {
+    Create = fn(red, green, blue, alpha)
+        return {
+            red = red
+            green = green
+            blue = blue
+            alpha = alpha
+            r = red / 255.0
+            g = green / 255.0
+            b = blue / 255.0
+            a = alpha / 255.0
+        }
+    end
+
+    RGBA = fn(red, green, blue, alpha)
+        return self.Create(red, green, blue, alpha)
+    end
+}
+`);
+const crossModuleRecordReturn = write('cross-module-record-return/main.lsx', `
+use "@Engine/Color.lsx" as ColorMod
+
+export static const Run = {
+    color = null
+
+    Init = fn()
+        self.color = ColorMod.Color.RGBA(100, 149, 237, 255)
+    end
+
+    Read = fn()
+        return self.color.r + self.color.g + self.color.b + self.color.a
+    end
+
+    Destroy = fn()
+        self.color.destroy()
+    end
+}
+
+fn main()
+    Run.Init()
+    local value = Run.Read()
+    Run.Destroy()
+    if value > 0.0 then
+        return 0
+    end
+    return 1
+end
+`);
+const crossModuleRecordRoot = path.join(temp, 'cross-module-record-return', 'Engine');
+run(['check', crossModuleRecordReturn, '--module-root', `Engine=${crossModuleRecordRoot}`]);
+const crossModuleRecordConfig = path.join(temp, 'cross-module-record-return', 'lazyscriptex.json');
+fs.writeFileSync(crossModuleRecordConfig, JSON.stringify({
+  entry: 'main.lsx',
+  output: 'build/cross-module-record-return.exe',
+  subsystem: 'console',
+  optimization: 6,
+  moduleRoots: { Engine: 'Engine' },
+}, null, 2));
+run(['build', crossModuleRecordConfig]);
+
+// The two not-equal symbols lower to the same comparison operation. The
+// `not` keyword remains the normal logical-negation form. SQL-style <> is not
+// LSX syntax and must not be accepted.
+const notEqualAliases = write('not-equal-aliases.lsx', `
+fn main()
+    local left = 10
+    local right = 20
+    if left ~= right and left != right and not (left == right) then
+        return 0
+    end
+    return 1
+end
+`);
+run(['check', notEqualAliases]);
+const notEqualTokens = new compilerApi.Lexer(fs.readFileSync(notEqualAliases, 'utf8'), notEqualAliases).lex();
+assert(notEqualTokens.some((token) => token.value === '~='), 'lexer did not retain ~=');
+assert(notEqualTokens.some((token) => token.value === '!='), 'lexer did not accept !=');
+assert(notEqualTokens.some((token) => token.type === 'keyword' && token.value === 'not'), 'lexer did not retain logical not');
+
+const sqlStyleNotEqual = write('invalid-angle-not-equal.lsx', `
+fn main()
+    if 1 <> 2 then return 0 end
+    return 1
+end
+`);
+const sqlStyleNotEqualResult = run(['check', sqlStyleNotEqual], 1);
+assert(sqlStyleNotEqualResult.stderr.includes("expected assignment, call, or control statement")
+  || sqlStyleNotEqualResult.stderr.includes("expected 'then'")
+  || sqlStyleNotEqualResult.stderr.includes("unexpected")
+  || sqlStyleNotEqualResult.stderr.includes("expected expression"),
+  `<> unexpectedly compiled or produced the wrong diagnostic: ${sqlStyleNotEqualResult.stderr}`);
+
 // Actual syntax and symbol errors still point to the correct source line.
 const bad = write('bad.lsx', `
 fn main()
@@ -1977,4 +2171,4 @@ const badResult = run(['check', bad], 1);
 assert(badResult.stderr.includes(`${bad}:3:`));
 assert(badResult.stderr.includes("unknown module alias or closed table 'Missing'"));
 
-console.log('LazyScriptEX 0.18.10 compiler, compact runtime object types, raw strings, native objects, persistent logs, file I/O, JSON, direct atomics, threading, automatic runtime crash records, sockets, HTTP, and GameKit tests passed.');
+console.log('LazyScriptEX 0.18.16 compiler, compact runtime object types, raw strings, native objects, persistent logs, file I/O, JSON, direct atomics, threading, automatic runtime crash records, sockets, HTTP, and GameKit tests passed.');

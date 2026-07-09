@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const { buildNativeBindings } = require('./native_bindings');
 const { compileInlineUiSource } = require('./inline_ui');
 
-const VERSION = '0.18.10';
+const VERSION = '0.18.16';
 const PE_IMAGE_BASE = 0x140000000n;
 
 
@@ -532,7 +532,7 @@ class Lexer {
   }
 
   lex() {
-    const twoCharacter = new Set(['==', '~=', '<=', '>=', '->']);
+    const twoCharacter = new Set(['==', '~=', '!=', '<=', '>=', '->']);
     const single = new Set(['(', ')', '{', '}', '[', ']', ',', '.', ':', '=', '+', '-', '*', '/', '%', '<', '>']);
     while (this.index < this.source.length) {
       this.skipWhitespaceAndComments();
@@ -909,13 +909,19 @@ class Parser {
       const countCall = { kind: 'call', path: [tableName, 'length'], args: [], token };
       const atCall = { kind: 'call', path: [tableName, 'get'], args: [indexRef()], token };
       return [
-        { kind: 'local', name: tableName, declaredType: null, expression: tableExpression, token },
+        {
+          kind: 'local', name: tableName, declaredType: null, expression: tableExpression, token,
+          syntheticForTable: true, forLoopId: id,
+        },
         { kind: 'local', name: indexName, declaredType: 'i64', expression: { kind: 'literal', value: 0n, valueType: 'i64', token }, token },
         {
           kind: 'while',
           condition: { kind: 'binary', operator: '<', left: indexRef(), right: countCall, token },
           body: [
-            { kind: 'local', name: item.value, declaredType: null, expression: atCall, token: item },
+            {
+              kind: 'local', name: item.value, declaredType: null, expression: atCall, token: item,
+              syntheticForItem: true, forLoopId: id, forTableName: tableName,
+            },
             ...body,
             { kind: 'assign', name: indexName, targetPath: [indexName], expression: { kind: 'binary', operator: '+', left: indexRef(), right: { kind: 'literal', value: 1n, valueType: 'i64', token }, token }, token },
           ],
@@ -951,9 +957,10 @@ class Parser {
   }
   parseComparison() {
     let expression = this.parseTerm();
-    while (this.at('symbol') && ['==', '~=', '<', '<=', '>', '>='].includes(this.current().value)) {
+    while (this.at('symbol') && ['==', '~=', '!=', '<', '<=', '>', '>='].includes(this.current().value)) {
       const op = this.current(); this.index += 1;
-      expression = { kind: 'binary', operator: op.value, left: expression, right: this.parseTerm(), token: op };
+      const operator = op.value === '!=' ? '~=' : op.value;
+      expression = { kind: 'binary', operator, left: expression, right: this.parseTerm(), token: op };
     }
     return expression;
   }
@@ -1276,24 +1283,50 @@ class Program {
   }
 
   registerAnonymousTables(module) {
-    const visit = (node) => {
+    const visit = (node, runtimeLiteral = true) => {
       if (!node || typeof node !== 'object') return;
       if (node.kind === 'table_literal' && node.entries.length > 0 && !node.tableStruct) {
         const name = `__table_${module.id}_${this.anonymousTableCounter++}`;
         const packed = this.registerPackedType(module, {
           kind: 'table', name, entries: node.entries, positional: Boolean(node.positional), exported: false, token: node.token,
-        }, true, true);
+        }, true, runtimeLiteral);
         node.tableStruct = packed;
         node.tableType = name;
       }
       for (const [key, value] of Object.entries(node)) {
         if (key === 'token' || key === 'tableStruct') continue;
-        if (Array.isArray(value)) value.forEach(visit);
-        else if (value && typeof value === 'object') visit(value);
+        if (Array.isArray(value)) value.forEach((item) => visit(item, runtimeLiteral));
+        else if (value && typeof value === 'object') visit(value, runtimeLiteral);
+      }
+      if (node.kind === 'table_literal' && node.tableStruct) {
+        for (const entry of node.entries || []) {
+          if (entry.expression?.kind !== 'table_literal' || !entry.expression.tableStruct) continue;
+          const field = node.tableStruct.fieldDeclarations.find((candidate) => candidate.name === entry.name);
+          if (field && isAutoType(field.type)) {
+            field.type = entry.expression.tableStruct.name;
+            field.ownership = 'owned';
+          }
+        }
       }
     };
-    for (const fn of [...module.functions.values()]) visit(fn.body);
-    for (const statement of module.legacyStatements) visit(statement);
+
+    // Named object literals declared directly inside an LSX object are part of
+    // that object's native default state, not runtime scratch literals. Give
+    // them a compiler-visible shape so Object.Group.Member works immediately
+    // and each owning object can initialize the nested value without a setup
+    // method such as StartInput().
+    for (const struct of [...module.structs.values()]) {
+      for (const field of struct.fieldDeclarations || []) {
+        visit(field.expression, false);
+        if (field.expression?.kind === 'table_literal' && field.expression.tableStruct && isAutoType(field.type)) {
+          field.type = field.expression.tableStruct.name;
+          field.ownership = 'owned';
+        }
+      }
+    }
+
+    for (const fn of [...module.functions.values()]) visit(fn.body, true);
+    for (const statement of module.legacyStatements) visit(statement, true);
   }
 
   load(filePath) {
@@ -1406,8 +1439,14 @@ class Program {
     const struct = this.resolveStructIdentity(fromModule, name);
     if (!struct) return name;
     if (struct.module === toModule) return struct.name;
-    for (const [alias, use] of toModule.uses) {
-      if (use.target === struct.module) return `${alias}.${struct.name}`;
+    // Private compiler-generated table identities must stay internal when they
+    // cross module boundaries. Qualifying them with a source import alias makes
+    // the same anonymous table look like two different types on later inference
+    // passes (for example __table_x and ColorMod.__table_x).
+    if (struct.exported) {
+      for (const [alias, use] of toModule.uses) {
+        if (use.target === struct.module) return `${alias}.${struct.name}`;
+      }
     }
     // Inferred object identities are compiler-owned metadata, not source-level
     // dependencies. Keep the concrete struct identity internally so a module
@@ -1693,17 +1732,32 @@ class Program {
   }
 
   applyUniqueMemberInference(owner, memberName, module, scope, token = null, methodOnly = false) {
-    if (!owner || !isAutoType(owner.type)) return false;
+    const ownerType = canonicalTypeName(owner?.type);
+    const deferredLoopPointer = ownerType === 'ptr' && Boolean(owner?.declaration?.syntheticForItem);
+    if (!owner || (!isAutoType(ownerType) && ownerType !== 'any' && !deferredLoopPointer)) return false;
     const modulePath = String(module.filePath || '').replaceAll('\\', '/').toLowerCase();
     if (modulePath.includes('/bindings/')) return false;
     const sourceExpression = owner.sourceExpression || owner.expression || null;
     if (sourceExpression?.kind === 'table_literal') return false;
     const candidate = this.inferUniqueStructForMember(module, memberName, methodOnly);
     if (!candidate) return false;
+    // Do not guess that an untyped peer value is the enclosing object merely
+    // because both expose a common lifecycle-style method such as Start or
+    // Update. That greedy guess turns values like go into self/Scene before
+    // later field access or project call sites can identify GameObject. Field
+    // evidence and actual call arguments may still infer the owning type.
+    if (methodOnly && candidate === scope?.function?.methodOf) return false;
     const inferredType = this.translateInferredType(candidate.name, candidate.module, module);
     owner.type = inferredType;
     if (owner.declaration) owner.declaration.inferredType = inferredType;
     this.inferenceChanged = true;
+    // Keep inferred locals tied to the expression that produced them. This is
+    // especially important for `for item in table`: a member used on `item`
+    // specializes the table element type instead of leaving the loop item as
+    // an unrelated fallback integer.
+    if (owner.sourceExpression) {
+      this.applyInferenceExpected(owner.sourceExpression, inferredType, module, module, scope);
+    }
     if (owner.param) {
       this.setInferredSlot(
         owner.param, 'type', inferredType, module, scope.function.module,
@@ -1787,7 +1841,10 @@ class Program {
           }
         }
       }
-      if (isAutoType(variable.type) && pathParts.length > 1) {
+      if ((isAutoType(variable.type)
+        || canonicalTypeName(variable.type) === 'any'
+        || (canonicalTypeName(variable.type) === 'ptr' && variable.declaration?.syntheticForItem))
+        && pathParts.length > 1) {
         this.applyUniqueMemberInference(variable, pathParts[1], module, scope, variable.param?.token || null, false);
       }
       current = { type: variable.type, module, variable };
@@ -2239,6 +2296,13 @@ class Program {
           const element = this.translateInferredType(elementType, actual.module, module);
           this.applyInferenceExpected(callable.receiverExpr, `table<${element}>`, module, module, scope);
           callable = this.inferenceCallable(module, expression, scope);
+        } else {
+          const receiverInfo = this.inferenceReference(module, callable.receiverExpr.path, scope);
+          const source = receiverInfo?.variable?.sourceExpression || receiverInfo?.field?.expression || null;
+          if (source?.kind === 'table_literal') {
+            this.applyInferenceExpected(callable.receiverExpr, 'table<any>', module, module, scope);
+            callable = this.inferenceCallable(module, expression, scope);
+          }
         }
       }
       if (callable?.kind === 'table_builtin' && callable.element === 'any') {
@@ -2375,7 +2439,10 @@ class Program {
             && (!paramIsGenericTable || actualIsSpecificTable);
           if (inferredInternalParameter) {
             this.setInferredSlot(param, 'type', actual.type, actual.module, callable.target.module, false, args[index].token || expression.token, `parameter '${param.name}'`);
-          } else if (!opaqueObjectAddress && !isAutoType(param.type) && (isAutoType(actual.type) || (actualIsGenericTable && paramIsSpecificTable))) {
+          } else if (!opaqueObjectAddress
+            && !isAutoType(param.type)
+            && canonicalTypeName(param.type) !== 'any'
+            && (isAutoType(actual.type) || canonicalTypeName(actual.type) === 'any' || (actualIsGenericTable && paramIsSpecificTable))) {
             this.applyInferenceExpected(args[index], param.type, callable.target.module || module, module, scope);
           }
         }
@@ -2409,14 +2476,22 @@ class Program {
       for (const statement of statements) {
         if (statement.kind === 'local') {
           const explicit = Boolean(statement.declaredType);
-          const expected = explicit ? canonicalTypeName(statement.declaredType) : null;
+          const inferredHint = !explicit && !isAutoType(statement.inferredType) && canonicalTypeName(statement.inferredType) !== 'any'
+            ? canonicalTypeName(statement.inferredType)
+            : null;
+          const expected = explicit ? canonicalTypeName(statement.declaredType) : inferredHint;
           const inferred = this.inferExpression(statement.expression, fn.module, scope, expected, fn.module);
           const nullInitializer = statement.expression?.kind === 'literal'
             && statement.expression.valueType === 'ptr'
             && statement.expression.value === 0n;
-          const type = expected || (nullInitializer || isAutoType(inferred.type)
+          const inferredType = nullInitializer || isAutoType(inferred.type)
             ? 'auto'
-            : this.translateInferredType(inferred.type, inferred.module, fn.module));
+            : this.translateInferredType(inferred.type, inferred.module, fn.module);
+          const type = explicit
+            ? expected
+            : (inferredHint
+              ? this.mergeInferredTypes(inferredHint, fn.module, inferredType, fn.module, false, statement.token, `variable '${statement.name}'`)
+              : inferredType);
           if (persistInferredLocals) statement.inferredType = type;
           variables.set(statement.name, {
             name: statement.name, type, explicitType: explicit, sourceExpression: statement.expression, declaration: statement,
@@ -2611,8 +2686,10 @@ class Program {
     const struct = this.resolveStructIdentity(declarationModule || callerModule, name);
     if (!struct) return name;
     if (struct.module === callerModule) return struct.name;
-    for (const [alias, use] of callerModule.uses) {
-      if (use.target === struct.module) return `${alias}.${struct.name}`;
+    if (struct.exported) {
+      for (const [alias, use] of callerModule.uses) {
+        if (use.target === struct.module) return `${alias}.${struct.name}`;
+      }
     }
     return internalStructTypeName(struct);
   }
@@ -2991,6 +3068,7 @@ class Program {
           defaultValue: 0n,
           defaultType: fieldDecl.type,
           defaultConstructTable: false,
+          defaultConstructObject: null,
           inheritedFrom: inheritedStorage.inheritedFrom || inheritedStorage.struct || struct.baseType,
           ownership: fieldDecl.ownership || inheritedStorage.ownership || 'unknown',
         };
@@ -3007,6 +3085,7 @@ class Program {
       let defaultValue = null;
       let defaultType = fieldDecl.type;
       let defaultConstructTable = false;
+      let defaultConstructObject = null;
       if (fieldDecl.expression) {
         if (fieldDecl.expression.kind === 'table_literal' && fieldDecl.expression.entries.length === 0 && typeInfo.kind === 'table') {
           // An inferred growable `field = {}` means an owned empty native table
@@ -3021,6 +3100,13 @@ class Program {
           // without allocating and immediately leaking a redundant default.
           defaultValue = 0n;
           defaultType = fieldDecl.type;
+        } else if (fieldDecl.expression.kind === 'table_literal' && fieldDecl.expression.entries.length > 0 && typeInfo.kind === 'struct') {
+          // A named nested object declared as a field is real default object
+          // state. Its anonymous closed shape keeps the member names visible to
+          // the compiler and is allocated for every owning object during init.
+          defaultValue = 0n;
+          defaultType = fieldDecl.type;
+          defaultConstructObject = typeInfo.struct;
         } else {
           const evaluated = this.evalConstantExpression(fieldDecl.expression, struct.module, [`${struct.name}.${fieldDecl.name}`]);
           if (!canAssignType(evaluated.type, fieldDecl.type)) throw new CompileError(`cannot initialize field '${fieldDecl.name}' of type ${fieldDecl.type} with ${evaluated.type}`, fieldDecl.token);
@@ -3040,6 +3126,7 @@ class Program {
         defaultValue,
         defaultType,
         defaultConstructTable,
+        defaultConstructObject,
         ownership: fieldDecl.ownership || syntacticReferenceOwnership(fieldDecl.expression),
       };
       struct.fields.set(field.name, field);
@@ -3218,6 +3305,29 @@ class Program {
       return { kind: 'internal', target: method, returnType: this.externalizeType(method.returnType, method.module, module), methodReceiver: receiver, baseCall: true };
     }
 
+
+    // Standalone editor checks may not have the call site that determines an
+    // inferred parameter or generic `for` item yet. Defer the member call
+    // before normal receiver resolution turns the placeholder into i64.
+    const deferredRoot = scope?.variables?.get(pathParts[0]);
+    if (this.allowDeferredLocalMethods && deferredRoot && pathParts.length >= 2
+      && (deferredRoot.deferredMethodReceiver || deferredRoot.deferredLoopItem
+        || (pathParts[0] !== 'self' && deferredRoot.kind === 'param' && !deferredRoot.param?.explicitType))) {
+      const receiver = { kind: 'reference', path: pathParts.slice(0, -1), token: call.token, inferredType: deferredRoot.type };
+      call.effectiveArgs = [...call.args];
+      return {
+        kind: 'deferred_method',
+        target: {
+          name: pathParts.join('.'),
+          params: call.args.map((_, index) => ({ name: `arg${index}`, type: 'auto' })),
+          returnType: 'i64',
+          module,
+        },
+        returnType: 'i64',
+        methodReceiver: receiver,
+        deferred: true,
+      };
+    }
 
     // Any local/self field chain can be a method receiver. This keeps object code
     // natural: self.context.start(), object.transform.translate(), and so on.
@@ -3557,6 +3667,17 @@ class Program {
     if (expr.path.length >= 1 && scope?.variables?.has(expr.path[0])) {
       const variable = scope.variables.get(expr.path[0]);
       if (expr.path.length === 1) return { kind: 'variable', variable, type: variable.type, typeInfo: variable.typeInfo || this.resolveType(module, variable.type, expr.token) };
+      // A standalone editor check may not have the project call site that
+      // specializes a generic table. Preserve `for item in table` as a
+      // deferred object item instead of rewriting `item` to i64 and reporting
+      // that member access is invalid. Full builds still require a concrete
+      // element type because allowDeferredLocalMethods is disabled there.
+      if (this.allowDeferredLocalMethods && variable.deferredLoopItem) {
+        return {
+          kind: 'deferred_field', variable, path: expr.path.slice(1), type: 'i64',
+          typeInfo: PRIMITIVE_TYPES.get('i64'), deferred: true,
+        };
+      }
       let currentType = variable.typeInfo || this.resolveType(module, variable.type, expr.token);
       const fields = [];
       for (let index = 1; index < expr.path.length; index += 1) {
@@ -3686,7 +3807,7 @@ class Program {
     if (expr.kind === 'reference') {
       const resolved = this.resolveReference(module, expr, scope);
       expr.resolvedReference = resolved;
-      if (resolved.kind === 'variable' || resolved.kind === 'field' || resolved.kind === 'static_object') expr.inferredType = resolved.type;
+      if (resolved.kind === 'variable' || resolved.kind === 'field' || resolved.kind === 'static_object' || resolved.kind === 'deferred_field') expr.inferredType = resolved.type;
       else if (resolved.kind === 'function') expr.inferredType = 'fnptr';
       else expr.inferredType = this.resolveConstant(resolved.constant).type;
       return expr.inferredType;
@@ -3780,20 +3901,32 @@ class Program {
           if (localScope.variables.has(statement.name)) throw new CompileError(`variable '${statement.name}' already exists in this function`, statement.token);
           const validationModulePath = String(fn.module.filePath || '').replaceAll('\\', '/').toLowerCase();
           const allowInferredLocalHint = !validationModulePath.includes('/bindings/');
+          const inferredLocalType = canonicalTypeName(statement.inferredType);
+          const unresolvedLoopItem = Boolean(statement.syntheticForItem
+            && (isAutoType(inferredLocalType) || inferredLocalType === 'any' || inferredLocalType === 'ptr'));
           const declaredHint = statement.declaredType
             ? canonicalTypeName(statement.declaredType)
-            : (allowInferredLocalHint && !isAutoType(statement.inferredType) ? canonicalTypeName(statement.inferredType) : null);
+            : (allowInferredLocalHint
+              && !unresolvedLoopItem
+              && !isAutoType(statement.inferredType)
+              && inferredLocalType !== 'any'
+              ? inferredLocalType
+              : null);
           if (statement.expression.kind === 'table_literal' && declaredHint && isTableTypeName(declaredHint)) {
             statement.expression.expectedType = declaredHint;
           }
           const inferred = this.validateExpression(statement.expression, fn.module, localScope);
-          const deferredGenericValue = !statement.declaredType && canonicalTypeName(inferred) === 'any';
+          const inferredValueType = canonicalTypeName(inferred);
+          const deferredGenericValue = !statement.declaredType && !declaredHint
+            && (inferredValueType === 'any'
+              || (statement.syntheticForItem && (inferredValueType === 'ptr' || isAutoType(inferredValueType))));
           const declared = canonicalTypeName(deferredGenericValue ? 'i64' : (declaredHint || inferred || 'i64'));
           if (!deferredGenericValue && !this.compatibleTypes(inferred, fn.module, declared, fn.module, statement.token)) throw new CompileError(`cannot initialize ${statement.name}: ${declared} with ${inferred}`, statement.token);
           const typeInfo = this.resolveType(fn.module, declared, statement.token);
           const variable = {
             name: statement.name, type: declared, typeInfo, kind: 'local', immutable: Boolean(statement.immutable), token: statement.token,
             sourceExpression: statement.expression, deferredMethodReceiver: deferredGenericValue,
+            deferredLoopItem: Boolean(deferredGenericValue && statement.syntheticForItem),
           };
           localScope.variables.set(statement.name, variable);
           statement.variable = variable;
@@ -8176,13 +8309,14 @@ class CodeGenerator {
 
       // Initialize an existing closed-object body. Struct.new(), escape-based
       // stack allocation, and object-table add() use this initializer before the
-      // resulting native object pointer is exposed. Empty table fields own
-      // independent native table headers rather than null pointers.
-      const ownsDefaultTables = struct.fieldOrder.some((field) => field.defaultConstructTable);
+      // resulting native object pointer is exposed. Empty growable-table fields
+      // own native headers, while named nested object literals own a real closed
+      // object initialized from the declaration itself.
+      const ownsDefaultStorage = struct.fieldOrder.some((field) => field.defaultConstructTable || field.defaultConstructObject);
       a.label(struct.initLabel);
       const initDone = a.unique(`${struct.name}_init_done`);
       const initNull = a.unique(`${struct.name}_init_null`);
-      if (ownsDefaultTables) {
+      if (ownsDefaultStorage) {
         a.subRsp(0x38);
         a.movMemRspReg(40, 'rcx');
         a.testRegReg('rcx'); a.jz(initNull);
@@ -8203,21 +8337,25 @@ class CodeGenerator {
           a.callLabel('__lsx_table_create');
           a.movRegMemRsp('r11', 40);
           a.movMemBaseReg('r11', field.offset, 'rax', 8);
+        } else if (field.defaultConstructObject) {
+          a.callLabel(field.defaultConstructObject.newLabel);
+          a.movRegMemRsp('r11', 40);
+          a.movMemBaseReg('r11', field.offset, 'rax', 8);
         } else if (isFloatType(field.type)) {
           a.movssXmmImm('xmm0', Number(field.defaultValue || 0));
-          if (ownsDefaultTables) a.movRegMemRsp('r11', 40);
+          if (ownsDefaultStorage) a.movRegMemRsp('r11', 40);
           a.movssMemBaseXmm('r11', field.offset, 'xmm0');
         } else if (field.type === 'string' && field.defaultValue) {
           a.leaRip('r10', this.internString(field.defaultValue));
-          if (ownsDefaultTables) a.movRegMemRsp('r11', 40);
+          if (ownsDefaultStorage) a.movRegMemRsp('r11', 40);
           a.movMemBaseReg('r11', field.offset, 'r10', 8);
         } else if (typeof field.defaultValue === 'bigint' && field.defaultValue !== 0n) {
           a.movRegImmSmart('r10', field.defaultValue);
-          if (ownsDefaultTables) a.movRegMemRsp('r11', 40);
+          if (ownsDefaultStorage) a.movRegMemRsp('r11', 40);
           a.movMemBaseReg('r11', field.offset, 'r10', field.size);
         }
       }
-      if (ownsDefaultTables) {
+      if (ownsDefaultStorage) {
         a.movRegMemRsp('rax', 40);
         a.jmp(initDone);
         a.label(initNull); a.xorRegReg('rax');

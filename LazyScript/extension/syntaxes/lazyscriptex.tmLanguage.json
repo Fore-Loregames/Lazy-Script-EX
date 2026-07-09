@@ -43,6 +43,9 @@
       "include": "#keywords"
     },
     {
+      "include": "#operators"
+    },
+    {
       "include": "#builtins"
     },
     {
@@ -538,6 +541,9 @@
               "include": "#keywords"
             },
             {
+              "include": "#operators"
+            },
+            {
               "include": "#builtins"
             },
             {
@@ -632,6 +638,22 @@
               "name": "entity.name.type.lazyscriptex"
             }
           }
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.comparison.lazyscriptex",
+          "match": "==|~=|!=|<=|>=|<|>"
+        },
+        {
+          "name": "keyword.operator.arithmetic.lazyscriptex",
+          "match": "[+\\-*/%]"
+        },
+        {
+          "name": "keyword.operator.assignment.lazyscriptex",
+          "match": "="
         }
       ]
     }

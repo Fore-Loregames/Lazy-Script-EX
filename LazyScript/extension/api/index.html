@@ -466,6 +466,15 @@ export const Transform : base(LazyBehaviorMod.LazyBehavior) = {
         GLFW.lsxUnloadLibraries()
     end
 }</code></pre></div>
+            <div class="code-card"><div class="code-card-head"><span>Declare nested constant groups directly</span><button class="copy-button" data-copy-target="static-nested-code">Copy</button></div><pre id="static-nested-code"><code>export static const Input = {
+    MouseButton = {
+        Left = GLFW.GLFW_MOUSE_BUTTON_LEFT
+        Right = GLFW.GLFW_MOUSE_BUTTON_RIGHT
+        Middle = GLFW.GLFW_MOUSE_BUTTON_MIDDLE
+    }
+}
+
+local left = InputMod.Input.MouseButton.Left</code></pre></div>
             <div class="code-card"><div class="code-card-head"><span>Import and call it directly</span><button class="copy-button" data-copy-target="static-use-code">Copy</button></div><pre id="static-use-code"><code>use "@Engine/Window/WindowManager.lsx" as WindowManagerMod
 
 fn main()

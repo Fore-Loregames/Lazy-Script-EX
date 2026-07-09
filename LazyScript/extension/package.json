@@ -2,7 +2,7 @@
   "name": "lazyscriptex-native-gamekit",
   "displayName": "LazyScriptEX Native GameKit",
   "description": "Native LazyScriptEX tooling with constructors, inheritance, GetTypeName/IsType, circular object graphs with borrowed back-references, project-wide inference, replacement-safe completion, project-aware diagnostics, LSHTML/LSCSS, and a beginner-first offline API that separates front-end features from backend/native declarations.",
-  "version": "0.18.18",
+  "version": "0.18.28",
   "publisher": "nissyokugames",
   "license": "MIT",
   "engines": {
@@ -238,6 +238,16 @@
         "command": "lazyscriptex.refreshIndex",
         "key": "ctrl+alt+r",
         "when": "editorLangId == lazyscriptex"
+      },
+      {
+        "key": "enter",
+        "command": "lazyscriptex.enterWithoutCompletion",
+        "when": "editorTextFocus && editorLangId == lazyscriptex && suggestWidgetVisible && !suggestWidgetHasFocusedSuggestion"
+      },
+      {
+        "key": "enter",
+        "command": "lazyscriptex.enterWithoutCompletion",
+        "when": "editorTextFocus && editorLangId == lazyscriptex && inlineSuggestionVisible && !suggestWidgetVisible"
       }
     ],
     "configuration": {
@@ -323,8 +333,10 @@
         "editor.suggestOnTriggerCharacters": true,
         "editor.formatOnSave": true,
         "editor.formatOnType": true,
+        "editor.formatOnPaste": true,
         "editor.wordBasedSuggestions": "currentDocument",
-        "editor.suggest.insertMode": "replace"
+        "editor.suggest.insertMode": "replace",
+        "editor.acceptSuggestionOnEnter": "smart"
       }
     }
   },

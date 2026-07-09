@@ -444,6 +444,7 @@ function parseMembers(lines, startLine, owner) {
   let started = false;
   for (let i = startLine; i < lines.length; i++) {
     const raw = lines[i];
+    const depthBefore = depth;
     let inString = false;
     let escaped = false;
     for (const ch of raw) {
@@ -455,6 +456,24 @@ function parseMembers(lines, startLine, owner) {
       if (ch === '}') depth--;
     }
     let m;
+
+    // A named table written directly inside an object is a nested object shape,
+    // not a growable empty table and not a flat list of members on the parent.
+    // Keep its children attached to the field so completion can walk chains such
+    // as Input.MouseButton.Left without requiring a startup assignment method.
+    if (depthBefore === 1 && (m = raw.match(/^\s*([A-Za-z_]\w*)\s*=\s*\{\s*$/))) {
+      const nestedOwner = `${owner}.${m[1]}`;
+      const parsed = parseMembers(lines, i, nestedOwner);
+      members.push({
+        name: m[1], kind: 'field', owner, type: 'inferred', initializer: '{ ... }',
+        signature: `${m[1]} = { ... }`, members: parsed.members, endLine: parsed.endLine,
+        line: i, column: raw.indexOf(m[1]), exported: true, documentation: documentationBefore(lines, i)
+      });
+      i = parsed.endLine;
+      depth = depthBefore;
+      continue;
+    }
+
     if ((m = raw.match(/^\s*([A-Za-z_]\w*)\s*=\s*fn\s*\(([^)]*)\)\s*(?:->\s*([^\s,}]+))?/))) {
       const returnType = m[3]?.trim() || '';
       members.push({
@@ -1342,9 +1361,16 @@ function importedSymbol(record, alias, member, childName = null) {
   const target = indexedFile(resolveImport(aliasEntry.import.spec, record.uri.fsPath));
   if (!target) return null;
   const sym = target.exports.find(s => s.name === member);
-  if (childName) {
-    const child = sym?.members?.find(m => m.name === childName);
-    return child ? { record: target, symbol: child, parent: sym } : null;
+  const childPath = Array.isArray(childName) ? childName : (childName ? [childName] : []);
+  if (sym && childPath.length) {
+    let parent = sym;
+    let current = sym;
+    for (const part of childPath) {
+      parent = current;
+      current = symbolByName(current.members || [], part, true);
+      if (!current) return null;
+    }
+    return { record: target, symbol: current, parent };
   }
   if (sym) return { record: target, symbol: sym };
   for (const obj of target.exports.filter(s => s.members)) {
@@ -1442,14 +1468,22 @@ function resolveChain(record, chain) {
   if (!chain.length) return null;
   const tableBuiltin = resolveTableBuiltinChain(record, chain);
   if (tableBuiltin) return tableBuiltin;
-  if (chain.length >= 3 && record.imports.has(chain[0])) return importedSymbol(record, chain[0], chain[1], chain[2]);
-  if (chain.length >= 2 && record.imports.has(chain[0])) return importedSymbol(record, chain[0], chain[1]);
+  if (chain.length >= 2 && record.imports.has(chain[0])) return importedSymbol(record, chain[0], chain[1], chain.slice(2));
   if (chain.length >= 2) {
     const instance = resolveInstanceMember(record, chain[0], chain[1]);
-    if (instance) return instance;
+    if (instance && chain.length === 2) return instance;
     const object = record.symbols.find(s => s.name === chain[0] && s.members);
-    const member = object?.members?.find(m => m.name === chain[1]);
-    if (member) return { record, symbol: member, parent: object };
+    if (object) {
+      let parent = object;
+      let current = object;
+      for (const part of chain.slice(1)) {
+        parent = current;
+        current = symbolByName(current.members || [], part, true);
+        if (!current) break;
+      }
+      if (current && current !== object) return { record, symbol: current, parent };
+    }
+    if (instance) return instance;
   }
   const objectBuiltin = resolveObjectBuiltinChain(record, chain);
   if (objectBuiltin) return objectBuiltin;
@@ -1948,7 +1982,150 @@ function htmlIndentDelta(code, active) {
   return { delta, leadingClosers };
 }
 
+
+function keywordPositionsOutsideLiterals(raw, keyword) {
+  const positions = [];
+  let quote = '';
+  let escaped = false;
+  let parenDepth = 0;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    const next = raw[i + 1] || '';
+    if (quote) {
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\') { escaped = true; continue; }
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '-' && next === '-') break;
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === '(' || ch === '[' || ch === '{') { parenDepth++; continue; }
+    if (ch === ')' || ch === ']' || ch === '}') { parenDepth = Math.max(0, parenDepth - 1); continue; }
+    if (parenDepth !== 0 || !raw.startsWith(keyword, i)) continue;
+    const before = i > 0 ? raw[i - 1] : '';
+    const after = raw[i + keyword.length] || '';
+    if ((!before || !/[A-Za-z0-9_]/.test(before)) && (!after || !/[A-Za-z0-9_]/.test(after))) {
+      positions.push(i);
+      i += keyword.length - 1;
+    }
+  }
+  return positions;
+}
+
+function trailingLineComment(raw) {
+  let quote = '';
+  let escaped = false;
+  for (let i = 0; i < raw.length - 1; i++) {
+    const ch = raw[i];
+    const next = raw[i + 1];
+    if (quote) {
+      if (escaped) { escaped = false; continue; }
+      if (ch === '\\') { escaped = true; continue; }
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === '-' && next === '-') return { code: raw.slice(0, i).trimEnd(), comment: raw.slice(i).trimEnd() };
+  }
+  return { code: raw.trimEnd(), comment: '' };
+}
+
+function splitCompactFunctionBody(body) {
+  const trimmed = body.trim();
+  if (!trimmed) return [];
+  // A common LSX compact helper is a call followed by return. Keep the
+  // formatter conservative, but make that readable instead of leaving the
+  // entire function on one line.
+  const returns = keywordPositionsOutsideLiterals(trimmed, 'return');
+  if (returns.length === 1 && returns[0] > 0) {
+    return [trimmed.slice(0, returns[0]).trim(), trimmed.slice(returns[0]).trim()].filter(Boolean);
+  }
+  return [trimmed];
+}
+
+function expandCompactLsxLine(raw) {
+  const leading = (raw.match(/^\s*/) || [''])[0];
+  const split = trailingLineComment(raw.slice(leading.length));
+  const code = split.code.trim();
+  if (!code || code.startsWith('<') || code.startsWith('--')) return [raw];
+
+  const ifMatch = code.match(/^(if|elseif)\b/);
+  if (ifMatch) {
+    const thenPositions = keywordPositionsOutsideLiterals(code, 'then');
+    const endPositions = keywordPositionsOutsideLiterals(code, 'end');
+    const thenAt = thenPositions[0];
+    const endAt = endPositions.length ? endPositions[endPositions.length - 1] : -1;
+    if (thenAt >= 0 && endAt > thenAt && !code.slice(endAt + 3).trim()) {
+      const header = code.slice(0, thenAt + 4).trim();
+      const body = code.slice(thenAt + 4, endAt).trim();
+      if (body) {
+        const bodyLines = expandCompactLsxLine(leading + body);
+        const ending = leading + 'end' + (split.comment ? ` ${split.comment}` : '');
+        return [leading + header, ...bodyLines, ending];
+      }
+    }
+  }
+
+  const fnAt = keywordPositionsOutsideLiterals(code, 'fn')[0];
+  const endPositions = keywordPositionsOutsideLiterals(code, 'end');
+  const endAt = endPositions.length ? endPositions[endPositions.length - 1] : -1;
+  if (fnAt >= 0 && endAt > fnAt && !code.slice(endAt + 3).trim()) {
+    const openParen = code.indexOf('(', fnAt + 2);
+    if (openParen >= 0) {
+      let quote = '';
+      let escaped = false;
+      let depth = 0;
+      let closeParen = -1;
+      for (let i = openParen; i < endAt; i++) {
+        const ch = code[i];
+        if (quote) {
+          if (escaped) { escaped = false; continue; }
+          if (ch === '\\') { escaped = true; continue; }
+          if (ch === quote) quote = '';
+          continue;
+        }
+        if (ch === '"' || ch === "'") { quote = ch; continue; }
+        if (ch === '(') depth++;
+        if (ch === ')') {
+          depth--;
+          if (depth === 0) { closeParen = i; break; }
+        }
+      }
+      if (closeParen >= 0) {
+        const header = code.slice(0, closeParen + 1).trim();
+        const body = code.slice(closeParen + 1, endAt).trim();
+        if (body) {
+          const statements = splitCompactFunctionBody(body);
+          const expandedBody = [];
+          for (const statement of statements) expandedBody.push(...expandCompactLsxLine(leading + statement));
+          const ending = leading + 'end' + (split.comment ? ` ${split.comment}` : '');
+          return [leading + header, ...expandedBody, ending];
+        }
+      }
+    }
+  }
+
+  return [raw];
+}
+
+function expandCompactLsxStatements(text) {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const hadFinalNewline = /\r?\n$/.test(text);
+  const input = text.replace(/\r\n/g, '\n').split('\n');
+  if (hadFinalNewline && input.at(-1) === '') input.pop();
+  const output = [];
+  for (const line of input) output.push(...expandCompactLsxLine(line));
+  return output.join(eol) + (hadFinalNewline ? eol : '');
+}
+
+function lineContinuesExpression(code) {
+  const trimmed = code.trimEnd();
+  if (!trimmed || /^(?:--|<|\)\})/.test(trimmed)) return false;
+  return /(?:\+|-|\*|\/|%|==|!=|~=|<=|>=|<|>|=|\band\b|\bor\b|,)$/.test(trimmed);
+}
+
 function formatLsxText(text, options = {}) {
+  text = expandCompactLsxStatements(text);
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
   const hadFinalNewline = /\r?\n$/.test(text);
   const lines = text.replace(/\r\n/g, '\n').split('\n');
@@ -1958,14 +2135,23 @@ function formatLsxText(text, options = {}) {
   const indentUnit = insertSpaces ? ' '.repeat(tabSize) : '\t';
   const state = { blockComment: false };
   const spacingState = { blockComment: false };
-  let indent = 0;
+  let indent = Number.isFinite(options.initialIndentLevel)
+    ? Math.max(0, Math.trunc(options.initialIndentLevel))
+    : 0;
   let lshtmlDepth = 0;
+  let continuationIndent = false;
+  // Track block headers whose terminating keyword appears on a later line,
+  // such as a long `if ... then` condition. Without this state, the formatter
+  // never opened the nested block and every following `end` pulled the rest
+  // of the function one level toward column zero.
+  let pendingKeywordBlock = '';
   const outputLines = [];
 
   for (const original of lines) {
     const trimmed = original.trim();
     if (!trimmed) {
       outputLines.push('');
+      continuationIndent = false;
       continue;
     }
 
@@ -1984,7 +2170,8 @@ function formatLsxText(text, options = {}) {
     if (leading) leadingDelimiterClosers = countMatches(leading[0], /[\}\]\)]/g);
     const html = htmlIndentDelta(code, lshtmlDepth > 0 || lshtmlStart);
     const preDedent = (startsEnd || startsBranch ? 1 : 0) + leadingDelimiterClosers + html.leadingClosers;
-    const lineIndent = Math.max(0, indent - preDedent);
+    const extraContinuationIndent = continuationIndent && !startsEnd && !startsBranch && leadingDelimiterClosers === 0 ? 1 : 0;
+    const lineIndent = Math.max(0, indent - preDedent + extraContinuationIndent);
     outputLines.push(indentUnit.repeat(lineIndent) + formattedContent);
 
     const openDelimiters = countMatches(normalized, /[\{\[\(]/g);
@@ -1993,15 +2180,48 @@ function formatLsxText(text, options = {}) {
     let keywordOpens = 0;
     const compact = endCount > 0;
     const braceDelimitedFunction = /(?:^|=\s*)fn(?:\s+[A-Za-z_]\w*)?\s*\([^)]*\)\s*(?:->\s*[A-Za-z_][A-Za-z0-9_.<>]*)?\s*\{\s*$/.test(code);
-    if (!compact && !braceDelimitedFunction && (/^(?:export\s+)?fn\s+[A-Za-z_]\w*\s*\(/.test(code) || /^[A-Za-z_]\w*\s*=\s*fn\s*\(/.test(code) || /^local\s+[A-Za-z_]\w*\s*=\s*fn\s*\(/.test(code))) keywordOpens++;
-    if (!compact && /^if\b.*\bthen\b/.test(code)) keywordOpens++;
-    if (!compact && /^while\b.*\bdo\b/.test(code)) keywordOpens++;
-    if (!compact && /^for\b.*\bdo\b/.test(code)) keywordOpens++;
-    if (!compact && /^do\s*$/.test(code)) keywordOpens++;
+    const hasThen = keywordPositionsOutsideLiterals(code, 'then').length > 0;
+    const hasDo = keywordPositionsOutsideLiterals(code, 'do').length > 0;
+    const pendingAtLineStart = pendingKeywordBlock;
+
+    // Finish a block header that began on an earlier physical line. An
+    // `elseif` already shares the open depth of its original `if`, while a
+    // multiline `if`, `while`, or `for` must open its body when `then`/`do`
+    // is finally reached.
+    if (!compact && pendingAtLineStart) {
+      const completesPending =
+        ((pendingAtLineStart === 'if' || pendingAtLineStart === 'elseif') && hasThen) ||
+        ((pendingAtLineStart === 'while' || pendingAtLineStart === 'for') && hasDo);
+      if (completesPending) {
+        if (pendingAtLineStart !== 'elseif') keywordOpens++;
+        pendingKeywordBlock = '';
+      }
+    }
+
+    if (!compact && !pendingAtLineStart) {
+      if (!braceDelimitedFunction && (/^(?:export\s+)?fn\s+[A-Za-z_]\w*\s*\(/.test(code) || /^[A-Za-z_]\w*\s*=\s*fn\s*\(/.test(code) || /^local\s+[A-Za-z_]\w*\s*=\s*fn\s*\(/.test(code))) keywordOpens++;
+
+      if (/^if\b/.test(code)) {
+        if (hasThen) keywordOpens++;
+        else pendingKeywordBlock = 'if';
+      } else if (/^elseif\b/.test(code)) {
+        if (!hasThen) pendingKeywordBlock = 'elseif';
+      } else if (/^while\b/.test(code)) {
+        if (hasDo) keywordOpens++;
+        else pendingKeywordBlock = 'while';
+      } else if (/^for\b/.test(code)) {
+        if (hasDo) keywordOpens++;
+        else pendingKeywordBlock = 'for';
+      }
+
+      if (/^do\s*$/.test(code)) keywordOpens++;
+    }
+
     // elseif/else close the previous branch for display but keep the same block depth.
-    if (startsBranch) keywordOpens = 0;
+    if (startsBranch && !pendingAtLineStart) keywordOpens = 0;
 
     indent = Math.max(0, indent + keywordOpens - endCount + openDelimiters - closeDelimiters + html.delta);
+    continuationIndent = lineContinuesExpression(code);
     if (lshtmlStart) lshtmlDepth++;
     if (lshtmlEnd) lshtmlDepth = Math.max(0, lshtmlDepth - 1);
   }
@@ -2023,16 +2243,36 @@ class DocumentFormattingProvider {
 }
 
 
+function indentationLevel(indentation, options = {}) {
+  const tabSize = Number.isFinite(options.tabSize) && options.tabSize > 0 ? options.tabSize : 4;
+  let columns = 0;
+  for (const ch of indentation || '') columns += ch === '\t' ? tabSize : 1;
+  return Math.max(0, Math.floor(columns / tabSize));
+}
+
 class DocumentRangeFormattingProvider {
   provideDocumentRangeFormattingEdits(document, range, options) {
     if (!vscode.workspace.getConfiguration('lazyscriptex').get('format.enable', true)) return [];
     const startLine = Math.max(0, range.start.line);
-    const endLine = Math.min(document.lineCount - 1, range.end.line);
+    const rawEndLine = range.end.character === 0 && range.end.line > startLine
+      ? range.end.line - 1
+      : range.end.line;
+    const endLine = Math.min(document.lineCount - 1, rawEndLine);
     const start = new vscode.Position(startLine, 0);
     const end = document.lineAt(endLine).range.end;
     const expandedRange = new vscode.Range(start, end);
     const original = document.getText(expandedRange);
-    const formatted = formatLsxText(original, options).replace(/\r?\n$/, '');
+
+    // VS Code can call range formatting after a multiline paste. Formatting a
+    // detached fragment from depth zero used to pull pasted code out of the
+    // object/function it was inserted into. Seed the fragment with the actual
+    // surrounding LSX depth so paste formatting keeps the block where it was
+    // pasted instead of flattening or over-indenting it.
+    const surroundingIndent = desiredIndentAtLine(document, startLine, options);
+    const formatted = formatLsxText(original, {
+      ...options,
+      initialIndentLevel: indentationLevel(surroundingIndent, options),
+    }).replace(/\r?\n$/, '');
     if (formatted === original) return [];
     return [vscode.TextEdit.replace(expandedRange, formatted)];
   }
@@ -2109,6 +2349,12 @@ class CompletionProvider {
         }
         if (object && base.length === 2) {
           const member = symbolByName(object.members, base[1], true);
+          if (member?.members?.length) {
+            const nestedItems = member.members
+              .filter(sym => !sym.name.startsWith('_'))
+              .map(sym => completionFor(record, sym, `self.${member.name}.`, member));
+            return applyCompletionRange(nestedItems, replacementRange, document);
+          }
           if (isTableLikeSymbol(member)) return applyCompletionRange(tableBuiltinCompletionItems(`self.${member.name}`), replacementRange, document);
           const typeRef = member?.typeRef || inferTypeFromInitializer(scopeRecord, member?.initializer);
           const resolved = resolveTypeObject(scopeRecord, typeRef);
@@ -2151,6 +2397,12 @@ class CompletionProvider {
       if (base.length === 2) {
         const object = record.symbols.find(s => s.name === base[0] && s.members);
         const member = object && symbolByName(object.members, base[1], true);
+        if (member?.members?.length) {
+          const nestedItems = member.members
+            .filter(sym => !sym.name.startsWith('_'))
+            .map(sym => completionFor(record, sym, `${object.name}.${member.name}.`, member));
+          return applyCompletionRange(nestedItems, replacementRange, document);
+        }
         if (isTableLikeSymbol(member)) return applyCompletionRange(tableBuiltinCompletionItems(`${object.name}.${member.name}`), replacementRange, document);
       }
     }
@@ -2665,6 +2917,12 @@ async function createProject() {
   vscode.window.showInformationMessage(`Created LSX project ${name}.`);
 }
 
+async function enterWithoutCompletion() {
+  await vscode.commands.executeCommand('hideSuggestWidget');
+  await vscode.commands.executeCommand('editor.action.inlineSuggest.hide');
+  await vscode.commands.executeCommand('type', { text: '\n' });
+}
+
 async function activate(context) {
   output = vscode.window.createOutputChannel('LazyScriptEX');
   diagnostics = vscode.languages.createDiagnosticCollection('lazyscriptex');
@@ -2685,6 +2943,7 @@ async function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand('lazyscriptex.selectLazyScriptRoot', selectLazyScriptRoot));
   context.subscriptions.push(vscode.commands.registerCommand('lazyscriptex.selectApiPath', selectApiPath));
   context.subscriptions.push(vscode.commands.registerCommand('lazyscriptex.formatDocument', () => vscode.commands.executeCommand('editor.action.formatDocument')));
+  context.subscriptions.push(vscode.commands.registerCommand('lazyscriptex.enterWithoutCompletion', enterWithoutCompletion));
 
   const selector = { language: LANGUAGE, scheme: 'file' };
   const completionTriggers = ['.', '<', '/', ' ', '=', '"', '{', '-', ...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'];
@@ -2741,5 +3000,5 @@ function deactivate() {
 }
 module.exports = {
   activate, deactivate, parseText, resolveImport, chainContext, inferTypeFromInitializer,
-  _test: { index, loadRecordSync, importedSymbol, importedCompletionTarget, importEntryForAlias, completionImportEntryForAlias, levenshteinDistance, symbolByName, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, OBJECT_BUILTIN_METHODS, objectBuiltinCompletionItems, resolveObjectBuiltinChain, TABLE_BUILTIN_METHODS, isGrowableTableInitializer, isTableLikeSymbol, tableBuiltinCompletionItems, resolveTableBuiltinChain, HoverProvider, DocumentFormattingProvider, DocumentRangeFormattingProvider, OnTypeFormattingProvider, formatLsxText, collectVisibleScopeSymbols, completionForScopeSymbol, completionForSelfMember, currentIdentifierRange, completionReplacementRange, applyCompletionRange, shouldAutoTriggerSuggestions, desiredIndentAtLine, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs, compilerCheckContext }
+  _test: { index, loadRecordSync, importedSymbol, importedCompletionTarget, importEntryForAlias, completionImportEntryForAlias, levenshteinDistance, symbolByName, resolveChain, resolveInstanceMember, apiByKey, loadApiMetadata, markdownForSymbol, insideLshtml, lshtmlCompletionItems, nearestOpenLshtmlTag, lshtmlTagInfo, markdownForLshtmlTag, insideLscss, lscssCompletionItems, markdownForLscssProperty, LSCSS_PROPERTY_DOCS, CompletionProvider, OBJECT_BUILTIN_METHODS, objectBuiltinCompletionItems, resolveObjectBuiltinChain, TABLE_BUILTIN_METHODS, isGrowableTableInitializer, isTableLikeSymbol, tableBuiltinCompletionItems, resolveTableBuiltinChain, HoverProvider, DocumentFormattingProvider, DocumentRangeFormattingProvider, OnTypeFormattingProvider, formatLsxText, expandCompactLsxStatements, collectVisibleScopeSymbols, completionForScopeSymbol, completionForSelfMember, currentIdentifierRange, completionReplacementRange, applyCompletionRange, shouldAutoTriggerSuggestions, desiredIndentAtLine, indentationLevel, enclosingObjectAt, parseCompilerDiagnostics, normalizeLazyScriptRoot, knownModuleRoots, importPathContext, importCompletionItems, compilerModuleRootArgs, compilerCheckContext }
 };

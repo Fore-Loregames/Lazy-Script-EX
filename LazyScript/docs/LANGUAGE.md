@@ -566,6 +566,20 @@ export static const WindowManager = {
 }
 ```
 
+Static objects can also declare named nested object groups directly. Imported constants inside those groups are resolved by the compiler before `main()`, so no constructor or startup assignment method is needed:
+
+```lsx
+export static const Input = {
+    MouseButton = {
+        Left = GLFW.GLFW_MOUSE_BUTTON_LEFT
+        Right = GLFW.GLFW_MOUSE_BUTTON_RIGHT
+        Middle = GLFW.GLFW_MOUSE_BUTTON_MIDDLE
+    }
+}
+```
+
+The nested fields keep their object shape across modules, so callers can use `InputMod.Input.MouseButton.Left` and editor completion can list `Left`, `Right`, and `Middle` after `MouseButton.`.
+
 A zero-argument static constructor can prepare shared state. It runs automatically once after field defaults and before `main()`:
 
 ```lsx
