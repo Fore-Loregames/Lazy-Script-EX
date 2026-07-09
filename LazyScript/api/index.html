@@ -20,7 +20,8 @@
 
       <div class="sidebar-tabs" role="tablist" aria-label="Documentation navigation">
         <button class="sidebar-tab active" id="guide-tab" data-sidebar-pane="guide" role="tab" aria-selected="true">Guide</button>
-        <button class="sidebar-tab" id="api-tab" data-sidebar-pane="api" role="tab" aria-selected="false">API index</button>
+        <button class="sidebar-tab" id="api-tab" data-sidebar-pane="api" role="tab" aria-selected="false">Front-end API</button>
+        <button class="sidebar-tab" id="backend-tab" data-sidebar-pane="backend" role="tab" aria-selected="false">Backend</button>
       </div>
 
       <div class="sidebar-pane active" id="guide-nav-pane" data-sidebar-pane-content="guide" role="tabpanel" aria-labelledby="guide-tab">
@@ -40,6 +41,7 @@
             <a href="#functions" class="nav-link nav-sub">Functions and return</a>
             <a href="#tables" class="nav-link nav-sub">Tables and buffers</a>
             <a href="#objects" class="nav-link nav-sub">Objects and methods</a>
+            <a href="#inheritance" class="nav-link nav-sub">Inheritance and constructors</a>
             <a href="#static-objects" class="nav-link nav-sub">Static managers and services</a>
             <a href="#modules" class="nav-link nav-sub">Modules and imports</a>
           </div>
@@ -53,7 +55,8 @@
           </div>
           <div class="guide-nav-group">
             <span class="guide-nav-label">Look up anything</span>
-            <a href="#api-reference" class="nav-link" data-open-api-index="true">Complete API reference</a>
+            <a href="#api-reference" class="nav-link" data-open-api-index="true">Front-end API reference</a>
+            <a href="#api-reference" class="nav-link nav-sub" data-open-backend-index="true">Backend and native reference</a>
           </div>
         </nav>
 
@@ -65,8 +68,8 @@
 
       <div class="sidebar-pane" id="api-nav-pane" data-sidebar-pane-content="api" role="tabpanel" aria-labelledby="api-tab" hidden>
         <div class="api-nav-head">
-          <label for="api-nav-search">Find any API</label>
-          <input id="api-nav-search" type="search" placeholder="Try: Vec3, quaternion, texture..." autocomplete="off">
+          <label for="api-nav-search" id="api-nav-search-label">Find a front-end API</label>
+          <input id="api-nav-search" type="search" placeholder="Try: inheritance, button click, texture..." autocomplete="off">
           <div class="api-nav-count" id="api-nav-count"></div>
         </div>
         <nav class="api-nav-tree" id="api-nav-tree" aria-label="Complete API categories"></nav>
@@ -81,7 +84,7 @@
           <input id="site-search" type="search" placeholder="Try: scrollbar, button, input, texture..." autocomplete="off">
           <div class="search-results" id="site-search-results" hidden></div>
         </div>
-        <a class="top-link" href="#api-reference">API reference</a>
+        <a class="top-link" href="#api-reference" data-open-api-index="true">Front-end API</a>
       </header>
 
       <main>
@@ -407,8 +410,35 @@ player.destroy()</code></pre></div>
             <div class="plain-language"><strong>Ownership rule:</strong> when your code creates an owned object with <code>.new()</code>, keep it while needed and call <code>.destroy()</code> when finished unless the API entry says another object owns it.</div>
           </article>
 
+          <article class="lesson-block" id="inheritance" data-search="inheritance base parent child derived constructor base constructor override GetTypeName IsType LazyBehavior Transform">
+            <div class="lesson-copy"><span class="lesson-number">2.7</span><h3>Inheritance and constructors</h3><p>Put <code>: base(...)</code> after an object name when the new object should start with another object’s fields and methods. Add a <code>constructor</code> when each new child needs setup values.</p></div>
+            <div class="code-card"><div class="code-card-head"><span>LazyBehavior and Transform</span><button class="copy-button" data-copy-target="inheritance-code">Copy</button></div><pre id="inheritance-code"><code>use "@Engine/Core/LazyBehaviors/LazyBehavior.lsx" as LazyBehaviorMod
+
+export const Transform : base(LazyBehaviorMod.LazyBehavior) = {
+    constructor = fn(parent)
+        self.lazyVars = {
+            parent = {type = "gameObject", visible = false, value = parent}
+            position = {type = "vec3", visible = true, value = {0, 0, 0}}
+            rotation = {type = "vec3", visible = true, value = {0, 0, 0}}
+            scale = {type = "vec3", visible = true, value = {1, 1, 1}}
+        }
+    end
+
+    Update = fn()
+        -- Transform-specific update code.
+    end
+}</code></pre></div>
+            <div class="inheritance-steps">
+              <article><b>1</b><div><h4><code>: base(...)</code></h4><p>The child receives the base object’s fields and methods.</p></div></article>
+              <article><b>2</b><div><h4><code>constructor = fn(...)</code></h4><p><code>Transform.new(parent)</code> passes <code>parent</code> into the constructor.</p></div></article>
+              <article><b>3</b><div><h4>Normal dot access</h4><p>Inherited methods are called normally: <code>transform.Start()</code>.</p></div></article>
+              <article><b>4</b><div><h4>Runtime type checks</h4><p><code>transform.GetTypeName()</code> returns <code>"Transform"</code>. <code>transform.IsType("LazyBehavior")</code> is also true.</p></div></article>
+            </div>
+            <div class="callout info"><strong>Base constructor rule:</strong><p>A zero-argument base constructor runs automatically. When the base constructor needs values, put <code>base.constructor(...)</code> first inside the child constructor.</p></div>
+          </article>
+
           <article class="lesson-block" id="static-objects" data-search="static const singleton manager service shared global state self no new shutdown">
-            <div class="lesson-copy"><span class="lesson-number">2.7</span><h3>Static managers and services</h3><p>Use <code>static const</code> when the program must have exactly one shared object. The compiler creates it once before <code>main()</code>, and every caller uses the same fields and methods without calling <code>.new()</code>.</p></div>
+            <div class="lesson-copy"><span class="lesson-number">2.8</span><h3>Static managers and services</h3><p>Use <code>static const</code> when the program must have exactly one shared object. The compiler creates it once before <code>main()</code>, and every caller uses the same fields and methods without calling <code>.new()</code>.</p></div>
             <div class="code-card"><div class="code-card-head"><span>One shared window manager</span><button class="copy-button" data-copy-target="static-object-code">Copy</button></div><pre id="static-object-code"><code>export static const WindowManager = {
     windowHandle = 0
     width = 1280
@@ -455,7 +485,7 @@ end</code></pre></div>
           </article>
 
           <article class="lesson-block" id="modules" data-search="module use import alias LazyScript bindings file split code export">
-            <div class="lesson-copy"><span class="lesson-number">2.8</span><h3>Modules and imports</h3><p><code>use</code> loads another LSX module and gives it a short alias. <code>@LazyScript</code> starts at the toolkit's <code>LazyScript</code> folder, which is why the whole toolkit root should be opened in VS Code.</p></div>
+            <div class="lesson-copy"><span class="lesson-number">2.9</span><h3>Modules and imports</h3><p><code>use</code> loads another LSX module and gives it a short alias. <code>@LazyScript</code> starts at the toolkit's <code>LazyScript</code> folder, which is why the whole toolkit root should be opened in VS Code.</p></div>
             <div class="code-card"><div class="code-card-head"><span>Import wrapped systems</span><button class="copy-button" data-copy-target="module-code">Copy</button></div><pre id="module-code"><code>use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
 use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
 use "@LazyScript/bindings/Math/GLM.lsx" as GLM
@@ -583,12 +613,16 @@ lshtml welcome_view(props) = {(
           <div class="section-heading">
             <span class="step-number">07</span>
             <div>
-              <span class="eyebrow">Complete API reference</span>
-              <h2>Every API entry includes a real LSX code example.</h2>
-              <p>Choose a category from the sidebar, read the plain-English explanation, then copy the code block. Even constants, fields, and one-line methods include a focused usage example. Exact native declarations stay hidden unless you choose to show them.</p>
+              <span class="eyebrow" id="api-mode-eyebrow">Front-end API reference</span>
+              <h2 id="api-mode-title">Use the features you write in normal LSX code.</h2>
+              <p id="api-mode-description">This view contains the LSX language, inheritance, high-level engine APIs, LSHTML, LSCSS, document lookup, and events. Native layouts, internal fields, raw bindings, and compiler-facing declarations are kept in the separate Backend tab.</p>
             </div>
           </div>
 
+          <div class="api-mode-switch" role="group" aria-label="API audience">
+            <button class="active" id="api-mode-frontend" type="button">Front-end API</button>
+            <button id="api-mode-backend" type="button">Backend / native</button>
+          </div>
           <div class="api-summary" id="api-summary"></div>
 
           <div class="api-toolbar">
@@ -604,12 +638,12 @@ lshtml welcome_view(props) = {(
               <label for="api-kind">Entry type</label>
               <select id="api-kind"><option value="">All entry types</option></select>
             </div>
-            <label class="signature-toggle"><input id="show-signatures" type="checkbox"> Show native signatures</label>
+            <label class="signature-toggle" id="signature-toggle-wrap"><input id="show-signatures" type="checkbox"> Show exact backend declarations</label>
           </div>
 
           <div class="api-help">
-            <strong>Use the API index in the left sidebar.</strong>
-            <span>Open a category, choose a module, then select an object or feature group. For example, <code>Math and cameras → GLM → Mat2</code> shows each matrix operation with an explanation, an LSX code block, and a copy button.</span>
+            <strong id="api-help-title">Start with a job, not a native declaration.</strong>
+            <span id="api-help-text">Open Language for inheritance and objects, or User interface for LSHTML, LSCSS, document.find(), events, inputs, and visible controls. The Backend tab contains raw functions, internal records, fixed layouts, and native constants.</span>
           </div>
 
           <div class="api-current-filter" id="api-current-filter" hidden>

@@ -21,7 +21,43 @@ for (const entry of data.entries) {
   assert(!/glUniformMatrix\w+\([^\n]*null/.test(entry.example), `${qualified} uses a null matrix upload example`);
 }
 
+
+assert(data.audienceStats && data.audienceStats.frontend > 0 && data.audienceStats.backend > 0, 'API audience split is missing');
+const frontendEntries = data.entries.filter(entry => entry.audience === 'frontend');
+const backendEntries = data.entries.filter(entry => entry.audience === 'backend');
+assert(frontendEntries.length === data.audienceStats.frontend, 'Front-end audience count is stale');
+assert(backendEntries.length === data.audienceStats.backend, 'Backend audience count is stale');
+for (const entry of frontendEntries) {
+  const qualified = `${entry.module}.${entry.owner ? `${entry.owner}.` : ''}${entry.name}`;
+  assert(!/(:\s*(?:u\d+|i\d+|f\d+|bool|string|fnptr|ptr)\b|extern\s+")/.test(entry.publicSignature || ''), `${qualified} exposes a backend type in the front-end call shape`);
+}
+const inheritanceNames = new Set(data.entries.filter(entry => entry.module === 'Language/Inheritance' && entry.audience === 'frontend').map(entry => entry.name));
+for (const name of ['base object declaration', 'inherited fields and methods', 'derived constructor', 'base constructor call', 'method override', 'GetTypeName', 'IsType']) {
+  assert(inheritanceNames.has(name), `Front-end inheritance API is missing ${name}`);
+}
+const lazyUiStart = data.entries.filter(entry => entry.module === 'LazyUI/Start here' && entry.audience === 'frontend');
+assert(lazyUiStart.length >= 5, 'LazyUI beginner start workflows are missing');
+const programmaticElements = data.entries.filter(entry => entry.module === 'LazyUI/Programmatic elements' && entry.audience === 'frontend');
+assert(programmaticElements.length >= 200, 'Programmatic LazyUI element factories are missing from the beginner API');
+assert(programmaticElements.every(entry => entry.sourceModule === 'UI/LazyUI'), 'Programmatic element metadata lost its real source module');
+const beginnerLazyUi = frontendEntries.filter(entry => entry.module === 'UI/LazyUI');
+for (const entry of beginnerLazyUi) {
+  const qualified = `${entry.module}.${entry.owner ? `${entry.owner}.` : ''}${entry.name}`;
+  assert(!/^Runs the .* operation provided by UI\/LazyUI\.$/.test(entry.friendlyDescription || ''), `${qualified} still has a meaningless generated description`);
+  assert(String(entry.example || '').trim() !== String(entry.signature || '').trim(), `${qualified} still shows its backend declaration as the beginner example`);
+}
+const propertyHash = data.entries.find(entry => entry.module === 'UI/LazyUI' && entry.owner === 'Binding' && entry.name === 'property_hash');
+assert(propertyHash && propertyHash.audience === 'backend', 'Binding.property_hash must stay in the Backend tab');
+const apiIndex = fs.readFileSync(path.join(root, 'api', 'index.html'), 'utf8');
+const apiApp = fs.readFileSync(path.join(root, 'api', 'app.js'), 'utf8');
+assert(apiIndex.includes('Front-end API') && apiIndex.includes('Backend'), 'API audience tabs are missing from the documentation');
+assert(apiApp.includes("apiMode === 'backend'"), 'API application does not switch between front-end and backend entries');
+assert(!apiApp.includes('find_id(UI.hash'), 'Beginner LazyUI lessons still use internal hash-based element lookup');
+assert(!apiApp.includes('id_hash'), 'Beginner LazyUI lessons still read internal element hash fields');
+assert(!apiApp.includes('mark_visual_dirty') && !apiApp.includes('mark_layout_dirty'), 'Beginner LazyUI lessons still call internal dirty-state methods');
+
 const modules = new Set(data.entries.map(entry => entry.module));
+assert.strictEqual(Object.keys(data.stats?.modules || {}).length, modules.size, 'API module statistics are stale');
 for (const module of modules) assert(data.moduleGuides?.[module], `Missing module guide for ${module}`);
 assert.strictEqual(Object.keys(data.moduleGuides || {}).length, modules.size, 'Module guide count does not match the API module count');
 

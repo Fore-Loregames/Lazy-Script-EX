@@ -480,3 +480,26 @@ footer strong { color: var(--text); }
   .method-reference h4 { grid-column: 1; }
   .method-reference div { grid-template-columns: 1fr; }
 }
+
+/* 0.18.18 beginner/API split */
+.sidebar-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sidebar-tab { padding: 6px 4px; }
+.api-mode-switch { display: inline-flex; gap: 6px; margin: 0 0 16px; padding: 5px; border: 1px solid var(--line-soft); border-radius: 10px; background: #0a1018; }
+.api-mode-switch button { border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); padding: 8px 12px; cursor: pointer; font-weight: 700; }
+.api-mode-switch button:hover { color: var(--text); background: #121d2b; }
+.api-mode-switch button.active { color: #fff; background: #1b2d45; border-color: #31537c; }
+.inheritance-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+.inheritance-steps article { display: flex; gap: 10px; padding: 13px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--surface); }
+.inheritance-steps article > b { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px; border-radius: 50%; background: #1b2d45; color: #dbeaff; }
+.inheritance-steps h4 { margin: 0 0 4px; }
+.inheritance-steps p { margin: 0; color: var(--muted); }
+.api-entry.backend-entry { border-color: #493c5e; }
+.api-entry.backend-entry .api-entry-head { background: linear-gradient(135deg, #191526, #171b27); }
+.api-backend-warning { margin-bottom: 12px; padding: 11px 13px; border: 1px solid #6a4d2f; border-radius: 9px; background: #21180f; color: #f1cf9d; }
+@media (max-width: 760px) {
+  .sidebar-tabs { grid-template-columns: 1fr; }
+  .inheritance-steps { grid-template-columns: 1fr; }
+  .api-mode-switch { display: grid; grid-template-columns: 1fr; width: 100%; }
+}
+.api-call-shape { display: inline-block; margin-top: 8px; padding: 5px 8px; border: 1px solid var(--line-soft); border-radius: 6px; background: #0b111a; color: #cfe2ff; font-size: 12px; }
+[hidden] { display: none !important; }

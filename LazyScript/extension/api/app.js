@@ -11,6 +11,7 @@ use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
 const AppProps = {
     title = "My First LazyUI App"
     status = "Ready"
+    document = null
 }
 
 lscss .app = {
@@ -80,9 +81,7 @@ lshtml app_view(props) = {(
 
 fn hello_clicked(element,event,props)
     props.status = "The button works. You are now updating retained UI."
-    local root = element
-    while root.parent ~= null do root = root.parent end
-    local status = root.find_id(UI.hash("status"))
+    local status = props.document.find("#status")
     if status ~= null then status.set_text(props.status) end
     return 0
 end
@@ -111,6 +110,7 @@ fn main()
     local props = AppProps.new()
     local root = app_view(props)
     local document = UI.document(root)
+    props.document = document
     local renderer = UIRenderer.create(null,64)
     local window_input = UI.connect_window_input(window,document)
     local framebuffer = GLFW.FramebufferSize.new()
@@ -178,6 +178,7 @@ use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
 const WelcomeProps = {
     title = "Build Something New"
     message = "LazyUI keeps familiar markup while compiling to native code."
+    document = null
 }
 
 lscss .screen = {
@@ -250,10 +251,7 @@ lshtml welcome_view(props) = {(
 )}
 
 fn create_clicked(element,event,props)
-    local root = element
-    while root.parent ~= null do root = root.parent end
-
-    local status = root.find_id(UI.hash("welcome-status"))
+    local status = props.document.find("#welcome-status")
     if status ~= null then
         status.set_text("Project creation started.")
     end
@@ -265,7 +263,7 @@ fn fail(message)
     return 1
 end
 
-fn run_window(root,title,width,height)
+fn run_window(root,title,width,height,props)
     if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then
         return fail("GLFW initialization failed.")
     end
@@ -291,6 +289,7 @@ fn run_window(root,title,width,height)
     end
 
     local document = UI.document(root)
+    props.document = document
     local renderer = UIRenderer.create(null,64)
     if not renderer.ready then
         document.destroy()
@@ -360,7 +359,7 @@ end
 fn main()
     local props = WelcomeProps.new()
     local root = welcome_view(props)
-    local result = run_window(root,"Welcome Panel",900,600)
+    local result = run_window(root,"Welcome Panel",900,600,props)
     props.destroy()
     return result
 end`;
@@ -374,6 +373,7 @@ use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
 const CounterProps = {
     count = 0
     text = null
+    document = null
 }
 
 lscss .screen = {
@@ -451,10 +451,7 @@ fn change_count(element,event,props)
     if props.count < 0 then props.count = 0 end
     if props.count > 8 then props.count = 8 end
 
-    local root = element
-    while root.parent ~= null do root = root.parent end
-
-    local value = root.find_id(UI.hash("count-value"))
+    local value = props.document.find("#count-value")
     if value ~= null then
         value.set_text(props.text.set_i64(props.count))
     end
@@ -466,7 +463,7 @@ fn fail(message)
     return 1
 end
 
-fn run_window(root,title,width,height)
+fn run_window(root,title,width,height,props)
     if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then
         return fail("GLFW initialization failed.")
     end
@@ -492,6 +489,7 @@ fn run_window(root,title,width,height)
     end
 
     local document = UI.document(root)
+    props.document = document
     local renderer = UIRenderer.create(null,64)
     if not renderer.ready then
         document.destroy()
@@ -562,7 +560,7 @@ fn main()
     local props = CounterProps.new()
     props.text = UI.counter_text("",32)
     local root = counter_view(props)
-    local result = run_window(root,"Counter Example",760,520)
+    local result = run_window(root,"Counter Example",760,520,props)
     props.text.destroy()
     props.destroy()
     return result
@@ -577,6 +575,7 @@ use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
 const FormProps = {
     name = ""
     notes = ""
+    document = null
 }
 
 lscss .screen = {
@@ -655,17 +654,11 @@ lshtml profile_view(props) = {(
     </ui>
 )}
 
-fn find_form_status(element)
-    local root = element
-    while root.parent ~= null do root = root.parent end
-    return root.find_id(UI.hash("form-status"))
-end
-
 fn name_changed(element,event,props)
     if element.value == null then props.name = ""
     else props.name = element.value end
 
-    local status = find_form_status(element)
+    local status = props.document.find("#form-status")
     if status ~= null then
         if string.length(props.name) == 0 then
             status.set_text("Enter a character name.")
@@ -680,7 +673,7 @@ fn notes_changed(element,event,props)
     if element.value == null then props.notes = ""
     else props.notes = element.value end
 
-    local status = find_form_status(element)
+    local status = props.document.find("#form-status")
     if status ~= null then
         if string.length(props.notes) == 0 then
             status.set_text("Write a short note.")
@@ -696,7 +689,7 @@ fn fail(message)
     return 1
 end
 
-fn run_window(root,title,width,height)
+fn run_window(root,title,width,height,props)
     if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then
         return fail("GLFW initialization failed.")
     end
@@ -722,6 +715,7 @@ fn run_window(root,title,width,height)
     end
 
     local document = UI.document(root)
+    props.document = document
     local renderer = UIRenderer.create(null,64)
     if not renderer.ready then
         document.destroy()
@@ -791,7 +785,7 @@ end
 fn main()
     local props = FormProps.new()
     local root = profile_view(props)
-    local result = run_window(root,"Character Profile",820,620)
+    local result = run_window(root,"Character Profile",820,620,props)
     props.destroy()
     return result
 end`;
@@ -991,6 +985,7 @@ use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
 
 const SettingsProps = {
     active_tab = "graphics"
+    document = null
 }
 
 lscss .screen = {
@@ -1042,11 +1037,11 @@ lshtml settings_view(props) = {(
     <ui class="screen">
         <panel class="settings-card">
             <row class="tabs">
-                <button id="graphics-tab" class="tab active"
+                <button id="graphics-tab" class="tab active" value="graphics"
                     onclick={open_tab} context={props}>Graphics</button>
-                <button id="audio-tab" class="tab"
+                <button id="audio-tab" class="tab" value="audio"
                     onclick={open_tab} context={props}>Audio</button>
-                <button id="gameplay-tab" class="tab"
+                <button id="gameplay-tab" class="tab" value="gameplay"
                     onclick={open_tab} context={props}>Gameplay</button>
             </row>
 
@@ -1071,39 +1066,26 @@ lshtml settings_view(props) = {(
     </ui>
 )}
 
-fn set_tab(root,button_id,page_id,is_active)
-    local button = root.find_id(UI.hash(button_id))
-    local page = root.find_id(UI.hash(page_id))
+fn set_tab(document,button_selector,page_selector,is_active)
+    local button = document.find(button_selector)
+    local page = document.find(page_selector)
 
     if button ~= null then
         if is_active then button.add_class("active")
         else button.remove_class("active") end
-        button.mark_visual_dirty()
     end
 
     if page ~= null then
         page.hidden = not is_active
-        page.mark_layout_dirty()
     end
 end
 
 fn open_tab(element,event,props)
-    local root = element
-    while root.parent ~= null do root = root.parent end
+    props.active_tab = element.value
 
-    if element.id_hash == UI.hash("graphics-tab") then
-        props.active_tab = "graphics"
-    end
-    if element.id_hash == UI.hash("audio-tab") then
-        props.active_tab = "audio"
-    end
-    if element.id_hash == UI.hash("gameplay-tab") then
-        props.active_tab = "gameplay"
-    end
-
-    set_tab(root,"graphics-tab","graphics-page",props.active_tab == "graphics")
-    set_tab(root,"audio-tab","audio-page",props.active_tab == "audio")
-    set_tab(root,"gameplay-tab","gameplay-page",props.active_tab == "gameplay")
+    set_tab(props.document,"#graphics-tab","#graphics-page",props.active_tab == "graphics")
+    set_tab(props.document,"#audio-tab","#audio-page",props.active_tab == "audio")
+    set_tab(props.document,"#gameplay-tab","#gameplay-page",props.active_tab == "gameplay")
     return 0
 end
 
@@ -1112,7 +1094,7 @@ fn fail(message)
     return 1
 end
 
-fn run_window(root,title,width,height)
+fn run_window(root,title,width,height,props)
     if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then
         return fail("GLFW initialization failed.")
     end
@@ -1138,6 +1120,7 @@ fn run_window(root,title,width,height)
     end
 
     local document = UI.document(root)
+    props.document = document
     local renderer = UIRenderer.create(null,64)
     if not renderer.ready then
         document.destroy()
@@ -1207,7 +1190,7 @@ end
 fn main()
     local props = SettingsProps.new()
     local root = settings_view(props)
-    local result = run_window(root,"Settings Tabs",860,620)
+    local result = run_window(root,"Settings Tabs",860,620,props)
     props.destroy()
     return result
 end`;
@@ -1512,10 +1495,7 @@ lscss .status = {
 }
 
 fn create_clicked(element,event,props)
-    local root = element
-    while root.parent ~= null do root = root.parent end
-
-    local status = root.find_id(UI.hash("welcome-status"))
+    local status = props.document.find("#welcome-status")
     if status ~= null then
         status.set_text("Project creation started.")
     end
@@ -1614,6 +1594,7 @@ lscss .hint = {
       'Props and event': `const CounterProps = {
     count = 0
     text = null
+    document = null
 }
 
 fn change_count(element,event,props)
@@ -1621,10 +1602,7 @@ fn change_count(element,event,props)
     if props.count < 0 then props.count = 0 end
     if props.count > 8 then props.count = 8 end
 
-    local root = element
-    while root.parent ~= null do root = root.parent end
-
-    local value = root.find_id(UI.hash("count-value"))
+    local value = props.document.find("#count-value")
     if value ~= null then
         value.set_text(props.text.set_i64(props.count))
     end
@@ -1736,19 +1714,14 @@ lscss .form-status = {
       'Input events': `const FormProps = {
     name = ""
     notes = ""
+    document = null
 }
-
-fn find_form_status(element)
-    local root = element
-    while root.parent ~= null do root = root.parent end
-    return root.find_id(UI.hash("form-status"))
-end
 
 fn name_changed(element,event,props)
     if element.value == null then props.name = ""
     else props.name = element.value end
 
-    local status = find_form_status(element)
+    local status = props.document.find("#form-status")
     if status ~= null then
         if string.length(props.name) == 0 then
             status.set_text("Enter a character name.")
@@ -1763,7 +1736,7 @@ fn notes_changed(element,event,props)
     if element.value == null then props.notes = ""
     else props.notes = element.value end
 
-    local status = find_form_status(element)
+    local status = props.document.find("#form-status")
     if status ~= null then
         if string.length(props.notes) == 0 then
             status.set_text("Write a short note.")
@@ -1921,11 +1894,11 @@ lscss .inventory-scroll = {
     <ui class="screen">
         <panel class="settings-card">
             <row class="tabs">
-                <button id="graphics-tab" class="tab active"
+                <button id="graphics-tab" class="tab active" value="graphics"
                     onclick={open_tab} context={props}>Graphics</button>
-                <button id="audio-tab" class="tab"
+                <button id="audio-tab" class="tab" value="audio"
                     onclick={open_tab} context={props}>Audio</button>
-                <button id="gameplay-tab" class="tab"
+                <button id="gameplay-tab" class="tab" value="gameplay"
                     onclick={open_tab} context={props}>Gameplay</button>
             </row>
 
@@ -1995,41 +1968,29 @@ lscss .tab-page = {
 }`,
       'Tab behavior': `const SettingsProps = {
     active_tab = "graphics"
+    document = null
 }
 
-fn set_tab(root,button_id,page_id,is_active)
-    local button = root.find_id(UI.hash(button_id))
-    local page = root.find_id(UI.hash(page_id))
+fn set_tab(document,button_selector,page_selector,is_active)
+    local button = document.find(button_selector)
+    local page = document.find(page_selector)
 
     if button ~= null then
         if is_active then button.add_class("active")
         else button.remove_class("active") end
-        button.mark_visual_dirty()
     end
 
     if page ~= null then
         page.hidden = not is_active
-        page.mark_layout_dirty()
     end
 end
 
 fn open_tab(element,event,props)
-    local root = element
-    while root.parent ~= null do root = root.parent end
+    props.active_tab = element.value
 
-    if element.id_hash == UI.hash("graphics-tab") then
-        props.active_tab = "graphics"
-    end
-    if element.id_hash == UI.hash("audio-tab") then
-        props.active_tab = "audio"
-    end
-    if element.id_hash == UI.hash("gameplay-tab") then
-        props.active_tab = "gameplay"
-    end
-
-    set_tab(root,"graphics-tab","graphics-page",props.active_tab == "graphics")
-    set_tab(root,"audio-tab","audio-page",props.active_tab == "audio")
-    set_tab(root,"gameplay-tab","gameplay-page",props.active_tab == "gameplay")
+    set_tab(props.document,"#graphics-tab","#graphics-page",props.active_tab == "graphics")
+    set_tab(props.document,"#audio-tab","#audio-page",props.active_tab == "audio")
+    set_tab(props.document,"#gameplay-tab","#gameplay-page",props.active_tab == "gameplay")
     return 0
 end`
     },
@@ -2377,6 +2338,15 @@ const API_CATEGORY_DEFINITIONS = [
   { label: 'Threading', description: 'Threads, locks, events, atomics, and synchronization', test: module => module === 'System/Threading' }
 ];
 
+const BACKEND_CATEGORY_DEFINITIONS = [
+  { label: 'Native graphics and audio', description: 'Raw OpenGL, OpenAL, texture upload, shader, and media declarations', test: module => module === 'OpenGL' || module === 'OpenAL' || module.startsWith('OpenGL/') || module.startsWith('OpenAL/') || module === 'UI/ShaderSources' },
+  { label: 'Windowing and Windows', description: 'Raw GLFW and Win32 functions, constants, handles, and callbacks', test: module => module === 'GLFW' || module.startsWith('Platform/') },
+  { label: 'LazyUI internals', description: 'Internal retained records, fixed layouts, hashes, renderer plumbing, and canvas command storage', test: module => module === 'UI/LazyUI' || module === 'UI/Renderer' },
+  { label: 'Native math and data bridges', description: 'GLM ABI bridges, raw image/font bindings, and fixed native records', test: module => module === 'Math/GLMRaw' || module === 'Graphics/STBImage' || module === 'Text/FreeTypeRaw' },
+  { label: 'Networking internals', description: 'Raw WinSock functions and native networking records', test: module => module === 'Network/WinSockRaw' },
+  { label: 'Other backend entries', description: 'Advanced and internal declarations kept away from the front-end API', test: module => true }
+];
+
 function apiEntryKey(entry) {
   return `${entry.module}|${entry.source}|${entry.line}|${entry.owner || ''}|${entry.name}`;
 }
@@ -2394,6 +2364,7 @@ function buildSpecialTopLevelGroups(module, topEntries) {
   const rules = [];
   if (module.startsWith('Language/')) {
     rules.push(
+      ['Inheritance and constructors', entry => entry.module === 'Language/Inheritance' || namesContain(entry, ['base object', 'inherited', 'derived constructor', 'base constructor', 'override', 'common base', 'gettypename', 'istype'])],
       ['Start here', entry => namesContain(entry, ['setup', 'project', 'build', 'main', 'entry'])],
       ['Values and variables', entry => namesContain(entry, ['local', 'const', 'value', 'variable', 'assignment', 'null'])],
       ['Conditions and loops', entry => namesContain(entry, ['if', 'elseif', 'else', 'while', 'for', 'break', 'condition'])],
@@ -2401,6 +2372,12 @@ function buildSpecialTopLevelGroups(module, topEntries) {
       ['Tables and buffers', entry => namesContain(entry, ['table', 'push', 'get', 'length', 'remove', 'clear', 'buffer', 'positional', 'byte'])],
       ['Static managers and services', entry => entry.module === 'Language/Static objects' || namesContain(entry, ['static object', 'singleton', 'shared static', 'static method', 'static field', 'shutdown'])],
       ['Objects and modules', entry => namesContain(entry, ['object', 'field', 'method', 'new', 'destroy', 'module', 'import', 'use'])]
+    );
+  } else if (module === 'LazyUI/Start here') {
+    rules.push(
+      ['Build the interface', entry => namesContain(entry, ['build a simple interface', 'ids and classes'])],
+      ['Find and change elements', entry => namesContain(entry, ['find an element', 'change text'])],
+      ['Attach events', entry => namesContain(entry, ['event listener'])]
     );
   } else if (module === 'Math/GLM') {
     rules.push(
@@ -2521,7 +2498,7 @@ function buildModuleGroups(module, moduleEntries) {
 }
 
 function setupApiReference() {
-  const entries = apiData.entries || [];
+  const allEntries = apiData.entries || [];
   const moduleSelect = document.getElementById('api-module');
   const kindSelect = document.getElementById('api-kind');
   const search = document.getElementById('api-search');
@@ -2530,66 +2507,166 @@ function setupApiReference() {
   const previous = document.getElementById('api-prev');
   const next = document.getElementById('api-next');
   const signatures = document.getElementById('show-signatures');
+  const signatureWrap = document.getElementById('signature-toggle-wrap');
   const apiNavTree = document.getElementById('api-nav-tree');
   const apiNavSearch = document.getElementById('api-nav-search');
+  const apiNavSearchLabel = document.getElementById('api-nav-search-label');
   const apiNavCount = document.getElementById('api-nav-count');
   const currentFilter = document.getElementById('api-current-filter');
   const currentFilterLabel = document.getElementById('api-current-filter-label');
   const clearNavFilter = document.getElementById('api-clear-nav-filter');
   const moduleGuide = document.getElementById('api-module-guide');
   const sidebar = document.getElementById('sidebar');
+  const summary = document.getElementById('api-summary');
+  const modeEyebrow = document.getElementById('api-mode-eyebrow');
+  const modeTitle = document.getElementById('api-mode-title');
+  const modeDescription = document.getElementById('api-mode-description');
+  const helpTitle = document.getElementById('api-help-title');
+  const helpText = document.getElementById('api-help-text');
+  const frontendModeButton = document.getElementById('api-mode-frontend');
+  const backendModeButton = document.getElementById('api-mode-backend');
+
   let page = 0;
   const pageSize = 20;
   let navFilter = null;
+  let apiMode = 'frontend';
+  let entries = [];
+  let modules = [];
+  let moduleEntries = new Map();
+  let moduleGroups = new Map();
 
-  const modules = Object.keys(apiData.stats?.modules || {}).sort((a, b) => a.localeCompare(b));
-  const moduleEntries = new Map(modules.map(module => [module, entries.filter(entry => entry.module === module)]));
-  const moduleGroups = new Map(modules.map(module => [module, buildModuleGroups(module, moduleEntries.get(module))]));
+  function currentPaneName() {
+    return apiMode === 'backend' ? 'backend' : 'api';
+  }
 
-  modules.forEach(name => {
-    const option = document.createElement('option');
-    option.value = name;
-    option.textContent = `${name} (${apiData.stats.modules[name]})`;
-    moduleSelect.appendChild(option);
-  });
-  Object.keys(apiData.stats?.kinds || {}).sort().forEach(name => {
-    const option = document.createElement('option');
-    option.value = name;
-    option.textContent = `${name} (${apiData.stats.kinds[name]})`;
-    kindSelect.appendChild(option);
-  });
-
-  const summary = document.getElementById('api-summary');
-  const summaryItems = [
-    ['Total entries', apiData.stats?.total || entries.length],
-    ['Modules', modules.length],
-    ['LazyUI entries', apiData.stats?.modules?.['UI/LazyUI'] || 0],
-    ['Texture entries', apiData.stats?.modules?.['Graphics/Texture2D'] || 0],
-    ['GLM entries', apiData.stats?.modules?.['Math/GLM'] || 0],
-    ['File and JSON', (apiData.stats?.modules?.['System/File'] || 0) + (apiData.stats?.modules?.['Data/Json'] || 0)]
-  ];
-  summary.innerHTML = summaryItems.map(([label, value]) => `<span class="stat-pill"><strong>${value}</strong> ${escapeHtml(label)}</span>`).join('');
-  apiNavCount.textContent = `${entries.length.toLocaleString()} entries in ${modules.length} modules`;
-
-  function setSidebarPane(name) {
+  function applySidebarPane(name) {
     document.querySelectorAll('[data-sidebar-pane]').forEach(button => {
       const active = button.dataset.sidebarPane === name;
       button.classList.toggle('active', active);
       button.setAttribute('aria-selected', String(active));
     });
+    const contentName = name === 'backend' ? 'api' : name;
     document.querySelectorAll('[data-sidebar-pane-content]').forEach(pane => {
-      const active = pane.dataset.sidebarPaneContent === name;
+      const active = pane.dataset.sidebarPaneContent === contentName;
       pane.hidden = !active;
       pane.classList.toggle('active', active);
     });
   }
 
+  function modeEntries() {
+    return allEntries.filter(entry => (entry.audience || 'frontend') === apiMode);
+  }
+
+  function clearSelect(select, label) {
+    select.innerHTML = `<option value="">${escapeHtml(label)}</option>`;
+  }
+
+  function rebuildIndexes() {
+    entries = modeEntries();
+    modules = [...new Set(entries.map(entry => entry.module))].sort((a, b) => a.localeCompare(b));
+    moduleEntries = new Map(modules.map(module => [module, entries.filter(entry => entry.module === module)]));
+    moduleGroups = new Map(modules.map(module => [module, buildModuleGroups(module, moduleEntries.get(module))]));
+
+    clearSelect(moduleSelect, 'All modules');
+    modules.forEach(name => {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = `${name} (${moduleEntries.get(name).length})`;
+      moduleSelect.appendChild(option);
+    });
+
+    clearSelect(kindSelect, 'All entry types');
+    const kinds = [...new Set(entries.map(entry => entry.kind))].sort((a, b) => a.localeCompare(b));
+    kinds.forEach(name => {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = `${name} (${entries.filter(entry => entry.kind === name).length})`;
+      kindSelect.appendChild(option);
+    });
+
+    const countModule = prefix => entries.filter(entry => entry.module === prefix || entry.module.startsWith(`${prefix}/`)).length;
+    const summaryItems = apiMode === 'frontend'
+      ? [
+          ['Front-end entries', entries.length],
+          ['Modules', modules.length],
+          ['Language', countModule('Language')],
+          ['Inheritance', countModule('Language/Inheritance')],
+          ['LazyUI', countModule('LazyUI') + countModule('UI/LazyUI')],
+          ['High-level math', countModule('Math/GLM') + countModule('Math/Camera')]
+        ]
+      : [
+          ['Backend entries', entries.length],
+          ['Modules', modules.length],
+          ['Raw functions', entries.filter(entry => entry.kind === 'raw function').length],
+          ['Internal fields', entries.filter(entry => entry.kind === 'field').length],
+          ['Native constants', entries.filter(entry => entry.kind === 'constant').length],
+          ['Internal UI', countModule('UI/LazyUI') + countModule('UI/Renderer')]
+        ];
+    summary.innerHTML = summaryItems.map(([label, value]) => `<span class="stat-pill"><strong>${value.toLocaleString()}</strong> ${escapeHtml(label)}</span>`).join('');
+    apiNavCount.textContent = `${entries.length.toLocaleString()} ${apiMode === 'frontend' ? 'front-end' : 'backend'} entries in ${modules.length} modules`;
+  }
+
+  function updateModeText() {
+    const backend = apiMode === 'backend';
+    frontendModeButton.classList.toggle('active', !backend);
+    backendModeButton.classList.toggle('active', backend);
+    signatureWrap.hidden = !backend;
+    if (!backend) signatures.checked = false;
+
+    modeEyebrow.textContent = backend ? 'Backend and native reference' : 'Front-end API reference';
+    modeTitle.textContent = backend
+      ? 'Raw declarations and internal layouts live here.'
+      : 'Use the features you write in normal LSX code.';
+    modeDescription.textContent = backend
+      ? 'This separate view contains raw functions, native constants, fixed-layout fields, internal LazyUI records, renderer plumbing, and ABI-facing declarations. Normal game and engine code should start in the Front-end API.'
+      : 'This view contains the LSX language, inheritance, high-level engine APIs, LSHTML, LSCSS, document lookup, and events. Native layouts, internal fields, raw bindings, and compiler-facing declarations are kept in the separate Backend tab.';
+    helpTitle.textContent = backend ? 'Use this only when extending a binding or runtime system.' : 'Start with a job, not a native declaration.';
+    helpText.textContent = backend
+      ? 'The exact declarations and source locations are visible here. Parameters may expose native types because this tab is for low-level work, not normal beginner-facing LSX code.'
+      : 'Open Language for inheritance and objects, or User interface for LSHTML, LSCSS, document.find(), events, inputs, and visible controls. The Backend tab contains raw functions, internal records, fixed layouts, and native constants.';
+    apiNavSearchLabel.textContent = backend ? 'Find a backend declaration' : 'Find a front-end API';
+    apiNavSearch.placeholder = backend ? 'Try: property_hash, glBufferData, native handle...' : 'Try: inheritance, button click, texture...';
+    search.placeholder = backend ? 'Example: raw OpenGL, property_hash, native field...' : 'Example: inherit object, find button, load texture...';
+  }
+
+  function setApiMode(mode, options = {}) {
+    const nextMode = mode === 'backend' ? 'backend' : 'frontend';
+    if (apiMode === nextMode && options.force !== true) {
+      applySidebarPane(currentPaneName());
+      return;
+    }
+    apiMode = nextMode;
+    page = 0;
+    navFilter = null;
+    search.value = '';
+    apiNavSearch.value = '';
+    moduleSelect.value = '';
+    kindSelect.value = '';
+    updateCurrentFilter();
+    updateModeText();
+    rebuildIndexes();
+    renderApiTree();
+    render();
+    applySidebarPane(currentPaneName());
+    if (options.scroll) document.getElementById('api-reference').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   document.querySelectorAll('[data-sidebar-pane]').forEach(button => {
-    button.addEventListener('click', () => setSidebarPane(button.dataset.sidebarPane));
+    button.addEventListener('click', () => {
+      const name = button.dataset.sidebarPane;
+      if (name === 'api') setApiMode('frontend', { force: true });
+      else if (name === 'backend') setApiMode('backend', { force: true });
+      else applySidebarPane('guide');
+    });
   });
   document.querySelectorAll('[data-open-api-index="true"], .top-link').forEach(link => {
-    link.addEventListener('click', () => setSidebarPane('api'));
+    link.addEventListener('click', () => setApiMode('frontend', { force: true }));
   });
+  document.querySelectorAll('[data-open-backend-index="true"]').forEach(link => {
+    link.addEventListener('click', () => setApiMode('backend', { force: true }));
+  });
+  frontendModeButton.addEventListener('click', () => setApiMode('frontend', { force: true }));
+  backendModeButton.addEventListener('click', () => setApiMode('backend', { force: true }));
 
   function updateCurrentFilter() {
     if (!navFilter) {
@@ -2610,51 +2687,50 @@ function setupApiReference() {
     updateCurrentFilter();
     renderApiTree();
     render();
-    setSidebarPane('api');
-    if (options.scroll !== false) {
-      document.getElementById('api-reference').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    applySidebarPane(currentPaneName());
+    if (options.scroll !== false) document.getElementById('api-reference').scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (window.innerWidth <= 1080) sidebar.classList.remove('open');
   }
 
   function renderApiTree() {
     const term = apiNavSearch.value.trim().toLowerCase();
     if (term) {
-      const matching = entries.filter(entry => [entry.module, entry.owner, entry.name, entry.friendlyDescription, entry.whatItIs, entry.whenToUse, entry.beginnerNote, entry.memberSummary, entry.howToGet, entry.workflow, entry.commonMistake, entry.description, entry.signature, entry.example, JSON.stringify(entry.parameterDocs || {})]
+      const matching = entries.filter(entry => [entry.module, entry.owner, entry.name, entry.publicSignature, entry.friendlyDescription, entry.whatItIs, entry.whenToUse, entry.beginnerNote, entry.memberSummary, entry.howToGet, entry.workflow, entry.commonMistake, entry.description, entry.signature, entry.example, JSON.stringify(entry.parameterDocs || {})]
         .filter(Boolean).join(' ').toLowerCase().includes(term)).slice(0, 120);
       apiNavTree.innerHTML = matching.length ? `<div class="api-nav-search-results">${matching.map(entry => {
         const key = apiEntryKey(entry);
         return `<button class="api-nav-search-result" type="button" data-api-entry-key="${escapeHtml(key)}"><strong>${escapeHtml(entry.module)}.${escapeHtml(entryNameText(entry))}</strong><span>${escapeHtml(entry.kind)}</span></button>`;
-      }).join('')}</div>` : '<div class="api-nav-search-empty">No API names or descriptions match that search.</div>';
+      }).join('')}</div>` : '<div class="api-nav-search-empty">No names or descriptions match that search in this tab.</div>';
       apiNavTree.querySelectorAll('[data-api-entry-key]').forEach(button => {
         button.addEventListener('click', () => {
           const key = button.dataset.apiEntryKey;
           const entry = entries.find(item => apiEntryKey(item) === key);
           if (!entry) return;
-          signatures.checked = true;
+          if (apiMode === 'backend') signatures.checked = true;
           activateNavFilter({ module: entry.module, label: `${entry.module}.${entryNameText(entry)}`, keys: new Set([key]) });
         });
       });
       return;
     }
 
+    const definitions = apiMode === 'backend' ? BACKEND_CATEGORY_DEFINITIONS : API_CATEGORY_DEFINITIONS;
     const usedModules = new Set();
-    const categories = API_CATEGORY_DEFINITIONS.map(category => {
-      const categoryModules = modules.filter(module => category.test(module));
+    const categories = definitions.map(category => {
+      const categoryModules = modules.filter(module => !usedModules.has(module) && category.test(module));
       categoryModules.forEach(module => usedModules.add(module));
       return { ...category, modules: categoryModules };
     }).filter(category => category.modules.length);
     const uncategorized = modules.filter(module => !usedModules.has(module));
-    if (uncategorized.length) categories.push({ label: 'Other modules', description: 'Additional bindings', modules: uncategorized });
+    if (uncategorized.length) categories.push({ label: 'Other modules', description: 'Additional entries', modules: uncategorized });
 
     apiNavTree.innerHTML = categories.map(category => {
       const count = category.modules.reduce((total, module) => total + moduleEntries.get(module).length, 0);
-      const open = category.modules.includes(navFilter?.module) || category.label === 'Math and cameras';
+      const open = category.modules.includes(navFilter?.module) || (!navFilter && ((apiMode === 'frontend' && category.label === 'Language') || (apiMode === 'backend' && category.label === 'LazyUI internals')));
       return `<details class="api-nav-category" ${open ? 'open' : ''}>
         <summary title="${escapeHtml(category.description)}"><span>${escapeHtml(category.label)}</span><span class="api-nav-summary-count">${count}</span></summary>
         <div class="api-nav-category-body">${category.modules.map(module => {
           const groups = moduleGroups.get(module);
-          const moduleOpen = module === navFilter?.module || module === 'Math/GLM';
+          const moduleOpen = module === navFilter?.module || (!navFilter && (module === 'Language/Inheritance' || module === 'LazyUI/Start here'));
           return `<details class="api-nav-module-group" ${moduleOpen ? 'open' : ''}>
             <summary><span class="api-nav-module-name">${escapeHtml(module.replace(/^.*\//, ''))}</span><span class="api-nav-summary-count">${moduleEntries.get(module).length}</span></summary>
             <div class="api-nav-module-actions">
@@ -2682,12 +2758,7 @@ function setupApiReference() {
         const index = Number(indexText);
         const group = moduleGroups.get(module)?.[index];
         if (!group) return;
-        activateNavFilter({
-          module,
-          groupId: button.dataset.apiGroup,
-          label: `${module} → ${group.label}`,
-          keys: new Set(group.entries.map(apiEntryKey))
-        });
+        activateNavFilter({ module, groupId: button.dataset.apiGroup, label: `${module} → ${group.label}`, keys: new Set(group.entries.map(apiEntryKey)) });
       });
     });
   }
@@ -2700,7 +2771,7 @@ function setupApiReference() {
       if (moduleSelect.value && entry.module !== moduleSelect.value) return false;
       if (kindSelect.value && entry.kind !== kindSelect.value) return false;
       if (!term) return true;
-      return [entry.module, entry.kind, entry.owner, entry.name, entry.signature, entry.friendlyDescription, entry.whatItIs, entry.whenToUse, entry.beginnerNote, entry.memberSummary, entry.howToGet, entry.workflow, entry.commonMistake, entry.description, entry.example, entry.source]
+      return [entry.module, entry.kind, entry.owner, entry.name, entry.publicSignature, entry.signature, entry.friendlyDescription, entry.whatItIs, entry.whenToUse, entry.beginnerNote, entry.memberSummary, entry.howToGet, entry.workflow, entry.commonMistake, entry.description, entry.example, entry.source]
         .filter(Boolean).join(' ').toLowerCase().includes(term);
     });
   }
@@ -2723,7 +2794,7 @@ function setupApiReference() {
         </div>
       </div>
       <div class="api-concept-grid">
-        <div><strong>What this module is</strong><p>${escapeHtml(guide.whatItIs || '')}</p></div>
+        <div><strong>What this section is</strong><p>${escapeHtml(guide.whatItIs || '')}</p></div>
         <div><strong>When you use it</strong><p>${escapeHtml(guide.whenToUse || '')}</p></div>
         <div><strong>Start here</strong><p>${escapeHtml(guide.beginnerStart || '')}</p></div>
         <div><strong>Before using it</strong><p>${escapeHtml(guide.requires || 'No special setup is required.')}</p></div>
@@ -2742,25 +2813,33 @@ function setupApiReference() {
     const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
     page = Math.min(Math.max(page, 0), pages - 1);
     const visible = filtered.slice(page * pageSize, (page + 1) * pageSize);
-    results.classList.toggle('show-signatures', signatures.checked);
+    results.classList.toggle('show-signatures', apiMode === 'backend' && signatures.checked);
     results.innerHTML = visible.length ? visible.map(entry => {
       const qualified = `${entry.module}.${entry.owner ? `${entry.owner}.` : ''}${entry.name}`;
       const entryId = `api-${apiEntryKey(entry).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
-      const ownerLabel = entry.owner ? `<button class="api-owner-link" type="button" data-api-owner-module="${escapeHtml(entry.module)}" data-api-owner="${escapeHtml(entry.owner)}">Part of ${escapeHtml(entry.owner)} — show the whole object</button>` : '';
-      const level = entry.level || 'beginner';
+      const ownerGroup = entry.owner ? moduleGroups.get(entry.module)?.find(group => group.owner && group.label === entry.owner) : null;
+      const ownerLabel = ownerGroup ? `<button class="api-owner-link" type="button" data-api-owner-module="${escapeHtml(entry.module)}" data-api-owner="${escapeHtml(entry.owner)}">Part of ${escapeHtml(entry.owner)} — show its public API</button>` : '';
+      const level = entry.level || (apiMode === 'backend' ? 'advanced' : 'beginner');
       const parameterRows = entry.parameterDocs && Object.keys(entry.parameterDocs).length
         ? `<div class="api-parameters"><strong>What the inputs mean</strong>${Object.entries(entry.parameterDocs).map(([name, description]) => `<div><code>${escapeHtml(name)}</code><span>${escapeHtml(description)}</span></div>`).join('')}</div>`
         : '';
       const related = entry.related?.length ? `<div class="api-related"><strong>Related</strong>${entry.related.map(value => `<code>${escapeHtml(value)}</code>`).join('')}</div>` : '';
-      return `<article class="api-entry" id="${escapeHtml(entryId)}">
+      const callShape = apiMode === 'backend' ? entry.signature : (entry.publicSignature || entry.signature);
+      const signatureBlock = apiMode === 'backend' ? `<div class="api-signature"><div class="api-signature-label">Exact backend declaration</div><pre>${escapeHtml(entry.signature)}</pre></div>` : '';
+      const meta = apiMode === 'backend' ? `<div class="api-meta">Source: ${escapeHtml(entry.source)}:${entry.line}${entry.dll ? ` · Native library: ${escapeHtml(entry.dll)}` : ''}</div>` : '';
+      const exampleTitle = apiMode === 'backend' ? 'Backend/native usage' : 'Copy-ready LSX example';
+      const exampleNote = entry.exampleNote || (apiMode === 'backend' ? 'Low-level declaration or usage example.' : 'Normal front-end LSX usage.');
+      return `<article class="api-entry ${apiMode === 'backend' ? 'backend-entry' : ''}" id="${escapeHtml(entryId)}">
         <div class="api-entry-head">
           <div class="api-entry-name">
             <div class="api-entry-labels"><span class="api-level api-level-${escapeHtml(level)}">${escapeHtml(level)}</span>${ownerLabel}</div>
             <strong>${escapeHtml(qualified)}</strong>
             <span>${escapeHtml(entry.friendlyDescription || entry.description || 'No description is available yet.')}</span>
+            <code class="api-call-shape">${escapeHtml(callShape)}</code>
           </div>
           <span class="api-badge">${escapeHtml(entry.kind)}</span>
         </div>
+        ${apiMode === 'backend' ? '<div class="api-backend-warning">This entry is intentionally separated from the beginner-facing API because it exposes native or internal implementation details.</div>' : ''}
         <div class="api-explanation-grid">
           ${conceptBlock('What this is', entry.whatItIs)}
           ${conceptBlock('When you use it', entry.whenToUse)}
@@ -2776,19 +2855,16 @@ function setupApiReference() {
         ${parameterRows}
         <div class="api-example">
           <div class="api-example-head">
-            <div><strong>Practical LSX example</strong><span>${escapeHtml(entry.exampleNote || 'A focused usage example. Setup that belongs to the module is explained above.')}</span></div>
-            <button class="copy-button api-copy-button" type="button" data-api-copy="true">Copy example</button>
+            <div><strong>${escapeHtml(exampleTitle)}</strong><span>${escapeHtml(exampleNote)}</span></div>
+            <button class="copy-button api-copy-button" type="button" data-api-copy="true">Copy</button>
           </div>
-          <pre><code>${escapeHtml(entry.example || entry.signature)}</code></pre>
+          <pre><code>${escapeHtml(entry.example || callShape)}</code></pre>
         </div>
         ${related}
-        <div class="api-signature">
-          <div class="api-signature-label">Exact declaration used by the compiler</div>
-          <pre>${escapeHtml(entry.signature)}</pre>
-        </div>
-        <div class="api-meta">Source: ${escapeHtml(entry.source)}:${entry.line}${entry.dll ? ` · Native library: ${escapeHtml(entry.dll)}` : ''}</div>
+        ${signatureBlock}
+        ${meta}
       </article>`;
-    }).join('') : '<div class="api-empty">No matching API entries.</div>';
+    }).join('') : `<div class="api-empty">No matching ${apiMode === 'backend' ? 'backend' : 'front-end'} API entries.</div>`;
     pageLabel.textContent = filtered.length ? `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, filtered.length)} of ${filtered.length}` : '0 results';
     previous.disabled = page === 0;
     next.disabled = page >= pages - 1;
@@ -2832,17 +2908,26 @@ function setupApiReference() {
   previous.addEventListener('click', () => { page -= 1; render(); document.getElementById('api-reference').scrollIntoView(); });
   next.addEventListener('click', () => { page += 1; render(); document.getElementById('api-reference').scrollIntoView(); });
 
+  updateModeText();
+  rebuildIndexes();
   renderApiTree();
   render();
-  const apiQuery = new URLSearchParams(location.search).get('api');
-  if (apiQuery) {
+  const params = new URLSearchParams(location.search);
+  const apiQuery = params.get('api');
+  const backendQuery = params.get('backend');
+  if (backendQuery !== null) {
+    setApiMode('backend', { force: true });
+    if (backendQuery) {
+      search.value = backendQuery;
+      render();
+    }
+  } else if (apiQuery) {
     search.value = apiQuery;
     page = 0;
     render();
-    setSidebarPane('api');
-  } else if (location.hash === '#api-reference') setSidebarPane('api');
+    applySidebarPane('api');
+  } else if (location.hash === '#api-reference') applySidebarPane('api');
 }
-
 function initialize() {
   document.getElementById('full-app-code').textContent = fullAppSource;
   renderExamples();

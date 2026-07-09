@@ -16,10 +16,11 @@ The offline documentation contains:
 - tables, objects, functions, conditions, loops, inheritance, and ownership;
 - a complete imports guide covering relative paths, named roots, shared folders, moduleRoots, and VS Code path completion;
 - LSHTML, LSCSS, scrolling, controls, and complete UI applications;
-- a categorized sidebar for every bundled API module;
-- practical LSX examples for every documented declaration;
-- explanations for setup, return values, cleanup, and common mistakes;
-- exact native signatures hidden behind an optional advanced view.
+- a Front-end API tab containing normal LSX, inheritance, high-level modules, LSHTML, LSCSS, document lookup, and events;
+- a separate Backend tab for raw functions, native constants, fixed-layout fields, ABI details, and renderer/compiler internals;
+- a LazyUI Start Here section with copy-ready workflows instead of internal records;
+- practical LSX examples and plain-language explanations for beginner-facing features;
+- exact native signatures and source locations only in the Backend tab.
 
 Keep this folder at LazyScript/api. Projects may live anywhere: run
 "LazyScriptEX: Select LazyScript/API Folder" in VS Code and select LazyScript,

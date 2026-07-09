@@ -41,7 +41,7 @@ Node.js 18 or newer is required to run the compiler. The runtime setup script do
 - Native LSHTML, LSCSS, and retained LazyUI
 - Compiler diagnostics with error codes, source ranges, underlines, and hints
 - A VS Code extension with diagnostics, hovers, completions, navigation, build, and run commands
-- An offline searchable API with beginner explanations and runnable examples
+- A beginner-first offline API with separate Front-end and Backend/native tabs, inheritance documentation, LazyUI start workflows, and copy-ready examples
 
 ## Quick start
 
@@ -95,7 +95,7 @@ or:
 open-api.bat
 ```
 
-The offline guide covers setup, language basics, windows, UI, tables, bindings, and the complete API.
+The offline guide covers setup, language basics, object inheritance, windows, tables, and LazyUI. The Front-end API contains normal LSX usage; raw native declarations and internal layouts are isolated in the Backend tab.
 
 ## Create your first project
 
@@ -860,6 +860,10 @@ LazyScriptEX is released under the [MIT License](LICENSE).
 
 Bundled third-party components are covered by their own licenses and notices under [`LazyScript/licenses`](LazyScript/licenses) and [`LazyScript/runtime`](LazyScript/runtime).
 
+
+## 0.18.18 beginner-first API split
+
+The offline documentation now separates the normal Front-end API from backend/native implementation details. Object inheritance has its own complete section covering `: base(...)`, inherited fields and methods, derived constructors, `base.constructor(...)`, overrides, common-base inference, `GetTypeName()`, and `IsType(...)`. LazyUI now starts with copy-ready workflows for LSHTML/LSCSS, `document.find()`, runtime listeners, element state changes, IDs, classes, and a separate programmatic-element section for `UI.button()`, `UI.panel()`, and the rest of the retained controls. Internal records such as `Binding.property_hash`, raw functions, native constants, fixed layouts, ABI types, and renderer/compiler plumbing appear only in the Backend tab.
 
 ## 0.18.17 circular object reference fix
 

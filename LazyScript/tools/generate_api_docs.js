@@ -547,9 +547,9 @@ entries.push(...[
 // binding declarations. Generate these entries directly from the same metadata
 // used by the LSHTML/LSCSS lowering pass so the API cannot silently omit them.
 entries.push({
-  module: 'Language/Objects',
+  module: 'Language/Inheritance',
   kind: 'compiler feature',
-  name: 'compile-time object inheritance',
+  name: 'base method call',
   signature: 'const Player : base(Actor) = { ... }',
   description: 'Creates a derived closed object whose base fields remain a fixed layout prefix. Same-named methods override the base method, and base.method(...) calls the immediate base implementation without a runtime prototype walk or vtable.',
   source: 'docs/LANGUAGE.md',
@@ -574,12 +574,12 @@ const Player : base(Actor) = {
 local player = Player.new()
 player.update(0.016)`,
   exampleNote: 'Inheritance is resolved by the compiler. Derived objects keep normal dot access and dot method calls.',
-  friendlyDescription: 'Inherit the fields and methods of one closed LSX object at compile time.',
-  whatItIs: 'Single-base object inheritance with fixed native layout and direct calls.',
-  whenToUse: 'Use it for reusable behavior and shared object state when composition alone would duplicate the same base fields and methods.',
-  workflow: 'Declare the base first, add : base(BaseName) to the derived object, override methods normally, and call base.method(...) only from a derived method.',
+  friendlyDescription: 'Call the immediate base version of an overridden method.',
+  whatItIs: 'The base.method(...) form used inside a derived method when both the parent and child implementations should run.',
+  whenToUse: 'Use it inside a derived method when the base implementation still performs required shared work.',
+  workflow: 'Override the method on the child, call base.method(...) where the shared parent work belongs, then continue with child-specific work.',
   commonMistake: 'Do not use colon method syntax. Circular inheritance and inheriting from more than one base object are rejected.',
-  related: ['Language/Objects.dot field access','Language/Objects.dot method call'],
+  related: ['Language/Inheritance.base object declaration','Language/Inheritance.method override'],
 });
 
 entries.push({

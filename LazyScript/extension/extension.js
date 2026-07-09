@@ -415,7 +415,10 @@ function loadApiMetadata() {
     try {
       if (!fs.existsSync(candidate)) continue;
       const data = JSON.parse(fs.readFileSync(candidate, 'utf8').replace(/^\uFEFF/, ''));
-      for (const entry of data.entries || []) apiByKey.set(apiKey(entry.module, entry.owner, entry.name), entry);
+      for (const entry of data.entries || []) {
+        apiByKey.set(apiKey(entry.module, entry.owner, entry.name), entry);
+        if (entry.sourceModule) apiByKey.set(apiKey(entry.sourceModule, entry.owner, entry.name), entry);
+      }
       return;
     } catch (err) {
       output?.appendLine(`API metadata load failed: ${err.message}`);

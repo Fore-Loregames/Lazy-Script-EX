@@ -50,6 +50,14 @@ const MODULE_GUIDES = {
     requires: 'A GLFW window and the LazyUI renderer for on-screen rendering.',
     cleanup: 'Destroy window input, the document, retained state objects, and the renderer at shutdown.'
   },
+  'LazyUI/Programmatic elements': {
+    level: 'beginner', title: 'Create LazyUI elements from normal LSX',
+    whatItIs: 'The same retained elements available in LSHTML, created directly from LSX when the interface must be built or changed in code.',
+    whenToUse: 'Use this for generated lists, inspector rows, runtime tools, editor panels, and any element that cannot be known ahead of time in LSHTML.',
+    beginnerStart: 'Call UI.button(), UI.panel(), UI.row(), or another element factory, set its text/id/classes, then add it to a parent element.',
+    requires: 'Import UI/LazyUI.lsx and keep the created element inside a Document-owned retained tree.',
+    cleanup: 'Elements added to the retained tree are cleaned up with the Document.'
+  },
   'LazyUI/LSHTML': {
     level: 'beginner', title: 'LSHTML declarations and bindings',
     whatItIs: 'Compiler-native retained UI markup written directly inside .lsx files.',
@@ -1070,8 +1078,429 @@ for (const entry of data.entries) {
   if (entry.level === 'advanced' && !entry.exampleNote) entry.exampleNote = 'Focused low-level call. The module guide explains the required context and the parameter list explains where each handle/value comes from.';
 }
 
+
+// Keep the beginner-facing API clean. Native layouts, internal records, raw
+// ABI calls, and compiler/renderer plumbing remain searchable in the separate
+// Backend tab instead of appearing beside normal LSX, LSHTML, and LSCSS usage.
+const BACKEND_MODULES = new Set([
+  'OpenGL', 'OpenAL', 'Platform/Win32', 'Math/GLMRaw', 'Network/WinSockRaw',
+  'Text/FreeTypeRaw', 'UI/ShaderSources', 'Graphics/STBImage'
+]);
+
+// Element factories are normal front-end LSX, but they are shown in their own
+// beginner section instead of being mixed with LazyUI's implementation helpers.
+const LSHTML_ELEMENT_NAMES = new Set(data.entries
+  .filter(entry => entry.module === 'LazyUI/LSHTML elements')
+  .map(entry => String(entry.name || '').toLowerCase().replace(/[^a-z0-9]/g, '')));
+const PROGRAMMATIC_ELEMENT_NAMES = new Set(data.entries
+  .filter(entry => {
+    if (entry.module !== 'UI/LazyUI' || entry.kind !== 'typed function' || !/->\s*Element\b/.test(String(entry.signature || ''))) return false;
+    const normalized = String(entry.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    return LSHTML_ELEMENT_NAMES.has(normalized);
+  })
+  .map(entry => entry.name));
+
+const PUBLIC_UI_OBJECTS = new Set(['Element', 'Document', 'UIEvent', 'WindowInput', 'CanvasContext']);
+const PUBLIC_UI_MODULE_FUNCTIONS = new Set([
+  'rgba', 'document', 'connect_window_input', 'canvas_context',
+  'on_click', 'on_change', 'on_input', 'on_focus', 'on_blur',
+  'on_key_down', 'on_key_up', 'on_pointer_down', 'on_pointer_up',
+  'on_pointer_move', 'on_scroll'
+]);
+const PUBLIC_ELEMENT_METHODS = new Set([
+  'add', 'remove', 'child', 'child_count',
+  'set_id', 'set_class', 'add_class', 'remove_class', 'has_class',
+  'set_text', 'set_value', 'set_placeholder', 'set_source', 'set_texture',
+  'set_alt', 'set_title', 'set_name', 'set_attribute',
+  'selection_start', 'selection_end', 'has_selection', 'collapse_selection',
+  'select_all', 'clear_canvas_points', 'add_canvas_point',
+  'add_event_listener', 'add_event_listener_with_context',
+  'remove_event_listener', 'clear_event_listeners'
+]);
+const PUBLIC_DOCUMENT_METHODS = new Set([
+  'set_root', 'find', 'find_all', 'resize',
+  'pointer_move_scaled', 'pointer_move', 'pointer_down', 'pointer_down_button',
+  'pointer_up', 'pointer_up_button', 'scroll', 'focus', 'focus_next',
+  'key_down_window', 'key_down', 'key_up', 'input_codepoint', 'input_text',
+  'change', 'destroy'
+]);
+const PUBLIC_CANVAS_METHODS = new Set([
+  'resize', 'clear', 'save', 'restore', 'reset_transform', 'translate', 'scale',
+  'rotate', 'set_fill', 'set_stroke', 'set_line_width', 'set_font_size',
+  'set_alpha', 'fill_rect', 'fill_box', 'stroke_rect', 'stroke_box',
+  'rounded_rect', 'fill_rounded_rect', 'stroke_rounded_rect', 'circle',
+  'fill_circle', 'stroke_circle', 'ellipse', 'fill_ellipse', 'stroke_ellipse',
+  'line', 'stroke_line', 'triangle', 'begin_path', 'move_to', 'line_to',
+  'quadratic_curve_to', 'bezier_curve_to', 'arc', 'close_path', 'stroke',
+  'fill', 'draw_text', 'fill_text', 'stroke_text', 'draw_image', 'image'
+]);
+const PUBLIC_UIEVENT_METHODS = new Set(['stop_propagation', 'prevent_default', 'handle']);
+const PUBLIC_WINDOW_INPUT_METHODS = new Set(['destroy']);
+const PUBLIC_RENDERER_METHODS = new Set(['create', 'begin', 'submit', 'flush', 'destroy', 'set_viewport', 'set_font', 'ready']);
+
+function isPublicUiMethod(entry) {
+  if (!entry.owner) return false;
+  if (entry.owner === 'Element') return PUBLIC_ELEMENT_METHODS.has(entry.name);
+  if (entry.owner === 'Document') return PUBLIC_DOCUMENT_METHODS.has(entry.name);
+  if (entry.owner === 'CanvasContext') return PUBLIC_CANVAS_METHODS.has(entry.name);
+  if (entry.owner === 'UIEvent') return PUBLIC_UIEVENT_METHODS.has(entry.name);
+  if (entry.owner === 'WindowInput') return PUBLIC_WINDOW_INPUT_METHODS.has(entry.name);
+  return false;
+}
+
+function isBackendEntry(entry) {
+  if (entry.module === 'Language/Collection') return true;
+  if (entry.module.startsWith('Language/') || entry.module.startsWith('LazyUI/')) return false;
+  if (BACKEND_MODULES.has(entry.module) || entry.module.includes('Raw')) return true;
+  if (entry.kind === 'raw function' || entry.kind === 'typed struct') return true;
+  if (entry.level === 'advanced' || entry.level === 'internal') return true;
+
+  if (entry.module === 'UI/LazyUI') {
+    if (entry.kind === 'constant' || entry.kind === 'field') return true;
+    if ((entry.kind === 'typed object' || entry.kind === 'typed struct') && !PUBLIC_UI_OBJECTS.has(entry.name)) return true;
+    if (entry.kind === 'method') return !isPublicUiMethod(entry);
+    if (entry.owner) return true;
+    if (entry.kind === 'typed function') {
+      if (PROGRAMMATIC_ELEMENT_NAMES.has(entry.name)) return false;
+      return !PUBLIC_UI_MODULE_FUNCTIONS.has(entry.name);
+    }
+    return true;
+  }
+
+  if (entry.module === 'UI/Renderer') {
+    if (entry.kind === 'field' || entry.kind === 'typed struct') return true;
+    if (entry.owner && !PUBLIC_RENDERER_METHODS.has(entry.name)) return true;
+    return false;
+  }
+
+  if (entry.kind === 'field' && entry.module.startsWith('Math/')) return true;
+  return false;
+}
+
+function publicParameterNames(signature) {
+  const parsed = parseCallable(signature || '');
+  return parsed.parameters.map(parameter => parameter.name).filter(Boolean);
+}
+
+function publicSignatureFor(entry) {
+  if (entry.kind === 'constant') return entry.name;
+  if (entry.kind === 'field') return entry.owner ? `${entry.owner}.${entry.name}` : entry.name;
+  if (entry.kind === 'typed object') return `${entry.name}.new(...)`;
+  const params = publicParameterNames(entry.signature);
+  if (entry.owner && (entry.kind === 'method' || entry.kind === 'compiler method')) return `${entry.owner}.${entry.name}(${params.join(', ')})`;
+  if (entry.kind === 'typed function' || entry.kind === 'method' || entry.kind === 'compiler method') return `${entry.name}(${params.join(', ')})`;
+  if (entry.module.startsWith('Language/') || entry.module.startsWith('LazyUI/')) {
+    return String(entry.signature || '').replace(/\s*->\s*[^\n]+/g, '');
+  }
+  return entry.signature;
+}
+
+function cssBeginnerValue(property) {
+  const exact = {
+    display: 'flex', position: 'relative', width: '320px', height: '180px',
+    'min-width': '120px', 'max-width': '640px', 'min-height': '40px', 'max-height': '480px',
+    'flex-direction': 'row', 'flex-wrap': 'wrap', 'justify-content': 'center', 'align-items': 'center',
+    'align-content': 'center', 'align-self': 'center', 'grid-template-columns': '1fr 1fr',
+    overflow: 'auto', 'overflow-x': 'hidden', 'overflow-y': 'auto', cursor: 'pointer',
+    visibility: 'visible', opacity: '1.0', color: '#FFFFFFFF', background: '#182235FF',
+    'font-size': '16px', 'font-weight': '600', 'text-align': 'center', 'object-fit': 'contain',
+    'pointer-events': 'auto', transform: 'translate(0px, 0px)'
+  };
+  if (exact[property]) return exact[property];
+  if (/color|background|fill|stroke|tint/.test(property)) return '#3478F6FF';
+  if (/margin|padding|gap|radius|width|height|size|offset|top|right|bottom|left|spacing|indent/.test(property)) return '12px';
+  if (/duration|delay/.test(property)) return '0.2s';
+  if (/opacity|scale|grow|shrink|order|index|columns|rows|weight|line-height/.test(property)) return '1';
+  if (/enabled|visible|checked|disabled|wrap|clip/.test(property)) return 'true';
+  return 'auto';
+}
+
+const UI_SIMPLE_INFO = {
+  'UI/LazyUI|Element|set_text': ['Change the words shown by an element.', 'Use this for labels, headings, buttons, status text, and other visible text.', 'local status = document.find("#status")\nif status ~= null then\n    status.set_text("Scene saved")\nend'],
+  'UI/LazyUI|Element|set_value': ['Change the current value of an input-like element.', 'Use this for text inputs, textareas, selects, ranges, and controls that store a value.', 'local name_input = document.find("#player-name")\nif name_input ~= null then\n    name_input.set_value("Luna")\nend'],
+  'UI/LazyUI|Element|add_class': ['Add one LSCSS class to an existing element.', 'Use this to apply a reusable visual state such as selected, warning, active, or success.', 'local status = document.find("#status")\nif status ~= null then\n    status.add_class("success")\nend'],
+  'UI/LazyUI|Element|remove_class': ['Remove one LSCSS class from an element.', 'Use this when an element leaves a visual state.', 'if status ~= null then\n    status.remove_class("success")\nend'],
+  'UI/LazyUI|Element|has_class': ['Check whether an element currently has a class.', 'Use before adding, removing, or branching on a visual state.', 'if panel.has_class("open") then\n    panel.remove_class("open")\nelse\n    panel.add_class("open")\nend'],
+  'UI/LazyUI|Element|set_id': ['Give an element the id used by document.find("#id").', 'Use when an element was created from LSX instead of LSHTML.', 'local button = UI.button()\nbutton.set_text("Save")\nbutton.set_id("save")'],
+  'UI/LazyUI|Element|set_class': ['Replace the element’s current class list.', 'Use when an LSX-created element needs a known set of LSCSS classes.', 'button.set_class("toolbar-button primary")'],
+  'UI/LazyUI|Element|add': ['Add a child element to this retained element.', 'Use when creating or changing the UI tree from normal LSX code.', 'local row = UI.row()\nlocal save_button = UI.button()\nsave_button.set_text("Save")\nrow.add(save_button)'],
+  'UI/LazyUI|Element|remove': ['Detach one child element from this retained element.', 'Use when a retained child should no longer appear under its current parent.', 'local removed = row.remove(save_button)'],
+  'UI/LazyUI|Element|child': ['Get one child by its zero-based position.', 'Use when you already know which child position you need.', 'local first_child = panel.child(0)'],
+  'UI/LazyUI|Element|child_count': ['Count the direct children of an element.', 'Use before indexed child access or when displaying collection size.', 'local count = panel.child_count()'],
+  'UI/LazyUI|Document|find': ['Find the first element matching an id, class, or tag.', 'Use #id for one exact element, .class for a styled group, or a tag such as button.', 'local save_button = document.find("#save")\nif save_button ~= null then\n    save_button.set_text("Save Scene")\nend'],
+  'UI/LazyUI|Document|find_all': ['Find every element matching an id, class, or tag.', 'Use when the same change or listener should be applied to several elements.', 'local buttons = document.find_all(".toolbar-button")\nfor button in buttons do\n    button.disabled = false\nend\nbuttons.destroy()']
+};
+
+const UI_MODULE_SIMPLE_INFO = {
+  rgba: ['Creates one RGBA color value from red, green, blue, and alpha values.', 'Use it for canvas fill, stroke, text, and image tint colors.', 'local blue = UI.rgba(52, 120, 246, 255)'],
+  document: ['Creates the Document that owns and controls one retained LazyUI tree.', 'Create it once after your LSHTML root is built.', `local root = MainView()
+local document = UI.document(root)`],
+  connect_window_input: ['Connects GLFW window callbacks to a LazyUI Document.', 'Use it once so clicks, keys, text input, and scrolling reach the document.', 'local window_input = UI.connect_window_input(window, document)'],
+  canvas_context: ['Gets the friendly drawing context for a canvas element.', 'Use it to draw shapes, paths, text, and images inside a retained canvas.', `local canvas_element = document.find("#preview")
+if canvas_element ~= null then
+    local canvas = UI.canvas_context(canvas_element)
+    canvas.set_fill(UI.rgba(52, 120, 246, 255))
+    canvas.fill_box(10.0, 10.0, 120.0, 40.0)
+end`]
+};
+
+const UI_EVENT_HELPER_NAMES = new Set([
+  'on_click', 'on_change', 'on_input', 'on_focus', 'on_blur',
+  'on_key_down', 'on_key_up', 'on_pointer_down', 'on_pointer_up',
+  'on_pointer_move', 'on_scroll'
+]);
+
+
+const UI_METHOD_DESCRIPTIONS = {
+  'Element|selection_start': 'Returns the starting character position of the current text selection.',
+  'Element|selection_end': 'Returns the ending character position of the current text selection.',
+  'Element|has_selection': 'Checks whether the element currently has selected text.',
+  'Element|collapse_selection': 'Moves the caret to one character position and clears the selection.',
+  'Element|select_all': 'Selects all editable text in the element.',
+  'Element|set_placeholder': 'Changes the hint shown when an input is empty.',
+  'Element|set_source': 'Changes the asset path used by an image, video, or other source-based element.',
+  'Element|set_texture': 'Changes the texture displayed by an image-like element.',
+  'Element|set_alt': 'Changes the alternate text stored on the element.',
+  'Element|set_title': 'Changes the element title or tooltip text.',
+  'Element|set_name': 'Changes the form or control-group name.',
+  'Element|set_attribute': 'Changes one named element attribute from LSX code.',
+  'Element|clear_canvas_points': 'Removes every point stored by a canvas shape element.',
+  'Element|add_canvas_point': 'Adds one point to a polygon, polyline, or path-like canvas element.',
+  'Element|add_event_listener': 'Runs an LSX function whenever the chosen event happens on this element.',
+  'Element|add_event_listener_with_context': 'Runs an LSX function for an event and passes your own object as the third argument.',
+  'Element|remove_event_listener': 'Removes one previously attached event function.',
+  'Element|clear_event_listeners': 'Removes every listener attached for one event name.',
+  'Document|set_root': 'Replaces the retained UI tree controlled by this Document.',
+  'Document|resize': 'Updates the UI layout size to match the current framebuffer.',
+  'Document|pointer_move_scaled': 'Sends a pointer position to the Document and scales it from window coordinates to framebuffer coordinates.',
+  'Document|pointer_move': 'Sends an already-scaled pointer position to the Document.',
+  'Document|pointer_down': 'Tells the Document that the main pointer button was pressed.',
+  'Document|pointer_down_button': 'Tells the Document which pointer button was pressed.',
+  'Document|pointer_up': 'Tells the Document that the main pointer button was released.',
+  'Document|pointer_up_button': 'Tells the Document which pointer button was released.',
+  'Document|scroll': 'Sends horizontal and vertical scrolling to the hovered element.',
+  'Document|focus': 'Moves keyboard focus to one element.',
+  'Document|focus_next': 'Moves focus to the next or previous focusable element.',
+  'Document|key_down_window': 'Sends a key press to the Document with the window needed for clipboard shortcuts.',
+  'Document|key_down': 'Sends a key press to the focused element.',
+  'Document|key_up': 'Sends a key release to the focused element.',
+  'Document|input_codepoint': 'Sends one typed character to the focused input.',
+  'Document|input_text': 'Sends a complete text string to the focused input.',
+  'Document|change': 'Dispatches a change event for one element.',
+  'Document|destroy': 'Releases the retained UI tree and listener storage owned by the Document.',
+  'UIEvent|stop_propagation': 'Stops this event from continuing through parent elements.',
+  'UIEvent|prevent_default': 'Prevents the control’s normal built-in action for this event.',
+  'UIEvent|handle': 'Marks this event as handled so other code can see that it was consumed.',
+  'WindowInput|destroy': 'Disconnects the GLFW callbacks owned by this WindowInput object.'
+};
+
+function uiReceiverName(owner) {
+  if (owner === 'Document') return 'document';
+  if (owner === 'CanvasContext') return 'canvas';
+  if (owner === 'UIEvent') return 'event';
+  if (owner === 'WindowInput') return 'window_input';
+  return 'element';
+}
+
+function uiExampleArgument(entry, parameter) {
+  const name = String(parameter.name || '').toLowerCase();
+  if (name === 'event') return '"click"';
+  if (name === 'handler') return 'handle_event';
+  if (name === 'context') return 'editor';
+  if (name === 'selector') return '"#save"';
+  if (name === 'child' || name === 'element') return 'button';
+  if (name === 'reverse') return 'false';
+  if (name === 'window') return 'window';
+  if (name === 'texture' || name === 'texture_id') return 'texture.id';
+  if (name === 'intrinsic_width') return 'texture.width';
+  if (name === 'intrinsic_height') return 'texture.height';
+  if (name.includes('color')) return 'UI.rgba(52, 120, 246, 255)';
+  if (name === 'value') {
+    if (entry.name === 'text') return '"Hello"';
+    if (entry.name === 'set_placeholder') return '"Type here..."';
+    if (entry.name === 'set_source') return '"Game/Assets/icon.png"';
+    if (entry.name === 'set_alt') return '"Player portrait"';
+    if (entry.name === 'set_title') return '"Save the scene"';
+    if (entry.name === 'set_name') return '"graphics"';
+    return '"value"';
+  }
+  if (name === 'name') return '"data-mode"';
+  if (name === 'property') return '"text"';
+  if (name === 'expression') return '"player_name"';
+  if (name.includes('text')) return '"Hello"';
+  if (name.includes('index') || name === 'key' || name === 'modifiers' || name === 'button' || name === 'codepoint') return '0';
+  if (name === 'allow_newlines') return 'false';
+  if (name === 'max_length') return '256';
+  if (name.includes('width')) return '800.0';
+  if (name.includes('height')) return '600.0';
+  if (name.includes('radius')) return '12.0';
+  if (name.includes('angle') || name === 'radians') return '0.5';
+  if (name.includes('alpha')) return '1.0';
+  if (name.includes('line')) return '2.0';
+  if (name === 'x' || name === 'x2' || name.includes('control') && name.endsWith('x') || name === 'point_x') return '20.0';
+  if (name === 'y' || name === 'y2' || name.includes('control') && name.endsWith('y') || name === 'point_y') return '20.0';
+  if (name.startsWith('delta')) return '1.0';
+  return name || 'value';
+}
+
+function friendlyUiMethodDescription(entry) {
+  const exact = UI_METHOD_DESCRIPTIONS[`${entry.owner}|${entry.name}`];
+  if (exact) return exact;
+  const words = humanize(entry.name);
+  if (entry.owner === 'CanvasContext') {
+    if (entry.name.startsWith('set_')) return `Changes the canvas ${humanize(entry.name.slice(4))} used by later drawing calls.`;
+    if (entry.name.startsWith('fill_')) return `Draws a filled ${humanize(entry.name.slice(5))} on the canvas.`;
+    if (entry.name.startsWith('stroke_')) return `Draws the outline of a ${humanize(entry.name.slice(7))} on the canvas.`;
+    if (entry.name.startsWith('draw_')) return `Draws ${humanize(entry.name.slice(5))} on the canvas.`;
+    if (entry.name === 'save') return 'Saves the current canvas drawing state.';
+    if (entry.name === 'restore') return 'Restores the most recently saved canvas drawing state.';
+    if (entry.name === 'clear') return 'Removes the recorded canvas drawing commands.';
+    if (entry.name === 'begin_path') return 'Starts a new canvas path.';
+    if (entry.name === 'close_path') return 'Closes the current canvas path.';
+    if (entry.name === 'move_to') return 'Moves the current path position without drawing a line.';
+    if (entry.name === 'line_to') return 'Adds a straight line to the current path.';
+    if (entry.name === 'stroke') return 'Draws the outline of the current path.';
+    if (entry.name === 'fill') return 'Fills the current path.';
+    return `Performs the canvas ${words} operation.`;
+  }
+  return `Performs ${words} on this ${entry.owner}.`;
+}
+
+function beginnerUiMethodExample(entry) {
+  const parsed = parseCallable(entry.signature || '');
+  const receiver = uiReceiverName(entry.owner);
+  const args = parsed.parameters.map(parameter => uiExampleArgument(entry, parameter));
+  const call = `${receiver}.${entry.name}(${args.join(', ')})`;
+  const returnsValue = /\s->\s/.test(String(entry.signature || ''));
+  return returnsValue ? `local result = ${call}` : call;
+}
+
+
+for (const entry of data.entries) {
+  if (entry.module === 'UI/LazyUI' && entry.kind === 'typed function' && PROGRAMMATIC_ELEMENT_NAMES.has(entry.name)) {
+    entry.sourceModule = 'UI/LazyUI';
+    entry.module = 'LazyUI/Programmatic elements';
+    const tagName = entry.name.replace(/_/g, '-');
+    entry.friendlyDescription = `Creates a <${tagName}> retained element from normal LSX code.`;
+    entry.whatItIs = `The programmatic LSX factory for the <${tagName}> LazyUI element.`;
+    entry.whenToUse = 'Use it when an element must be created or added at runtime instead of being declared in LSHTML.';
+    const factoryParameters = parseCallable(entry.signature || '').parameters;
+    const factoryArguments = factoryParameters.map(parameter => uiExampleArgument(entry, parameter));
+    entry.example = `use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
+
+local parent = document.find("#container")
+if parent ~= null then
+    local element = UI.${entry.name}(${factoryArguments.join(', ')})
+    element.set_id("new-${tagName}")
+    parent.add(element)
+end`;
+    entry.exampleNote = 'Copy-ready programmatic LazyUI creation. LSHTML remains the simpler choice for UI known ahead of time.';
+    entry.commonMistake = 'Add the created element to a Document-owned retained tree. Creating it without attaching it will not display anything.';
+  }
+}
+
+function lowerObjectName(name) {
+  return String(name || 'object')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^A-Za-z0-9_]/g, '_')
+    .toLowerCase();
+}
+
+for (const entry of data.entries) {
+  entry.audience = isBackendEntry(entry) ? 'backend' : 'frontend';
+  entry.publicSignature = publicSignatureFor(entry);
+
+  if (entry.kind === 'field' && entry.audience === 'frontend') {
+    const receiver = lowerObjectName(entry.owner || 'object');
+    entry.example = `local value = ${receiver}.${entry.name}`;
+    entry.exampleNote = 'Read this value from an object that has already been created or filled by its normal API.';
+  }
+
+  if (entry.module === 'UI/LazyUI' && entry.kind === 'method' && entry.audience === 'frontend') {
+    const description = friendlyUiMethodDescription(entry);
+    entry.friendlyDescription = description;
+    entry.whatItIs = description;
+    entry.whenToUse = `Use it when working with a ${entry.owner} in normal LazyUI code.`;
+    entry.example = beginnerUiMethodExample(entry);
+    entry.exampleNote = 'Normal LSX usage with inferred values. The exact native declaration is available only in the Backend tab.';
+  }
+
+  const moduleSimple = entry.module === 'UI/LazyUI' && !entry.owner ? UI_MODULE_SIMPLE_INFO[entry.name] : null;
+  if (moduleSimple) {
+    entry.friendlyDescription = moduleSimple[0];
+    entry.whatItIs = moduleSimple[0];
+    entry.whenToUse = moduleSimple[1];
+    entry.example = `use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
+
+${moduleSimple[2]}`;
+    entry.exampleNote = 'Copy-ready normal LazyUI usage.';
+  }
+  if (entry.module === 'UI/LazyUI' && UI_EVENT_HELPER_NAMES.has(entry.name)) {
+    const eventName = entry.name.replace(/^on_/, '').replace(/_/g, ' ');
+    entry.friendlyDescription = `Attaches a ${eventName} handler to an element.`;
+    entry.whatItIs = `A short helper for connecting an LSX function to the element's ${eventName} event.`;
+    entry.whenToUse = `Use it when you already have an Element and want to react to ${eventName}.`;
+    entry.example = `use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
+
+fn handle_event(element, event)
+    console.write_line("${eventName}")
+end
+
+local element = document.find("#target")
+if element ~= null then
+    UI.${entry.name}(element, handle_event)
+end`;
+    entry.exampleNote = 'You can also call element.add_event_listener(...) when the event name is chosen at runtime.';
+  }
+
+  const simple = UI_SIMPLE_INFO[entryKey(entry)];
+  if (simple) {
+    entry.friendlyDescription = simple[0];
+    entry.whatItIs = simple[0];
+    entry.whenToUse = simple[1];
+    entry.example = simple[2];
+    entry.exampleNote = 'Copy-ready normal LSX usage. No native fields or explicit front-end types are required.';
+  }
+
+  if (entry.module === 'LazyUI/LSCSS properties') {
+    const value = cssBeginnerValue(entry.name);
+    entry.example = `lscss .example = {\n    ${entry.name} = ${value}\n}`;
+    entry.exampleNote = `Apply ${entry.name} to a reusable LSCSS class. Replace the shown value with another supported value when needed.`;
+    entry.friendlyDescription = `Controls ${humanize(entry.name)} for matching LSHTML elements.`;
+    entry.whatItIs = `An LSCSS style property named ${entry.name}.`;
+    entry.whenToUse = `Use it inside an lscss rule when you need to change ${humanize(entry.name)}.`;
+  }
+
+  if (entry.kind === 'constant' && entry.audience === 'frontend' && /^export const\s/.test(String(entry.example || ''))) {
+    const alias = entry.module.replace(/^.*\//, '').replace(/[^A-Za-z0-9_]/g, '') || 'API';
+    entry.example = `local value = ${alias}.${entry.name}`;
+    entry.exampleNote = `Use ${entry.name} where the related ${entry.module} function asks for this named value.`;
+  }
+
+  if (entry.audience === 'backend' && (!entry.example || entry.example === entry.signature)) {
+    entry.example = entry.signature;
+    entry.exampleNote = 'Backend declaration. This is intentionally kept out of the beginner-facing API.';
+  }
+}
+
+data.audienceStats = data.entries.reduce((stats, entry) => {
+  stats[entry.audience] = (stats[entry.audience] || 0) + 1;
+  return stats;
+}, { frontend: 0, backend: 0 });
+
+data.stats = data.stats || {};
+data.stats.total = data.entries.length;
+data.stats.modules = data.entries.reduce((modules, entry) => {
+  modules[entry.module] = (modules[entry.module] || 0) + 1;
+  return modules;
+}, {});
+data.stats.kinds = data.entries.reduce((kinds, entry) => {
+  kinds[entry.kind] = (kinds[entry.kind] || 0) + 1;
+  return kinds;
+}, {});
+
 data.moduleGuides = MODULE_GUIDES;
-data.generated = { ...(data.generated || {}), beginnerMetadata: '0.18.5' };
+data.generated = { ...(data.generated || {}), beginnerMetadata: '0.18.18', audienceSplit: true };
 
 fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2) + '\n');
 fs.writeFileSync(jsPath, `window.LSX_API_DATA=${JSON.stringify(data)};\n`);

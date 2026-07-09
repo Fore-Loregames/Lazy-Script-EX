@@ -143,7 +143,7 @@ Hover information explains:
 - common mistakes;
 - a practical LSX example.
 
-Internal records are marked as internal and direct users toward the public wrapper that creates or consumes them.
+The offline reference opens on a Front-end API containing normal LSX, inheritance, high-level modules, LSHTML, LSCSS, document lookup, and events. Raw functions, native constants, fixed-layout fields, ABI details, and internal renderer/compiler records live in a separate Backend tab.
 
 ## LSHTML and LSCSS
 
@@ -161,7 +161,7 @@ It provides help for:
 - retained canvas elements;
 - images, lists, tables, trees, overlays, and HUD layouts.
 
-Use the offline API for complete runnable UI examples.
+Use the LazyUI Start Here section for copy-ready LSHTML/LSCSS, `document.find()`, runtime listeners, element updates, IDs, and classes. The full element, event, attribute, and style lists remain searchable after those workflows.
 
 ## Imports and workspace discovery
 
@@ -312,6 +312,10 @@ local window = WindowManagerMod.WindowManager.windowHandle
 ```
 
 A static object is initialized once before `main()`. A zero-argument `constructor = fn()` may prepare its shared state automatically. `self` points to that one persistent object. Do not call `.new()` or `constructor()` on it; provide an explicit shutdown method for native resources.
+
+## 0.18.18 beginner-first API split
+
+The bundled offline API now has separate Front-end API and Backend tabs. The front-end view contains the LSX language, a complete inheritance section, high-level wrappers, beginner-readable LazyUI workflows, and a separate programmatic-elements section for retained controls created from normal LSX. Internal fields such as `property_hash`, raw ABI calls, fixed native layouts, and renderer/compiler plumbing are kept in the Backend tab. Front-end call shapes hide explicit ABI types and use copy-ready inferred LSX examples.
 
 ## 0.18.17 circular object reference fix
 
