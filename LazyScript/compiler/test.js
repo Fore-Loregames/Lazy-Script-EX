@@ -2205,4 +2205,4 @@ const badResult = run(['check', bad], 1);
 assert(badResult.stderr.includes(`${bad}:3:`));
 assert(badResult.stderr.includes("unknown module alias or closed table 'Missing'"));
 
-console.log('LazyScriptEX 0.21.5 compiler with clear LSG front-end naming, compound assignments, OpenGL/Vulkan, and LSSL GLSL/SPIR-V, compact runtime object types, raw strings, native objects, persistent logs, file I/O, JSON, direct atomics, threading, automatic runtime crash records, sockets, HTTP, and GameKit tests passed.');
+console.log('LazyScriptEX 0.21.6 compiler with clear LSG front-end naming, compound assignments, OpenGL/Vulkan, and LSSL GLSL/SPIR-V, compact runtime object types, raw strings, native objects, persistent logs, file I/O, JSON, direct atomics, threading, automatic runtime crash records, sockets, HTTP, and GameKit tests passed.');

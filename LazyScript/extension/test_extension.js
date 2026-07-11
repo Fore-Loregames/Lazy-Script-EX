@@ -40,7 +40,10 @@ assert(grammarText.includes('keyword.declaration.lshtml.lazyscriptex'), 'LSHTML 
 assert(grammarText.includes('keyword.declaration.lscss.lazyscriptex'), 'LSCSS keyword does not have a declaration-keyword scope');
 assert(grammarText.includes('meta.selector.lscss.lazyscriptex'), 'direct LSCSS selector scope is missing');
 assert(grammarText.includes('meta.parameter.typed.dot.lazyscriptex'), 'dot parameter type scope is missing');
-assert(grammarText.includes('struct|lshtml|lscss'), 'LSHTML/LSCSS keyword fallback is missing from the grammar');
+assert(grammarText.includes('struct|class|lshtml|lscss'), 'current LSX object declaration keywords are missing from the grammar');
+const staticManagerSnippets = JSON.parse(fs.readFileSync(path.join(__dirname, 'snippets', 'lazyscriptex.json'), 'utf8'));
+assert(staticManagerSnippets['Static LSG window manager'], 'extension snippets are missing the flow-aware static LSG window manager');
+assert(staticManagerSnippets['Static LSG window manager'].body.some(line => line.includes('self.windowHandle.begin')), 'static window-manager snippet does not use the canonical Window.begin() API');
 
 
 const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lsx-extension-'));
@@ -65,10 +68,17 @@ end
 
 const sourceCompilerPath = path.join(toolkit, 'LazyScript', 'compiler', 'lazyscriptex.js');
 const bundledCompilerPath = path.join(__dirname, 'compiler', 'lazyscriptex.js');
+for (const compilerFile of ['lazyscriptex.js', 'lssl.js', 'inline_ui.js', 'native_bindings.js']) {
+  assert.strictEqual(
+    fs.readFileSync(path.join(__dirname, 'compiler', compilerFile), 'utf8'),
+    fs.readFileSync(path.join(toolkit, 'LazyScript', 'compiler', compilerFile), 'utf8'),
+    `VS Code extension ${compilerFile} is not synchronized with the source compiler`,
+  );
+}
 assert.strictEqual(
-  fs.readFileSync(bundledCompilerPath, 'utf8'),
-  fs.readFileSync(sourceCompilerPath, 'utf8'),
-  'VS Code extension compiler is not synchronized with the source compiler',
+  fs.readFileSync(path.join(__dirname, 'api', 'api-data.json'), 'utf8'),
+  fs.readFileSync(path.join(toolkit, 'LazyScript', 'api', 'api-data.json'), 'utf8'),
+  'VS Code extension API metadata is not synchronized with the source API',
 );
 
 const unanchoredBehaviorSource = path.join(sourceDir, 'UnanchoredBehavior.lsx');
@@ -91,7 +101,7 @@ assert(!`${bundledBehaviorCheck.stdout}
 ${bundledBehaviorCheck.stderr}`.includes("unknown module or API namespace 'behavior'"), 'bundled extension compiler still treats local behavior values as namespaces');
 const bundledVersion = cp.spawnSync(process.execPath, [bundledCompilerPath, '--version'], { encoding: 'utf8' });
 assert.strictEqual(bundledVersion.status, 0, bundledVersion.stderr);
-assert.strictEqual(bundledVersion.stdout.trim(), '0.21.5', 'extension did not bundle compiler 0.21.5');
+assert.strictEqual(bundledVersion.stdout.trim(), '0.21.6', 'extension did not bundle compiler 0.21.6');
 extension._test.loadApiMetadata();
 const lsgRecord = extension._test.loadRecordSync(path.join(toolkit, 'LazyScript', 'LSG.lsx'));
 const lsgWindow = lsgRecord.exports.find(symbol => symbol.name === 'Window');
@@ -110,6 +120,56 @@ assert(grammarText.includes('vulkan'), 'syntax grammar does not highlight the LS
 for (const operator of ['\+=','-=','\*=','/=','%=']) assert(grammarText.includes(operator), `syntax grammar does not include ${operator}`);
 
 
+const deepChainDir = path.join(sourceDir, 'DeepStaticChain');
+fs.mkdirSync(deepChainDir, { recursive: true });
+fs.writeFileSync(path.join(deepChainDir, 'Handle.lsx'), `export const Handle = {
+    begin = fn(red,green,blue)
+        return red + green + blue
+    end
+    end = fn()
+        return 0
+    end
+}
+export fn open()
+    return Handle.new()
+end
+`);
+fs.writeFileSync(path.join(deepChainDir, 'WindowManager.lsx'), `use "Handle.lsx" as Handles
+export static const WindowManager = {
+    windowHandle = null
+    CreateWindow = fn()
+        self.windowHandle = Handles.open()
+        return self.windowHandle
+    end
+}
+`);
+const deepChainEntry = path.join(deepChainDir, 'main.lsx');
+const deepChainSource = `use "WindowManager.lsx" as WindowManagerMod
+fn BeginDrawing(red,green,blue)
+    WindowManagerMod.WindowManager.windowHandle.begin(red,green,blue)
+end
+fn EndDrawing()
+    WindowManagerMod.WindowManager.windowHandle.end()
+end
+fn main()
+    WindowManagerMod.WindowManager.CreateWindow()
+    BeginDrawing(1,2,3)
+    EndDrawing()
+    WindowManagerMod.WindowManager.windowHandle.destroy()
+    return 0
+end
+`;
+fs.writeFileSync(deepChainEntry, deepChainSource);
+const deepChainCompilerCheck = cp.spawnSync(process.execPath, [bundledCompilerPath, 'check', deepChainEntry, '--diagnostics=json'], { encoding: 'utf8' });
+assert.strictEqual(deepChainCompilerCheck.status, 0, deepChainCompilerCheck.stderr || deepChainCompilerCheck.stdout);
+assert(!`${deepChainCompilerCheck.stdout}\n${deepChainCompilerCheck.stderr}`.includes('function names may contain at most'), 'bundled compiler still rejects a member call reached through an imported static-object field');
+const deepChainRecord = extension._test.loadRecordSync(deepChainEntry);
+const deepBegin = extension._test.resolveChain(deepChainRecord, ['WindowManagerMod', 'WindowManager', 'windowHandle', 'begin']);
+assert(deepBegin?.symbol?.name === 'begin', 'deep imported static-object field call does not resolve to Handle.begin');
+assert(deepBegin?.parent?.name === 'Handle', 'deep imported static-object field call lost the concrete Handle owner');
+const deepTarget = extension._test.importedCompletionTarget(deepChainRecord, ['WindowManagerMod', 'WindowManager', 'windowHandle']);
+assert(deepTarget?.symbols?.some(symbol => symbol.name === 'begin'), 'completion after an imported static-object field is missing begin');
+assert(deepTarget?.symbols?.some(symbol => symbol.name === 'end'), 'completion after an imported static-object field is missing end');
 const runtimeTypeDir = path.join(sourceDir, 'RuntimeTypes');
 fs.mkdirSync(runtimeTypeDir, { recursive: true });
 fs.writeFileSync(path.join(runtimeTypeDir, 'LazyBehavior.lsx'), `export const LazyBehavior = {
@@ -218,6 +278,45 @@ function mockDocument(text) {
     uri: { fsPath: uiSource }
   };
 }
+
+
+const deepCompletionLine = '    WindowManagerMod.WindowManager.windowHandle.be';
+const deepCompletionDoc = {
+  ...mockDocument(`use "WindowManager.lsx" as WindowManagerMod\nfn main()\n${deepCompletionLine}\nend\n`),
+  uri: { fsPath: deepChainEntry }
+};
+const deepCompletionItems = new extension._test.CompletionProvider().provideCompletionItems(deepCompletionDoc, new Position(2, deepCompletionLine.length));
+assert(deepCompletionItems.some(item => (item.label.label || item.label) === 'begin'), 'deep member completion does not offer begin for a field initialized as null and assigned later');
+
+const localNullFlowLine = '    handle.be';
+const localNullFlowDoc = {
+  ...mockDocument(`use "Handle.lsx" as Handles
+fn main()
+    local handle = null
+    handle = Handles.open()
+${localNullFlowLine}
+end
+`),
+  uri: { fsPath: path.join(deepChainDir, 'local-null-flow.lsx') }
+};
+const localNullFlowItems = new extension._test.CompletionProvider().provideCompletionItems(localNullFlowDoc, new Position(4, localNullFlowLine.length));
+assert(localNullFlowItems.some(item => (item.label.label || item.label) === 'begin'), 'local value assigned after an initial null does not gain Handle members');
+
+const selfNullFlowLine = '        self.windowHandle.be';
+const selfNullFlowDoc = {
+  ...mockDocument(`use "Handle.lsx" as Handles
+export static const WindowManager = {
+    windowHandle = null
+    CreateWindow = fn()
+        self.windowHandle = Handles.open()
+${selfNullFlowLine}
+    end
+}
+`),
+  uri: { fsPath: path.join(deepChainDir, 'self-null-flow.lsx') }
+};
+const selfNullFlowItems = new extension._test.CompletionProvider().provideCompletionItems(selfNullFlowDoc, new Position(5, selfNullFlowLine.length));
+assert(selfNullFlowItems.some(item => (item.label.label || item.label) === 'begin'), 'self field assigned after an initial null does not gain Handle members');
 
 
 const lsslKeywordDoc = {

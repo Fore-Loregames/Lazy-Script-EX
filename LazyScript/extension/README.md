@@ -24,6 +24,9 @@ Extensions → ... → Install from VSIX
 - File icons for LSX source
 - Compiler diagnostics while typing and on save
 - Scope-aware completion for locals, parameters, loop variables, object members, modules, tables, LSG, LSSL, LazyUI, LSHTML, and LSCSS
+- Arbitrarily deep member-chain completion, hover, signature, and definition support, including `Module.StaticObject.nullField.begin()` after the field receives a concrete object
+- Flow-aware inferred values: a local or field initialized with `null` gains the members of later assignments instead of being written off as permanently unknown
+- Local variables and object names take priority over fuzzy import-alias recovery, preventing similarly named modules from hijacking completion
 - Hover documentation and copy-ready examples from the generated API
 - Signature help
 - Go to Definition, Find References, Rename Symbol, Document Symbols, and Workspace Symbols
@@ -77,7 +80,7 @@ From the repository root:
 update-api.bat
 ```
 
-This regenerates the API from current source declarations and copies it into the extension source before validating the result.
+This regenerates the API from current source declarations and copies it into the extension source before validating the result. The packaged extension also embeds the exact same compiler, LSSL translator, LazyUI lowering, and native-binding metadata as the repository source.
 
 Rebuild the installable package from the repository root with:
 

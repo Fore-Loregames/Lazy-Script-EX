@@ -113,6 +113,53 @@ for (const level of ['0', '6']) {
   assert(fs.existsSync(output) && fs.statSync(output).size > 4096, `nested static object O${level} executable was not generated`);
 }
 
+write('Handle.lsx', `
+export const Handle = {
+    value = 0
+    begin = fn(red,green,blue)
+        self.value = red + green + blue
+    end
+    end = fn()
+        return self.value
+    end
+}
+
+export fn open()
+    return Handle.new()
+end
+`);
+
+write('DeepWindowManager.lsx', `
+use "Handle.lsx" as Handles
+
+export static const WindowManager = {
+    windowHandle = null
+
+    CreateWindow = fn()
+        self.windowHandle = Handles.open()
+        return self.windowHandle
+    end
+}
+`);
+
+const deepStaticMemberCall = write('deep-static-member-call.lsx', `
+use "DeepWindowManager.lsx" as WindowManagerMod
+
+fn main()
+    WindowManagerMod.WindowManager.CreateWindow()
+    WindowManagerMod.WindowManager.windowHandle.begin(1,2,3)
+    local value = WindowManagerMod.WindowManager.windowHandle.end()
+    WindowManagerMod.WindowManager.windowHandle.destroy()
+    return value
+end
+`);
+run(['check', deepStaticMemberCall, '--diagnostics=json']);
+for (const level of ['0', '6']) {
+  const output = path.join(temp, `deep-static-member-o${level}.exe`);
+  run(['build', deepStaticMemberCall, '-o', output, '--opt', level]);
+  assert(fs.existsSync(output) && fs.statSync(output).size > 4096, `deep static-object member-call O${level} executable was not generated`);
+}
+
 const invalidNew = write('invalid-new.lsx', `
 use "WindowManager.lsx" as WindowManagerMod
 fn main()

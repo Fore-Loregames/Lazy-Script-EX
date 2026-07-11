@@ -33,7 +33,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo LazyScriptEX Native GameKit 0.21.5 is installed.
+echo LazyScriptEX Native GameKit 0.21.6 is installed.
 echo Restart or reload the editor.
 pause
 exit /b 0

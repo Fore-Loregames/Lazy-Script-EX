@@ -1,4 +1,4 @@
-LazyScriptEX 0.21.5
+LazyScriptEX 0.21.6
 
 1. Run setup-runtime.bat
 2. Run INSTALL_VSCODE_EXTENSION.bat

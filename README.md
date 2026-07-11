@@ -2,7 +2,7 @@
 
 LazyScriptEX is a statically compiled language and native game/application framework for Windows x64. It keeps ordinary LSX code small and inference-first while compiling directly to native executables.
 
-The current repository includes the complete **0.21.5** toolchain with OpenGL 4.6, Vulkan, LSG, LSSL, modular ray effects, native LSHTML/LSCSS/LazyUI, audio, image loading, SDF text, math, networking, threading, file I/O, JSON, the offline API, and the Visual Studio Code extension.
+The current repository includes the complete **0.21.6** toolchain with OpenGL 4.6, Vulkan, LSG, LSSL, modular ray effects, native LSHTML/LSCSS/LazyUI, audio, image loading, SDF text, math, networking, threading, file I/O, JSON, the offline API, and the Visual Studio Code extension.
 
 ## Platform and requirements
 

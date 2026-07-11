@@ -1,4 +1,4 @@
-LazyScriptEX 0.21.5 Offline API
+LazyScriptEX 0.21.6 Offline API
 
 Open index.html in a web browser or run open-api.bat from the repository root.
 

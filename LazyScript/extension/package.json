@@ -1,8 +1,8 @@
 {
   "name": "lazyscriptex-native-gamekit",
   "displayName": "LazyScriptEX Native GameKit",
-  "description": "LazyScriptEX language support with clear LSG front-end names, complete OpenGL/Vulkan LSG and LSSL APIs, autocomplete, signatures, hovers, formatting, diagnostics, and the beginner API browser.",
-  "version": "0.21.5",
+  "description": "LazyScriptEX language support with current LSX/LSSL parsing, deep chained member intelligence, flow-aware inferred objects, complete OpenGL/Vulkan LSG and LSSL APIs, autocomplete, signatures, hovers, formatting, diagnostics, and the beginner API browser.",
+  "version": "0.21.6",
   "publisher": "nissyokugames",
   "license": "MIT",
   "engines": {

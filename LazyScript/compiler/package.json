@@ -1,6 +1,6 @@
 {
   "name": "lazyscriptex-compiler",
-  "version": "0.21.5",
+  "version": "0.21.6",
   "private": true,
   "description": "Direct native x64 LazyScriptEX compiler with clear LSG front-end naming, OpenGL/Vulkan parity, LSSL GLSL/SPIR-V shaders, plug-and-play ray scenes, Vulkan-backed LazyUI, inferred objects and tables, circular module graphs, LSHTML/LSCSS, native bindings, O0-O6 optimization, fused SIMD loops, persistent worker pools, runtime workload selection, and optional generated LSSL compute workloads.",
   "bin": {

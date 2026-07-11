@@ -8,7 +8,7 @@ const { buildNativeBindings } = require('./native_bindings');
 const { compileInlineUiSource } = require('./inline_ui');
 const { compileLsslSource } = require('./lssl');
 
-const VERSION = '0.21.5';
+const VERSION = '0.21.6';
 const PE_IMAGE_BASE = 0x140000000n;
 
 
@@ -3457,6 +3457,115 @@ class Program {
             };
           }
         }
+        call.effectiveArgs = method.isStatic ? [...call.args] : [receiver, ...call.args];
+        return { kind: 'internal', target: method, returnType: this.externalizeType(method.returnType, method.module, module), methodReceiver: method.isStatic ? null : receiver };
+      }
+      if (receiverType.kind === 'table') {
+        const elementType = this.externalizeType(receiverType.element.name, receiverType.element.struct?.module || module, module);
+        if (operation === 'push') {
+          call.effectiveArgs = [receiver, ...call.args];
+          return makeSpecial('table_push', [receiverTypeName, elementType], 'i64', { tableElement: receiverType.element });
+        }
+        if (operation === 'get') {
+          call.effectiveArgs = [receiver, ...call.args];
+          return makeSpecial('table_get', [receiverTypeName, 'i64'], elementType, { tableElement: receiverType.element });
+        }
+        const definitions = {
+          length: { builtin: 'table.count', params: [receiverTypeName], returnType: 'i64' },
+          count: { builtin: 'table.count', params: [receiverTypeName], returnType: 'i64' },
+          capacity: { builtin: 'table.capacity', params: [receiverTypeName], returnType: 'i64' },
+          byte_length: { builtin: 'table.byte_length', params: [receiverTypeName], returnType: 'i64' },
+          bytes: { builtin: 'table.byte_length', params: [receiverTypeName], returnType: 'i64' },
+          data: { builtin: 'table.data', params: [receiverTypeName], returnType: 'ptr' },
+          data_at: { builtin: 'table.data_at', params: [receiverTypeName, 'i64'], returnType: 'ptr' },
+          byte_data: { builtin: 'table.data', params: [receiverTypeName], returnType: 'ptr' },
+          copy_from_ptr: { builtin: 'table.copy_from_ptr', params: [receiverTypeName, 'ptr', 'i64'], returnType: 'bool' },
+          copy_bytes_from_ptr: { builtin: 'table.copy_from_ptr', params: [receiverTypeName, 'ptr', 'i64'], returnType: 'bool' },
+          is_empty: { builtin: 'table.is_empty', params: [receiverTypeName], returnType: 'bool' },
+          reserve: { builtin: 'table.reserve', params: [receiverTypeName, 'i64'], returnType: 'bool' },
+          reserve_bytes: { builtin: 'table.reserve', params: [receiverTypeName, 'i64'], returnType: 'bool' },
+          resize: { builtin: 'table.resize', params: [receiverTypeName, 'i64'], returnType: 'bool' },
+          resize_bytes: { builtin: 'table.resize', params: [receiverTypeName, 'i64'], returnType: 'bool' },
+          remove: { builtin: 'table.remove_at', params: [receiverTypeName, 'i64'], returnType: 'bool' },
+          remove_fast: { builtin: 'table.remove_swap', params: [receiverTypeName, 'i64'], returnType: 'bool' },
+          pop: { builtin: 'table.pop', params: [receiverTypeName], returnType: 'bool' },
+          clear: { builtin: 'table.clear', params: [receiverTypeName], returnType: 'void' },
+          destroy: { builtin: 'table.destroy', params: [receiverTypeName], returnType: 'void' },
+          add: { builtin: 'table.add_zeroed', params: [receiverTypeName], returnType: elementType },
+          add_copy: { builtin: 'table.add_copy', params: [receiverTypeName, elementType], returnType: elementType },
+          at: { builtin: 'table.get_ptr', params: [receiverTypeName, 'i64'], returnType: elementType },
+          first: { builtin: 'table.first_ptr', params: [receiverTypeName], returnType: elementType },
+          last: { builtin: 'table.last_ptr', params: [receiverTypeName], returnType: elementType },
+          remove_at: { builtin: 'table.remove_at', params: [receiverTypeName, 'i64'], returnType: 'bool' },
+          remove_swap: { builtin: 'table.remove_swap', params: [receiverTypeName, 'i64'], returnType: 'bool' },
+        };
+        const definition = definitions[operation];
+        if (!definition) throw new CompileError(`table has no function '${operation}'`, call.token);
+        const builtinTarget = BUILTINS.get(definition.builtin);
+        call.effectiveArgs = [receiver, ...call.args];
+        return { kind: 'builtin', target: { ...builtinTarget, params: definition.params.map((type, index) => ({ name: `arg${index}`, type })), returnType: definition.returnType }, returnType: definition.returnType, tableElement: receiverType.element };
+      }
+    }
+
+    // A static object may expose an ordinary object through one of its fields.
+    // Calls through that field are normal member calls, regardless of how many
+    // module/object/field segments precede the operation:
+    // Manager.WindowManager.windowHandle.begin(...)
+    // WindowManager.windowHandle.begin(...)
+    // Keep direct static-object methods on the dedicated path below so new(),
+    // constructor, and static-method diagnostics retain their exact behavior.
+    let staticReceiverPrefix = 0;
+    const localStaticReceiver = module.tables.get(pathParts[0]);
+    if (localStaticReceiver?.staticObject) staticReceiverPrefix = 1;
+    else if (pathParts.length >= 2) {
+      const importedUse = module.uses.get(pathParts[0]);
+      const importedStaticReceiver = importedUse?.target.tables.get(pathParts[1]);
+      if (importedStaticReceiver?.exported && importedStaticReceiver.staticObject) staticReceiverPrefix = 2;
+    }
+    if (staticReceiverPrefix > 0 && pathParts.length > staticReceiverPrefix + 1) {
+      const receiverPath = pathParts.slice(0, -1);
+      const operation = pathParts[pathParts.length - 1];
+      const receiver = { kind: 'reference', path: receiverPath, token: call.token };
+      const resolvedReceiver = this.resolveReference(module, receiver, scope);
+      const receiverType = resolvedReceiver.typeInfo || this.resolveType(module, resolvedReceiver.type, call.token);
+      const receiverTypeName = resolvedReceiver.type;
+      if (receiverType.kind === 'struct') {
+        const objectTypeCallable = this.buildObjectTypeCallable(receiverType.struct, receiverTypeName, operation, call, receiver, module);
+        if (objectTypeCallable) return objectTypeCallable;
+        if (receiverType.struct.positional && operation === 'length') {
+          const callable = makeSpecial('packed_length', [receiverTypeName], 'i64', { struct: receiverType.struct });
+          call.effectiveArgs = [receiver];
+          return callable;
+        }
+        if (receiverType.struct.positional && (operation === 'byte_length' || operation === 'bytes')) {
+          const callable = makeSpecial('packed_byte_length', [receiverTypeName], 'i64', { struct: receiverType.struct });
+          call.effectiveArgs = [receiver];
+          return callable;
+        }
+        if (receiverType.struct.positional && operation === 'data') {
+          const callable = makeSpecial('packed_data', [receiverTypeName], 'ptr', { struct: receiverType.struct });
+          call.effectiveArgs = [receiver];
+          return callable;
+        }
+        if (operation === 'destroy') {
+          const callable = makeSpecial('struct_destroy', [receiverTypeName], 'bool', { struct: receiverType.struct });
+          call.effectiveArgs = [receiver, ...call.args];
+          return callable;
+        }
+        if (operation === 'clone') {
+          const callable = makeSpecial('struct_clone', [receiverTypeName], receiverTypeName, { struct: receiverType.struct });
+          call.effectiveArgs = [receiver, ...call.args];
+          return callable;
+        }
+        if (operation === 'constructor') {
+          throw new CompileError('constructors are called through Object.new(...)', call.token, null, {
+            code: 'LSX2717',
+            hint: `Replace ${receiverPath.join('.')}.constructor(...) with ${receiverType.struct.name}.new(...).`,
+          });
+        }
+        const method = receiverType.struct.methods.get(operation);
+        const label = receiverType.struct.tableModel ? 'table' : 'struct';
+        if (!method) throw new CompileError(`${label} '${receiverType.struct.name}' has no function '${operation}'`, call.token);
         call.effectiveArgs = method.isStatic ? [...call.args] : [receiver, ...call.args];
         return { kind: 'internal', target: method, returnType: this.externalizeType(method.returnType, method.module, module), methodReceiver: method.isStatic ? null : receiver };
       }

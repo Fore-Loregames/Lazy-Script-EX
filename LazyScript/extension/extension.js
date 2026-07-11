@@ -21,8 +21,8 @@ let lastCheckGeneration = 0;
 let suggestionTimer;
 
 const KEYWORDS = [
-  'use','as','export','extern','fn','const','static','lshtml','lscss','local','return','if','then','else','elseif','end','while','do','for','in','break','continue',
-  'true','false','null','and','or','not','self','struct','i8','u8','i16','u16','i32','u32','i64','u64','f32','ptr','handle','fnptr','string','void','bool','table',
+  'use','as','export','extern','fn','const','static','lshtml','lscss','local','return','if','then','else','elseif','end','while','do','for','in','break',
+  'true','false','null','and','or','not','self','struct','class','i8','u8','i16','u16','i32','u32','i64','u64','f32','ptr','handle','fnptr','string','void','bool','table',
   'shader','vertex','fragment','compute','input','output','flat','uniform','texture','image','storage','workers','vulkan','overlay','strip','raytracing'
 ];
 
@@ -1342,20 +1342,27 @@ function importedCompletionTarget(record, chain) {
   if (!aliasEntry) return null;
   const target = indexedFile(resolveImport(aliasEntry.import.spec, record.uri.fsPath));
   if (!target) return { matchedImport: true, alias: aliasEntry.alias, record: null, parent: null, symbols: [] };
-
-  let symbols = target.exports;
-  let parent = null;
-  const canonicalChain = [aliasEntry.alias];
-  for (let index = 1; index < chain.length; index++) {
-    const symbol = symbolByName(symbols, chain[index], true);
-    if (!symbol) {
-      return { matchedImport: true, alias: aliasEntry.alias, record: target, parent, symbols: [], canonicalChain, unresolved: chain[index] };
-    }
-    parent = symbol;
-    canonicalChain.push(symbol.name);
-    symbols = symbol.members || [];
+  if (chain.length === 1) {
+    return { matchedImport: true, alias: aliasEntry.alias, record: target, parent: null, symbols: target.exports, canonicalChain: [aliasEntry.alias] };
   }
-  return { matchedImport: true, alias: aliasEntry.alias, record: target, parent, symbols, canonicalChain };
+
+  const root = symbolByName(target.exports, chain[1], true);
+  if (!root) {
+    return { matchedImport: true, alias: aliasEntry.alias, record: target, parent: null, symbols: [], canonicalChain: [aliasEntry.alias], unresolved: chain[1] };
+  }
+  const followed = followSymbolPath(target, root, chain.slice(2));
+  if (!followed) {
+    return { matchedImport: true, alias: aliasEntry.alias, record: target, parent: root, symbols: [], canonicalChain: [aliasEntry.alias, root.name], unresolved: chain.at(-1) };
+  }
+  const container = resolvedMemberContainer(followed.record, followed.symbol, followed.parent);
+  return {
+    matchedImport: true,
+    alias: aliasEntry.alias,
+    record: container?.record || followed.record,
+    parent: container?.object || followed.symbol,
+    symbols: container?.symbols || followed.symbol.members || [],
+    canonicalChain: [aliasEntry.alias, ...followed.canonicalParts],
+  };
 }
 
 function importedSymbol(record, alias, member, childName = null) {
@@ -1363,22 +1370,34 @@ function importedSymbol(record, alias, member, childName = null) {
   if (!aliasEntry) return null;
   const target = indexedFile(resolveImport(aliasEntry.import.spec, record.uri.fsPath));
   if (!target) return null;
-  const sym = target.exports.find(s => s.name === member);
+  const root = symbolByName(target.exports, member, true);
+  if (!root) return null;
   const childPath = Array.isArray(childName) ? childName : (childName ? [childName] : []);
-  if (sym && childPath.length) {
-    let parent = sym;
-    let current = sym;
-    for (const part of childPath) {
-      parent = current;
-      current = symbolByName(current.members || [], part, true);
-      if (!current) return null;
+  return followSymbolPath(target, root, childPath);
+}
+
+function inferredReturnTypeReference(record, symbol, visited = new Set()) {
+  const explicit = parseTypeReference(symbol?.returnType);
+  if (explicit) return explicit;
+  if (!record?.lines || !symbol || !Number.isInteger(symbol.line)) return null;
+  const key = `${keyForFile(record.uri.fsPath)}|return|${symbol.owner || ''}|${symbol.name}|${symbol.line}`;
+  if (visited.has(key)) return null;
+  visited.add(key);
+  let depth = 1;
+  for (let line = symbol.line + 1; line < record.lines.length; line++) {
+    const source = String(record.lines[line] || '').replace(/--.*$/, '').trim();
+    if (!source) continue;
+    const returnMatch = source.match(/^return\s+(.+?)\s*$/);
+    if (returnMatch) {
+      const inferred = inferTypeFromInitializer(record, cleanInitializerText(returnMatch[1]), visited);
+      if (inferred) return inferred;
     }
-    return { record: target, symbol: current, parent };
-  }
-  if (sym) return { record: target, symbol: sym };
-  for (const obj of target.exports.filter(s => s.members)) {
-    const child = obj.members.find(m => m.name === member);
-    if (child) return { record: target, symbol: child, parent: obj };
+    if (/^(?:if\b.*\bthen|while\b.*\bdo|for\b.*\bdo|fn\b|[A-Za-z_]\w*\s*=\s*fn\b)/.test(source)
+        && !/\bend\s*$/.test(source)) depth += 1;
+    if (/^end\b/.test(source) || /^}\s*$/.test(source)) {
+      depth -= 1;
+      if (depth <= 0) break;
+    }
   }
   return null;
 }
@@ -1389,25 +1408,25 @@ function inferTypeFromInitializer(record, initializer, visited = new Set()) {
   if ((m = initializer.match(/^([A-Za-z_]\w*)\.([A-Za-z_]\w*)\.new\s*\(/))) return { alias: m[1], type: m[2] };
   if ((m = initializer.match(/^([A-Za-z_]\w*)\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*\(/))) {
     const hit = importedSymbol(record, m[1], m[2], m[3]);
-    const explicit = parseTypeReference(hit?.symbol?.returnType);
-    if (explicit) return { alias: explicit.alias || m[1], type: explicit.type };
+    const returned = inferredReturnTypeReference(hit?.record, hit?.symbol, visited);
+    if (returned) return { alias: returned.alias || m[1], type: returned.type };
     if (['new','create','start','clone','load','open','connect','listen','accept'].includes(m[3])) return { alias: m[1], type: m[2] };
   }
   if ((m = initializer.match(/^([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*\(/))) {
     const hit = importedSymbol(record, m[1], m[2]);
-    const explicit = parseTypeReference(hit?.symbol?.returnType);
-    if (explicit) return { alias: explicit.alias || m[1], type: explicit.type };
+    const returned = inferredReturnTypeReference(hit?.record, hit?.symbol, visited);
+    if (returned) return { alias: returned.alias || m[1], type: returned.type };
   }
   if ((m = initializer.match(/^([A-Za-z_]\w*)\.new\s*\(/))) return { alias: '', type: m[1] };
   if ((m = initializer.match(/^([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*\(/))) {
     const sourceVar = record.symbols.find(s => s.kind === 'variable' && s.name === m[1]);
     if (sourceVar && !visited.has(sourceVar.name)) {
       visited.add(sourceVar.name);
-      const sourceType = sourceVar.typeRef || inferTypeFromInitializer(record, sourceVar.initializer, visited);
+      const sourceType = inferredTypeReferenceForSymbol(record, sourceVar, null, visited);
       const resolved = resolveTypeObject(record, sourceType);
       const method = resolved?.object?.members?.find(x => x.name === m[2]);
-      const explicit = parseTypeReference(method?.returnType);
-      if (explicit) return { alias: explicit.alias || sourceType?.alias || '', type: explicit.type };
+      const returned = inferredReturnTypeReference(resolved?.record, method, visited);
+      if (returned) return { alias: returned.alias || sourceType?.alias || '', type: returned.type };
     }
   }
   return null;
@@ -1430,18 +1449,141 @@ function resolveTypeObject(record, typeRef) {
   return null;
 }
 
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function concreteAssignmentInitializers(record, symbol, parent = null) {
+  if (!record?.lines || !symbol?.name) return [];
+  const start = Math.max(0, parent?.line ?? 0);
+  const end = Math.min(record.lines.length - 1, parent?.endLine ?? (record.lines.length - 1));
+  const target = parent ? `self\\.${escapeRegExp(symbol.name)}` : escapeRegExp(symbol.name);
+  const pattern = new RegExp(`^\\s*(?:local\\s+)?${target}\\s*=\\s*(.+?)\\s*,?\\s*$`);
+  const values = [];
+  for (let line = start; line <= end; line++) {
+    const source = String(record.lines[line] || '').replace(/--.*$/, '');
+    const match = source.match(pattern);
+    if (!match) continue;
+    const initializer = cleanInitializerText(match[1]);
+    if (!initializer || initializer === 'null') continue;
+    values.push(initializer);
+  }
+  return values;
+}
+
+function inferredTypeReferenceForSymbol(record, symbol, parent = null, visited = new Set()) {
+  if (!record || !symbol) return null;
+  const visitKey = `${keyForFile(record.uri.fsPath)}|${parent?.name || ''}|${symbol.name}`;
+  if (visited.has(visitKey)) return symbol.inferredTypeRef || null;
+  visited.add(visitKey);
+  const remember = typeRef => {
+    if (typeRef) symbol.inferredTypeRef = typeRef;
+    return typeRef;
+  };
+
+  const explicit = symbol.typeRef || (() => {
+    const value = String(symbol.type || '').trim();
+    if (!value || ['auto', 'inferred', 'null', 'void'].includes(value.toLowerCase())) return null;
+    return parseTypeReference(value);
+  })();
+  if (explicit && explicit.type !== 'table') return remember(explicit);
+
+  const direct = inferTypeFromInitializer(record, symbol.initializer, visited);
+  if (direct) return remember(direct);
+  const assignments = concreteAssignmentInitializers(record, symbol, parent);
+  for (let index = assignments.length - 1; index >= 0; index--) {
+    const inferred = inferTypeFromInitializer(record, assignments[index], visited);
+    if (inferred) return remember(inferred);
+  }
+  return remember(explicit);
+}
+
+function resolvedMemberContainer(record, symbol, parent = null, visited = new Set()) {
+  if (!record || !symbol) return null;
+  if (Array.isArray(symbol.members) && symbol.members.length) {
+    return { record, object: symbol, symbols: symbol.members };
+  }
+  const typeRef = inferredTypeReferenceForSymbol(record, symbol, parent, visited);
+  const resolved = resolveTypeObject(record, typeRef);
+  if (!resolved) return null;
+  return { record: resolved.record, object: resolved.object, symbols: resolved.object.members || [] };
+}
+
+function followSymbolPath(record, rootSymbol, childParts = []) {
+  if (!record || !rootSymbol) return null;
+  let currentRecord = record;
+  let current = rootSymbol;
+  let parent = null;
+  const canonicalParts = [rootSymbol.name];
+  for (const part of childParts) {
+    const container = resolvedMemberContainer(currentRecord, current, parent);
+    if (!container) return null;
+    const next = symbolByName(container.symbols, part, true);
+    if (!next) return null;
+    currentRecord = container.record;
+    parent = container.object;
+    current = next;
+    canonicalParts.push(next.name);
+  }
+  return { record: currentRecord, symbol: current, parent, canonicalParts };
+}
+
+function completionTargetForChain(record, chain, currentObject = null) {
+  if (!record || !Array.isArray(chain) || !chain.length) return null;
+  let followed = null;
+  if (chain[0] === 'self') {
+    if (!currentObject) return null;
+    if (chain.length === 1) {
+      return { record, parent: currentObject, symbols: currentObject.members || [], canonicalChain: ['self'] };
+    }
+    followed = followSymbolPath(record, currentObject, chain.slice(1));
+  } else {
+    const variable = record.symbols.find(symbol => symbol.kind === 'variable' && symbol.name === chain[0]);
+    if (variable) {
+      const typeRef = inferredTypeReferenceForSymbol(record, variable);
+      const resolved = resolveTypeObject(record, typeRef);
+      if (!resolved) return { record, parent: variable, symbols: [], canonicalChain: [variable.name], tableLike: isTableLikeSymbol(variable) };
+      if (chain.length === 1) {
+        return { record: resolved.record, parent: resolved.object, symbols: resolved.object.members || [], canonicalChain: [variable.name] };
+      }
+      const first = symbolByName(resolved.object.members || [], chain[1], true);
+      if (!first) return null;
+      followed = followSymbolPath(resolved.record, first, chain.slice(2));
+      if (followed) followed.canonicalParts = [variable.name, ...followed.canonicalParts.slice(1)];
+    } else {
+      const object = record.symbols.find(symbol => symbol.name === chain[0] && symbol.members);
+      if (!object) return null;
+      followed = chain.length === 1
+        ? { record, symbol: object, parent: null, canonicalParts: [object.name] }
+        : followSymbolPath(record, object, chain.slice(1));
+    }
+  }
+  if (!followed) return null;
+  if (isTableLikeSymbol(followed.symbol)) {
+    return { record: followed.record, parent: followed.symbol, symbols: [], canonicalChain: followed.canonicalParts, tableLike: true };
+  }
+  const container = resolvedMemberContainer(followed.record, followed.symbol, followed.parent);
+  return {
+    record: container?.record || followed.record,
+    parent: container?.object || followed.symbol,
+    symbols: container?.symbols || followed.symbol.members || [],
+    canonicalChain: followed.canonicalParts,
+  };
+}
+
 function resolveInstanceMember(record, variableName, memberName) {
   if (variableName === 'self') {
     const object = record.symbols.find(s => s.members?.some(m => m.name === memberName));
-    const member = object?.members?.find(m => m.name === memberName);
-    return member ? { record, symbol: member, parent: object } : null;
+    if (!object) return null;
+    return followSymbolPath(record, object, [memberName]);
   }
   const variable = record.symbols.find(s => s.kind === 'variable' && s.name === variableName);
   if (!variable) return null;
-  const typeRef = variable.typeRef || inferTypeFromInitializer(record, variable.initializer);
+  const typeRef = inferredTypeReferenceForSymbol(record, variable);
   const resolved = resolveTypeObject(record, typeRef);
-  const member = resolved?.object?.members?.find(m => m.name === memberName);
-  return member ? { record: resolved.record, symbol: member, parent: resolved.object } : null;
+  if (!resolved) return null;
+  const member = symbolByName(resolved.object.members || [], memberName, true);
+  return member ? { record: resolved.record, symbol: member, parent: resolved.object, canonicalParts: [resolved.object.name, member.name] } : null;
 }
 
 function chainContext(document, position) {
@@ -1473,24 +1615,35 @@ function resolveChain(record, chain) {
   if (tableBuiltin) return tableBuiltin;
   if (chain.length >= 2 && record.imports.has(chain[0])) return importedSymbol(record, chain[0], chain[1], chain.slice(2));
   if (chain.length >= 2) {
-    const instance = resolveInstanceMember(record, chain[0], chain[1]);
-    if (instance && chain.length === 2) return instance;
-    const object = record.symbols.find(s => s.name === chain[0] && s.members);
-    if (object) {
-      let parent = object;
-      let current = object;
-      for (const part of chain.slice(1)) {
-        parent = current;
-        current = symbolByName(current.members || [], part, true);
-        if (!current) break;
-      }
-      if (current && current !== object) return { record, symbol: current, parent };
+    if (chain[0] === 'self') {
+      const object = record.symbols.find(symbol => symbol.members?.some(member => member.name === chain[1]));
+      if (object) return followSymbolPath(record, object, chain.slice(1));
     }
-    if (instance) return instance;
+
+    const variable = record.symbols.find(symbol => symbol.kind === 'variable' && symbol.name === chain[0]);
+    if (variable) {
+      const typeRef = inferredTypeReferenceForSymbol(record, variable);
+      const resolved = resolveTypeObject(record, typeRef);
+      if (resolved) {
+        const first = symbolByName(resolved.object.members || [], chain[1], true);
+        if (first) {
+          if (chain.length === 2) return { record: resolved.record, symbol: first, parent: resolved.object, canonicalParts: [resolved.object.name, first.name] };
+          const followed = followSymbolPath(resolved.record, first, chain.slice(2));
+          if (followed && !followed.parent) followed.parent = resolved.object;
+          return followed;
+        }
+      }
+    }
+
+    const object = record.symbols.find(symbol => symbol.name === chain[0] && symbol.members);
+    if (object) {
+      const followed = followSymbolPath(record, object, chain.slice(1));
+      if (followed?.symbol !== object) return followed;
+    }
   }
   const objectBuiltin = resolveObjectBuiltinChain(record, chain);
   if (objectBuiltin) return objectBuiltin;
-  const local = record.symbols.find(s => s.name === chain.at(-1));
+  const local = record.symbols.find(symbol => symbol.name === chain.at(-1));
   if (local) return { record, symbol: local };
   return null;
 }
@@ -1505,6 +1658,12 @@ function markdownForSymbol(record, symbol, parent = null) {
 
   const summary = api?.friendlyDescription || api?.whatItIs || symbol.documentation;
   if (summary) md.appendMarkdown(`\n${String(summary).replace(/\n/g, '  \n')}\n`);
+  if (symbol.inferredTypeRef) {
+    const inferredName = symbol.inferredTypeRef.alias
+      ? `${symbol.inferredTypeRef.alias}.${symbol.inferredTypeRef.type}`
+      : symbol.inferredTypeRef.type;
+    md.appendMarkdown(`\n**Inferred value type:** \`${inferredName}\`\n`);
+  }
   if (api?.whatItIs && api.whatItIs !== summary) md.appendMarkdown(`\n**What this is**  \n${api.whatItIs.replace(/\n/g, '  \n')}\n`);
   if (api?.whenToUse) md.appendMarkdown(`\n**When to use it**  \n${api.whenToUse.replace(/\n/g, '  \n')}\n`);
   if (api?.beginnerNote) md.appendMarkdown(`\n> **Beginner note:** ${api.beginnerNote.replace(/\n/g, '  \n')}\n`);
@@ -1555,7 +1714,10 @@ function snippetForCallable(symbol) {
 function completionFor(record, symbol, prefix = '', parent = null) {
   enrichSymbol(record, symbol);
   const item = new vscode.CompletionItem(symbol.name, completionKind(symbol.kind));
-  item.detail = `${prefix}${symbol.signature}`;
+  const inferredDetail = symbol.inferredTypeRef
+    ? ` -> ${symbol.inferredTypeRef.alias ? `${symbol.inferredTypeRef.alias}.` : ''}${symbol.inferredTypeRef.type}`
+    : '';
+  item.detail = `${prefix}${symbol.signature}${inferredDetail}`;
   item.documentation = markdownForSymbol(record, symbol, parent);
   item.sortText = `${symbol.kind === 'method' || symbol.kind === 'function' ? '0' : '1'}_${symbol.name}`;
   if (symbol.apiMetadata?.friendlyDescription) item.label = { label: symbol.name, description: symbol.apiMetadata.friendlyDescription };
@@ -2334,7 +2496,13 @@ class CompletionProvider {
     const chainMatch = prefix.match(/([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\.([A-Za-z_]\w*)?$/);
     if (chainMatch) {
       const base = chainMatch[1].split('.');
-      const importedTarget = importedCompletionTarget(record, base);
+      const currentObjectForChain = enclosingObjectAt(record, position.line);
+      const hasLocalRoot = base[0] === 'self'
+        || scopeSymbols.some(symbol => symbol.name === base[0])
+        || record.symbols.some(symbol => symbol.name === base[0] && symbol.kind !== 'import');
+      const importedTarget = (record.imports.has(base[0]) || !hasLocalRoot)
+        ? importedCompletionTarget(record, base)
+        : null;
       if (importedTarget?.matchedImport) {
         if (!importedTarget.record) return [];
         const canonicalQualifier = (importedTarget.canonicalChain || [importedTarget.alias]).join('.');
@@ -2355,6 +2523,17 @@ class CompletionProvider {
         }
         return applyCompletionRange(items, replacementRange, document);
       }
+      const localTarget = completionTargetForChain(scopeRecord, base, currentObjectForChain);
+      if (localTarget) {
+        const canonicalQualifier = (localTarget.canonicalChain || base).join('.');
+        const items = localTarget.tableLike
+          ? tableBuiltinCompletionItems(canonicalQualifier)
+          : localTarget.symbols
+            .filter(symbol => !symbol.name.startsWith('_'))
+            .map(symbol => completionFor(localTarget.record, symbol, `${canonicalQualifier}.`, localTarget.parent));
+        if (!localTarget.tableLike) appendObjectBuiltinCompletions(items, canonicalQualifier);
+        return applyCompletionRange(items, replacementRange, document);
+      }
       if (base[0] === 'self') {
         const object = enclosingObjectAt(record, position.line);
         if (object && base.length === 1) {
@@ -2372,7 +2551,7 @@ class CompletionProvider {
             return applyCompletionRange(nestedItems, replacementRange, document);
           }
           if (isTableLikeSymbol(member)) return applyCompletionRange(tableBuiltinCompletionItems(`self.${member.name}`), replacementRange, document);
-          const typeRef = member?.typeRef || inferTypeFromInitializer(scopeRecord, member?.initializer);
+          const typeRef = inferredTypeReferenceForSymbol(scopeRecord, member, object);
           const resolved = resolveTypeObject(scopeRecord, typeRef);
           if (resolved) {
             const objectItems = resolved.object.members
@@ -2399,7 +2578,7 @@ class CompletionProvider {
         const variable = scopeSymbols.find(s => s.name === base[0]) || record.symbols.find(s => s.kind === 'variable' && s.name === base[0]);
         if (variable) {
           if (isTableLikeSymbol(variable)) return applyCompletionRange(tableBuiltinCompletionItems(base[0]), replacementRange, document);
-          const typeRef = variable.typeRef || inferTypeFromInitializer(scopeRecord, variable.initializer);
+          const typeRef = inferredTypeReferenceForSymbol(scopeRecord, variable);
           const resolved = resolveTypeObject(scopeRecord, typeRef);
           if (resolved) {
             const objectItems = resolved.object.members.filter(sym => !sym.name.startsWith('_')).map(sym => completionFor(resolved.record, sym, `${base[0]}.`, resolved.object));

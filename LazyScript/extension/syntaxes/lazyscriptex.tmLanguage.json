@@ -265,7 +265,7 @@
       "patterns": [
         {
           "name": "storage.modifier.lazyscriptex",
-          "match": "\\b(export|static|local|const|extern|struct|lshtml|lscss|shader|vertex|fragment|compute|input|output|flat|uniform|texture|image|storage|workers|vulkan|overlay|strip|raytracing)\\b"
+          "match": "\\b(export|static|local|const|extern|struct|class|lshtml|lscss|shader|vertex|fragment|compute|input|output|flat|uniform|texture|image|storage|workers|vulkan|overlay|strip|raytracing)\\b"
         },
         {
           "name": "keyword.control.lazyscriptex",

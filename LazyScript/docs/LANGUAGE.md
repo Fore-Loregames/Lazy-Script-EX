@@ -634,6 +634,22 @@ fn main()
 end
 ```
 
+A field may begin as `null` and gain its concrete object type when a method assigns it. Calls can continue naturally through the imported static object and that field; the number of member segments is not limited:
+
+```lsx
+use "@Engine/Window/WindowManager.lsx" as WindowManagerMod
+
+fn BeginDrawing(red, green, blue)
+    WindowManagerMod.WindowManager.windowHandle.begin(red, green, blue)
+end
+
+fn EndDrawing()
+    WindowManagerMod.WindowManager.windowHandle.end()
+end
+```
+
+The compiler and VS Code extension follow the assignment made by `CreateWindow()` and resolve `windowHandle` as an LSG `Window`. Its initial `null` value does not permanently erase the later concrete type.
+
 Rules:
 
 - Write `static const`, usually with `export` when another module needs it.

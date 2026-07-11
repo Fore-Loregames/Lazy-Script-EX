@@ -998,7 +998,7 @@ function escapeRawForLsx(text) {
   return String(text).replace(/\$\{/g, '$\\{').replace(/`/g, '\\`');
 }
 
-const SPIRV_CACHE_VERSION = 'lsx-lssl-spirv-0.21.5-lsg-front-end-names-v1';
+const SPIRV_CACHE_VERSION = 'lsx-lssl-spirv-0.21.6-extension-intelligence-v1';
 const spirvMemoryCache = new Map();
 
 function spirvCacheKey(source, kind) {
