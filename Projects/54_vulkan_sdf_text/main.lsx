@@ -1,0 +1,55 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "@LazyScript/bindings/Text/FreeType.lsx" as FreeType
+use "@LazyScript/bindings/Text/Font.lsx" as Font
+use "shaders/text.lssl" as TextShader
+
+fn fail(message)
+    return LSG.show_error(message)
+end
+
+fn main()
+    LSG.use_vulkan()
+    local window = LSG.open("54 - Vulkan FreeType SDF text",1000,600)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return fail(window.error()) end
+    if not FreeType.ready() then window.destroy() return fail("libfreetype.dll could not be loaded.") end
+
+    local face = FreeType.load("C:/Windows/Fonts/segoeui.ttf",64)
+    if not face.valid() then local faceMessage = face.error() face.destroy() window.destroy() return fail(faceMessage) end
+    local atlas = Font.create_ascii_atlas(face)
+    if not atlas.valid() then local atlasMessage = atlas.error() atlas.destroy() face.destroy() window.destroy() return fail(atlasMessage) end
+    local text = Font.build_text(face,atlas,"LazyScriptEX\nFreeType SDF text stays sharp.",52,42,1)
+    if not text.valid() then text.destroy() atlas.destroy() face.destroy() window.destroy() return fail("Text mesh generation failed.") end
+    local atlasTexture = Font.upload_atlas(atlas)
+    if not atlasTexture.valid() then
+        local textureMessage = atlasTexture.error()
+        atlasTexture.destroy() text.destroy() atlas.destroy() face.destroy() window.destroy()
+        return fail(textureMessage)
+    end
+
+    local shader = TextShader.create()
+    if not shader.ready() then return fail(shader.error()) end
+    local textMesh = LSG.mesh(text.vertices,TextShader.vertex_layout)
+    LSG.alpha_blending(true)
+
+    while window.running() do
+        window.begin(0.025,0.03,0.05)
+        shader.bind()
+        shader.vector2("viewport",window.width,window.height)
+        shader.texture("fontAtlas",0)
+        atlasTexture.bind(0)
+        textMesh.draw()
+        window.end()
+    end
+
+    LSG.alpha_blending(false)
+    textMesh.destroy()
+    shader.destroy()
+    atlasTexture.destroy()
+    text.destroy()
+    atlas.destroy()
+    face.destroy()
+    window.destroy()
+    return 0
+end

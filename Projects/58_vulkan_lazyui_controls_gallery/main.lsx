@@ -1,0 +1,1101 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
+use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
+
+const GalleryProps = {
+    status = "Ready - click a field and type"
+    changes = 0
+    hue = 350.0
+    saturation = 28.0
+    brightness = 75.0
+    alpha = 100.0
+    dragging_sv = false
+    dragging_hue = false
+    dragging_alpha = false
+    red_text = null
+    green_text = null
+    blue_text = null
+    alpha_text = null
+}
+
+lscss .root = {
+    width = "100vw"
+    height = "100vh"
+    padding = "12px"
+    gap = "10px"
+    background = "linear-gradient(135deg, #0b1019, #162238)"
+    color = "#edf3ff"
+}
+
+lscss .topbar = {
+    height = "56px"
+    padding = "9px 14px"
+    flex_direction = "row"
+    align_items = "center"
+    gap = "10px"
+    background = "#1c2738"
+    border = "1px #3c4f6c"
+    border_radius = "10px"
+}
+
+lscss h2 = {
+    font_size = "22px"
+    color = "#ffffff"
+}
+lscss h3 = {
+    font_size = "17px"
+    color = "#d7e5ff"
+}
+lscss .muted = {
+    color = "#91a4c2"
+    font_size = "12px"
+}
+lscss .workspace = {
+    flex_direction = "row"
+    gap = "10px"
+    flex_grow = 1
+    min_height = "0px"
+}
+
+lscss .panel = {
+    flex_grow = 1
+    min_width = "0px"
+    min_height = "0px"
+    padding = "11px"
+    gap = "10px"
+    background = "#151e2c"
+    border = "1px #34445f"
+    border_radius = "12px"
+    overflow_y = "auto"
+    overflow_x = "hidden"
+}
+
+lscss .section = {
+    flex_shrink = 0
+    gap = "8px"
+    padding = "11px"
+    background = "#101722"
+    border = "1px #2d3a50"
+    border_radius = "8px"
+}
+
+lscss .row = {
+    flex_direction = "row"
+    align_items = "center"
+    gap = "10px"
+    min_width = "0px"
+}
+lscss .label = {
+    color = "#b9c9e2"
+    font_size = "13px"
+}
+
+lscss button = {
+    height = "34px"
+    padding = "8px 13px"
+    background = "#263650"
+    border = "1px #4a6084"
+    border_radius = "7px"
+    color = "#e8efff"
+    cursor = "pointer"
+    hover = {
+        background = "#31476a"
+        border = "1px #6f8fc1"
+    }
+    active = {
+        translate_y = "1px"
+        opacity = 0.82
+    }
+}
+
+lscss .primary = {
+    background = "linear-gradient(90deg, #357bff, #7252ff)"
+    border = "1px #8fb0ff"
+}
+
+lscss input, search, password, email, url, tel, number, date, time, keybind, select, combobox, dropdown, colorpicker = {
+    width = "100%"
+    min_width = "0px"
+    box_sizing = "border-box"
+    height = "38px"
+    padding = "8px 11px"
+    background = "#0d141f"
+    border = "1px #3d4e69"
+    border_radius = "7px"
+    color = "#dce7fa"
+    focus = {
+        border = "2px #6898ff"
+        outline = "1px rgba(104,152,255,0.30)"
+        outline_offset = "2px"
+    }
+}
+
+lscss textarea = {
+    width = "100%"
+    min_width = "0px"
+    box_sizing = "border-box"
+    height = "116px"
+    min_height = "116px"
+    padding = "10px 11px"
+    background = "#0d141f"
+    border = "1px #3d4e69"
+    border_radius = "7px"
+    color = "#dce7fa"
+    line_height = "20px"
+    overflow_y = "auto"
+    focus = {
+        border = "2px #6898ff"
+    }
+}
+
+lscss checkbox, radio, toggle, switch = {
+    width = "100%"
+    height = "32px"
+    padding = "5px 7px"
+    background = "rgba(0,0,0,0)"
+    color = "#d2dced"
+    cursor = "pointer"
+    hover = {
+        background = "rgba(51,70,99,0.38)"
+    }
+}
+
+lscss range, slider = {
+    width = "100%"
+    height = "34px"
+    padding = "7px 9px"
+    background = "rgba(0,0,0,0)"
+    cursor = "pointer"
+    focus = {
+        outline = "1px #719bff"
+        outline_offset = "2px"
+    }
+}
+
+lscss .control-grid = {
+    display = "grid"
+    grid_columns = 2
+    gap = "8px"
+}
+lscss .small-field = {
+    width = "0px"
+    min_width = "0px"
+    flex_grow = 1
+    box_sizing = "border-box"
+}
+lscss .swatch-preview = {
+    height = "78px"
+    background = "linear-gradient(135deg, #7c4dff, #31d5c8)"
+    border = "1px #8ea6d0"
+    border_radius = "9px"
+}
+
+lscss .color-section = {
+    flex_shrink = 0
+    gap = "10px"
+}
+lscss .color-head = {
+    flex_direction = "row"
+    align_items = "center"
+}
+lscss .color-workbench = {
+    flex_direction = "row"
+    align_items = "stretch"
+    gap = "12px"
+    min_width = "0px"
+}
+lscss .color-main = {
+    flex_grow = 1
+    min_width = "300px"
+    gap = "7px"
+}
+lscss .color-side = {
+    width = "210px"
+    flex_shrink = 0
+    gap = "8px"
+}
+lscss .sv-plane = {
+    position = "relative"
+    width = "100%"
+    height = "230px"
+    flex_shrink = 0
+    overflow = "hidden"
+    background = "#ff0000"
+    border = "1px #6f84a5"
+    border_radius = "7px"
+    cursor = "crosshair"
+}
+lscss .sv-base, .sv-white, .sv-black = {
+    position = "absolute"
+    left = "0px"
+    top = "0px"
+    width = "100%"
+    height = "100%"
+    pointer_events = false
+}
+lscss .sv-base = { background = "#ff0000" }
+lscss .sv-white = { background = "linear-gradient(to right, #ffffff, rgba(255,255,255,0))" }
+lscss .sv-black = { background = "linear-gradient(to bottom, rgba(0,0,0,0), #000000)" }
+lscss .color-cursor = {
+    position = "absolute"
+    width = "16px"
+    height = "16px"
+    border = "2px #ffffff"
+    outline = "1px #000000"
+    border_radius = "8px"
+    background = "rgba(0,0,0,0)"
+    pointer_events = false
+}
+lscss .hue-strip, .alpha-strip = {
+    position = "relative"
+    width = "100%"
+    height = "26px"
+    flex_shrink = 0
+    overflow = "hidden"
+    border = "1px #617695"
+    border_radius = "6px"
+    cursor = "crosshair"
+}
+lscss .hue-colors = {
+    position = "absolute"
+    left = "0px"
+    top = "0px"
+    width = "100%"
+    height = "100%"
+    flex_direction = "row"
+    pointer_events = false
+}
+lscss .hue-segment = { flex_grow = 1; min_width = "0px"; height = "100%" }
+lscss .hue-0 = { background = "linear-gradient(to right, #ff0000, #ffff00)" }
+lscss .hue-1 = { background = "linear-gradient(to right, #ffff00, #00ff00)" }
+lscss .hue-2 = { background = "linear-gradient(to right, #00ff00, #00ffff)" }
+lscss .hue-3 = { background = "linear-gradient(to right, #00ffff, #0000ff)" }
+lscss .hue-4 = { background = "linear-gradient(to right, #0000ff, #ff00ff)" }
+lscss .hue-5 = { background = "linear-gradient(to right, #ff00ff, #ff0000)" }
+lscss .strip-cursor = {
+    position = "absolute"
+    top = "-3px"
+    width = "10px"
+    height = "30px"
+    background = "rgba(255,255,255,0.16)"
+    border = "2px #ffffff"
+    outline = "1px #000000"
+    border_radius = "5px"
+    pointer_events = false
+}
+lscss .alpha-checker, .alpha-overlay = {
+    position = "absolute"
+    left = "0px"
+    top = "0px"
+    width = "100%"
+    height = "100%"
+    pointer_events = false
+    object_fit = "cover"
+}
+lscss .alpha-overlay = { background = "linear-gradient(to right, rgba(255,0,0,0), #ff0000)" }
+lscss .preview-row = {
+    flex_direction = "row"
+    gap = "8px"
+}
+lscss .color-preview = {
+    flex_grow = 1
+    min_width = "0px"
+    height = "72px"
+    border = "1px #8194b2"
+    border_radius = "7px"
+}
+lscss .previous-preview = { background = "#29344a" }
+lscss .channel-grid = {
+    display = "grid"
+    grid_columns = 2
+    gap = "7px"
+}
+lscss .channel = {
+    flex_direction = "row"
+    align_items = "center"
+    gap = "6px"
+}
+lscss .channel-label = {
+    width = "18px"
+    flex_shrink = 0
+    color = "#93a7c5"
+    text_align = "center"
+}
+lscss .preset-strip = {
+    display = "grid"
+    grid_columns = 4
+    gap = "6px"
+}
+lscss .preset-color = {
+    height = "28px"
+    min_width = "0px"
+    padding = "0px"
+    border = "1px #5d6f89"
+    border_radius = "5px"
+    hover = { border = "2px #ffffff" }
+    selected = { border = "2px #ffffff"; outline = "1px #000000" }
+}
+lscss .image-demo-card = {
+    flex_direction = "row"
+    align_items = "center"
+    gap = "12px"
+    padding = "9px"
+    background = "#0c131e"
+    border = "1px #354761"
+    border_radius = "7px"
+}
+lscss .image-demo = {
+    width = "200px"
+    flex_shrink = 0
+    object_fit = "contain"
+    border = "1px #7187a8"
+    border_radius = "6px"
+}
+
+lscss .progress = {
+    height = "20px"
+    background = "#0c121c"
+    border = "1px #34445f"
+    border_radius = "9px"
+    overflow = "hidden"
+}
+
+lscss .progress-fill = {
+    width = "73%"
+    height = "100%"
+    background = "linear-gradient(90deg, #32d59a, #58a8ff)"
+}
+
+lscss .status = {
+    height = "30px"
+    padding = "6px 10px"
+    background = "#182334"
+    border = "1px #344861"
+    border_radius = "7px"
+    color = "#9ec2ff"
+}
+
+lshtml gallery_view(props) = {(
+    <ui class="root">
+        <toolbar class="topbar">
+            <h2>LazyUI HTML-style Controls Gallery</h2>
+            <spacer />
+            <badge>Instanced geometry</badge>
+            <badge>Retained input state</badge>
+        </toolbar>
+        <row class="workspace">
+            <column class="panel">
+                <section class="section">
+                    <h3>Text input fields</h3>
+                    <span class="muted">Click, type, select, copy, paste, use Home/End and Tab.</span>
+                    <label class="label">Object name</label>
+                    <input id="object-name" placeholder="Player Controller" maxlength=64 oninput={control_input} context={props} />
+                    <label class="label">Search assets</label>
+                    <search placeholder="Search materials, meshes, scripts..." maxlength=96 oninput={control_input} context={props} />
+                    <row class="row">
+                        <email class="small-field" placeholder="name@example.com" oninput={control_input} context={props} />
+                        <password class="small-field" placeholder="Password" maxlength=32 oninput={control_input} context={props} />
+                    </row>
+                    <row class="row">
+                        <number class="small-field" value="12.5" oninput={control_input} context={props} />
+                        <date class="small-field" value="2026-07-06" oninput={control_input} context={props} />
+                    </row>
+                </section>
+
+                <section class="section">
+                    <h3>Multiline text area</h3>
+                    <textarea id="notes" placeholder="Write multiline notes here..." maxlength=2048 oninput={control_input} context={props}>LazyUI textarea
+supports multiple lines,
+selection, clipboard editing and a caret.
+The text area owns its own scroll offset.
+Use the mouse wheel or drag its scrollbar.
+Page Up and Page Down also work.
+Long editor notes stay clipped to the field.
+Only visible glyphs reach the final clip.
+This final line forces vertical overflow.</textarea>
+                </section>
+
+                <section class="section">
+                    <h3>Buttons and selection controls</h3>
+                    <row class="row"><button class="primary" onclick={button_clicked} context={props}>Primary Action</button><button>Secondary</button><button disabled>Disabled</button></row>
+                    <checkbox checked onchange={control_change} context={props}>Cast shadows</checkbox>
+                    <checkbox onchange={control_change} context={props}>Receive decals</checkbox>
+                    <radio checked onchange={control_change} context={props}>Forward renderer</radio>
+                    <radio onchange={control_change} context={props}>Deferred renderer</radio>
+                    <switch checked onchange={control_change} context={props}>GPU instancing</switch>
+                    <toggle checked onchange={control_change} context={props}>Debug overlays</toggle>
+                </section>
+            </column>
+
+            <column id="color-panel" class="panel">
+                <section class="section">
+                    <h3>Range sliders</h3>
+                    <label class="label">Exposure</label>
+                    <range min=0 max=2 step=0.05 number-value=1.15 oninput={control_input} context={props} />
+                    <label class="label">UI scale</label>
+                    <slider min=50 max=200 step=1 number-value=100 oninput={control_input} context={props} />
+                    <label class="label">Master volume</label>
+                    <range min=0 max=100 step=1 number-value=72 oninput={control_input} context={props} />
+                </section>
+
+                <section class="section">
+                    <h3>Select and picker fields</h3>
+                    <select value="High Quality" onchange={control_change} context={props}>
+                        <option value="Low Quality">Low Quality</option>
+                        <option value="Medium Quality">Medium Quality</option>
+                        <option value="High Quality" selected>High Quality</option>
+                        <option value="Ultra Quality">Ultra Quality</option>
+                    </select>
+                    <combobox value="Segoe UI" onchange={control_change} context={props}>
+                        <option value="Segoe UI" selected>Segoe UI</option>
+                        <option value="Consolas">Consolas</option>
+                        <option value="Arial">Arial</option>
+                        <option value="Tahoma">Tahoma</option>
+                    </combobox>
+                    <dropdown value="Perspective" onchange={control_change} context={props}>
+                        <option value="Perspective" selected>Perspective</option>
+                        <option value="Orthographic">Orthographic</option>
+                        <option value="Front">Front</option>
+                        <option value="Top">Top</option>
+                        <option value="Right">Right</option>
+                    </dropdown>
+                    <keybind value="Ctrl + Shift + P" oninput={control_input} context={props} />
+                </section>
+
+                <section class="section color-section">
+                    <row class="color-head"><h3>Editor color picker</h3><spacer /><badge>Continuous HSV + Alpha</badge></row>
+                    <span class="muted">Drag inside the saturation/value plane, hue strip, or alpha strip. This is one continuous picker, not a grid of fake color buttons.</span>
+                    <row class="color-workbench">
+                        <column class="color-main">
+                            <panel id="color-plane" class="sv-plane" onpointerdown={color_plane_down} onpointermove={color_plane_move} onpointerup={color_plane_up} context={props}>
+                                <panel id="color-plane-base" class="sv-base" />
+                                <panel class="sv-white" />
+                                <panel class="sv-black" />
+                                <panel id="color-plane-cursor" class="color-cursor" />
+                            </panel>
+                            <label class="label">Hue</label>
+                            <panel id="color-hue-strip" class="hue-strip" onpointerdown={hue_strip_down} onpointermove={hue_strip_move} onpointerup={hue_strip_up} context={props}>
+                                <row class="hue-colors"><panel class="hue-segment hue-0" /><panel class="hue-segment hue-1" /><panel class="hue-segment hue-2" /><panel class="hue-segment hue-3" /><panel class="hue-segment hue-4" /><panel class="hue-segment hue-5" /></row>
+                                <panel id="color-hue-cursor" class="strip-cursor" />
+                            </panel>
+                            <label class="label">Alpha</label>
+                            <panel id="color-alpha-strip" class="alpha-strip" onpointerdown={alpha_strip_down} onpointermove={alpha_strip_move} onpointerup={alpha_strip_up} context={props}>
+                                <img id="alpha-checker" class="alpha-checker" src="assets/checkerboard.png" alt="checkerboard transparency"></img>
+                                <panel id="color-alpha-overlay" class="alpha-overlay" />
+                                <panel id="color-alpha-cursor" class="strip-cursor" />
+                            </panel>
+                        </column>
+                        <column class="color-side">
+                            <label class="label">Current / previous</label>
+                            <row class="preview-row"><panel id="current-color" class="color-preview" /><panel class="color-preview previous-preview" /></row>
+                            <colorpicker id="live-color" value="#BF9C9CFF" maxlength=9 oninput={hex_color_input} onchange={control_change} context={props} />
+                            <grid class="channel-grid">
+                                <row class="channel"><span class="channel-label">R</span><number id="channel-r" value="191" min=0 max=255 oninput={color_channel_input} context={props} /></row>
+                                <row class="channel"><span class="channel-label">G</span><number id="channel-g" value="156" min=0 max=255 oninput={color_channel_input} context={props} /></row>
+                                <row class="channel"><span class="channel-label">B</span><number id="channel-b" value="156" min=0 max=255 oninput={color_channel_input} context={props} /></row>
+                                <row class="channel"><span class="channel-label">A</span><number id="channel-a" value="255" min=0 max=255 oninput={color_channel_input} context={props} /></row>
+                            </grid>
+                            <label class="label">Saved swatches</label>
+                            <grid id="color-presets" class="preset-strip"><button class="preset-color" number-value=0 min=100 max=100 onclick={preset_clicked} context={props}></button><button class="preset-color" number-value=35 min=90 max=100 onclick={preset_clicked} context={props}></button><button class="preset-color" number-value=60 min=100 max=100 onclick={preset_clicked} context={props}></button><button class="preset-color" number-value=120 min=100 max=100 onclick={preset_clicked} context={props}></button><button class="preset-color" number-value=180 min=100 max=100 onclick={preset_clicked} context={props}></button><button class="preset-color" number-value=215 min=85 max=100 onclick={preset_clicked} context={props}></button><button class="preset-color" number-value=270 min=75 max=100 onclick={preset_clicked} context={props}></button><button class="preset-color" number-value=320 min=85 max=100 onclick={preset_clicked} context={props}></button></grid>
+                        </column>
+                    </row>
+                    <panel class="image-demo-card">
+                        <img id="image-demo" class="image-demo" src="assets/checkerboard.png" alt="LazyUI img tag checkerboard"></img>
+                        <column><h4>Real LSHTML image element</h4><span class="muted">This actual &lt;img&gt; only specifies width: 200px. set_texture records the source dimensions, so LazyUI computes height from the real image aspect ratio without stretching it.</span></column>
+                    </panel>
+                </section>
+
+                <section class="section">
+                    <h3>Progress and status</h3>
+                    <panel class="progress"><panel class="progress-fill" /></panel>
+                    <span class="muted">The columns scroll with visible, draggable native LazyUI scrollbars.</span>
+                </section>
+            </column>
+        </row>
+        <statusbar id="status" class="status">{props.status}</statusbar>
+    </ui>
+)}
+
+fn update_status(element,props,message)
+    props.changes = props.changes + 1
+    props.status = message
+    local root = element
+    while root.parent ~= null do root = root.parent end
+    local status = root.find_id(UI.hash("status"))
+    if status ~= null then status.set_text(props.status) end
+end
+
+fn hsv_to_color(hue,saturationPercent,valuePercent)
+    local h = hue
+    while h < 0.0 do h = h + 360.0 end
+    while h >= 360.0 do h = h - 360.0 end
+    local saturation = saturationPercent / 100.0
+    local brightness = valuePercent / 100.0
+    if saturation < 0.0 then saturation = 0.0 end
+    if saturation > 1.0 then saturation = 1.0 end
+    if brightness < 0.0 then brightness = 0.0 end
+    if brightness > 1.0 then brightness = 1.0 end
+
+    -- Keep HSV sector selection entirely in f32 comparisons. Besides being
+    -- simpler, this avoids depending on a narrowing conversion while the O6
+    -- optimizer is rewriting surrounding expressions.
+    local fraction = 0.0
+    local red = brightness
+    local green = 0.0
+    local blue = 0.0
+    local p = brightness * (1.0-saturation)
+    if h < 60.0 then
+        fraction = h/60.0
+        red = brightness
+        green = brightness*(1.0-saturation*(1.0-fraction))
+        blue = p
+    elseif h < 120.0 then
+        fraction = (h-60.0)/60.0
+        red = brightness*(1.0-saturation*fraction)
+        green = brightness
+        blue = p
+    elseif h < 180.0 then
+        fraction = (h-120.0)/60.0
+        red = p
+        green = brightness
+        blue = brightness*(1.0-saturation*(1.0-fraction))
+    elseif h < 240.0 then
+        fraction = (h-180.0)/60.0
+        red = p
+        green = brightness*(1.0-saturation*fraction)
+        blue = brightness
+    elseif h < 300.0 then
+        fraction = (h-240.0)/60.0
+        red = brightness*(1.0-saturation*(1.0-fraction))
+        green = p
+        blue = brightness
+    else
+        fraction = (h-300.0)/60.0
+        red = brightness
+        green = p
+        blue = brightness*(1.0-saturation*fraction)
+    end
+    local redByte = red * 255.0 + 0.5
+    local greenByte = green * 255.0 + 0.5
+    local blueByte = blue * 255.0 + 0.5
+    return UI.rgba(redByte,greenByte,blueByte,255)
+end
+
+fn apply_alpha(color,alphaPercent)
+    local alpha = alphaPercent / 100.0
+    if alpha < 0.0 then alpha = 0.0 end
+    if alpha > 1.0 then alpha = 1.0 end
+    local alphaByte = alpha * 255.0 + 0.5
+    return color % 16777216 + alphaByte * 16777216
+end
+
+fn parse_channel(value,fallback)
+    if value == null then return fallback end
+    local result = 0
+    local found = false
+    local index = 0
+    while index < string.length(value) do
+        local byte = string.byte_at(value,index)
+        if byte >= 48 and byte <= 57 then
+            result = result*10 + byte-48
+            found = true
+        end
+        index = index + 1
+    end
+    if not found then return fallback end
+    if result < 0 then result = 0 end
+    if result > 255 then result = 255 end
+    return result
+end
+
+fn hex_digit_value(byte)
+    if byte >= 48 and byte <= 57 then return byte-48 end
+    if byte >= 65 and byte <= 70 then return byte-55 end
+    if byte >= 97 and byte <= 102 then return byte-87 end
+    return -1
+end
+
+fn parse_hex_color(value,fallback)
+    if value == null then return fallback end
+    local length = string.length(value)
+    if length ~= 7 and length ~= 9 then return fallback end
+    if string.byte_at(value,0) ~= 35 then return fallback end
+    local r0 = hex_digit_value(string.byte_at(value,1))
+    local r1 = hex_digit_value(string.byte_at(value,2))
+    local g0 = hex_digit_value(string.byte_at(value,3))
+    local g1 = hex_digit_value(string.byte_at(value,4))
+    local b0 = hex_digit_value(string.byte_at(value,5))
+    local b1 = hex_digit_value(string.byte_at(value,6))
+    if r0 < 0 or r1 < 0 or g0 < 0 or g1 < 0 or b0 < 0 or b1 < 0 then return fallback end
+    local alpha = 255
+    if length == 9 then
+        local a0 = hex_digit_value(string.byte_at(value,7))
+        local a1 = hex_digit_value(string.byte_at(value,8))
+        if a0 < 0 or a1 < 0 then return fallback end
+        alpha = a0*16+a1
+    end
+    return UI.rgba(r0*16+r1,g0*16+g1,b0*16+b1,alpha)
+end
+
+fn set_hsv_from_rgba(props,redValue,greenValue,blueValue,alphaValue)
+    local red = redValue / 255.0
+    local green = greenValue / 255.0
+    local blue = blueValue / 255.0
+    local maximum = red
+    if green > maximum then maximum = green end
+    if blue > maximum then maximum = blue end
+    local minimum = red
+    if green < minimum then minimum = green end
+    if blue < minimum then minimum = blue end
+    local delta = maximum-minimum
+    local hue = 0.0
+    if delta > 0.00001 then
+        if maximum == red then hue = 60.0*((green-blue)/delta)
+        elseif maximum == green then hue = 60.0*(2.0+(blue-red)/delta)
+        else hue = 60.0*(4.0+(red-green)/delta) end
+        while hue < 0.0 do hue = hue+360.0 end
+        while hue >= 360.0 do hue = hue-360.0 end
+    end
+    local saturation = 0.0
+    if maximum > 0.00001 then saturation = delta/maximum*100.0 end
+    props.hue = hue
+    props.saturation = saturation
+    props.brightness = maximum*100.0
+    props.alpha = alphaValue/255.0*100.0
+end
+
+fn set_panel_color(element,color)
+    if element == null then return end
+    element.style.background = color
+    element.style.background_end = color
+    element.style.gradient_mode = UI.GRADIENT_NONE
+    if element.hover_style ~= null then
+        element.hover_style.background = color
+        element.hover_style.background_end = color
+        element.hover_style.gradient_mode = UI.GRADIENT_NONE
+    end
+    if element.selected_style ~= null then
+        element.selected_style.background = color
+        element.selected_style.background_end = color
+        element.selected_style.gradient_mode = UI.GRADIENT_NONE
+    end
+    element.mark_visual_dirty()
+end
+
+fn set_panel_gradient(element,startColor,endColor,angle)
+    if element == null then return end
+    element.style.background = startColor
+    element.style.background_end = endColor
+    element.style.gradient_mode = UI.GRADIENT_LINEAR
+    element.style.gradient_angle = angle
+    element.mark_visual_dirty()
+end
+
+fn position_absolute(element,left,top)
+    if element == null then return end
+    element.style.left_unit = UI.UNIT_PX
+    element.style.top_unit = UI.UNIT_PX
+    element.style.left = left
+    element.style.top = top
+    element.mark_layout_dirty()
+end
+
+fn update_channel(root,idValue,counter,value)
+    local field = root.find_id(idValue)
+    if field ~= null and counter ~= null then field.set_value(counter.set_i64(value)) end
+end
+
+fn refresh_color_picker(root,props,message)
+    if root == null then return end
+    local hueColor = hsv_to_color(props.hue,100.0,100.0)
+    local opaqueColor = hsv_to_color(props.hue,props.saturation,props.brightness)
+    local color = apply_alpha(opaqueColor,props.alpha)
+    set_panel_color(root.find_id(UI.hash("color-plane-base")),hueColor)
+    set_panel_color(root.find_id(UI.hash("current-color")),color)
+    local transparentColor = opaqueColor % 16777216
+    set_panel_gradient(root.find_id(UI.hash("color-alpha-overlay")),transparentColor,opaqueColor,0.0)
+    local picker = root.find_id(UI.hash("live-color"))
+    if picker ~= null then picker.set_color(color) end
+
+    local plane = root.find_id(UI.hash("color-plane"))
+    local planeCursor = root.find_id(UI.hash("color-plane-cursor"))
+    if plane ~= null and planeCursor ~= null then
+        position_absolute(planeCursor,props.saturation/100.0*plane.content_width-8.0,(1.0-props.brightness/100.0)*plane.content_height-8.0)
+    end
+    local hueStrip = root.find_id(UI.hash("color-hue-strip"))
+    local hueCursor = root.find_id(UI.hash("color-hue-cursor"))
+    if hueStrip ~= null and hueCursor ~= null then position_absolute(hueCursor,props.hue/360.0*hueStrip.content_width-5.0,-3.0) end
+    local alphaStrip = root.find_id(UI.hash("color-alpha-strip"))
+    local alphaCursor = root.find_id(UI.hash("color-alpha-cursor"))
+    if alphaStrip ~= null and alphaCursor ~= null then position_absolute(alphaCursor,props.alpha/100.0*alphaStrip.content_width-5.0,-3.0) end
+
+    local red = opaqueColor % 256
+    local green = opaqueColor / 256 % 256
+    local blue = opaqueColor / 65536 % 256
+    local alphaByte = props.alpha/100.0*255.0+0.5
+    update_channel(root,UI.hash("channel-r"),props.red_text,red)
+    update_channel(root,UI.hash("channel-g"),props.green_text,green)
+    update_channel(root,UI.hash("channel-b"),props.blue_text,blue)
+    update_channel(root,UI.hash("channel-a"),props.alpha_text,alphaByte)
+    if message ~= null then update_status(root,props,message) end
+end
+
+fn update_sv_from_pointer(element,event,props)
+    local width = element.content_width
+    local height = element.content_height
+    if width <= 0.0 then width = element.width end
+    if height <= 0.0 then height = element.height end
+    local x = (event.x-element.content_x)/width
+    local y = (event.y-element.content_y)/height
+    if x < 0.0 then x = 0.0 end
+    if x > 1.0 then x = 1.0 end
+    if y < 0.0 then y = 0.0 end
+    if y > 1.0 then y = 1.0 end
+    props.saturation = x*100.0
+    props.brightness = (1.0-y)*100.0
+    local root = element
+    while root.parent ~= null do root = root.parent end
+    refresh_color_picker(root,props,"Saturation and value updated")
+end
+
+fn color_plane_down(element,event,props)
+    props.dragging_sv = true
+    update_sv_from_pointer(element,event,props)
+    event.prevent_default()
+    return 0
+end
+fn color_plane_move(element,event,props)
+    if props.dragging_sv then update_sv_from_pointer(element,event,props) end
+    return 0
+end
+fn color_plane_up(element,event,props)
+    if props.dragging_sv then update_sv_from_pointer(element,event,props) end
+    props.dragging_sv = false
+    return 0
+end
+
+fn update_hue_from_pointer(element,event,props)
+    local root = element
+    while root.parent ~= null do root = root.parent end
+    local strip = root.find_id(UI.hash("color-hue-strip"))
+    if strip == null then return end
+    local width = strip.content_width
+    if width <= 0.0 then width = strip.width end
+    local ratio = (event.x-strip.content_x)/width
+    if ratio < 0.0 then ratio = 0.0 end
+    if ratio > 1.0 then ratio = 1.0 end
+    props.hue = ratio*360.0
+    if props.hue >= 360.0 then props.hue = 359.999 end
+    refresh_color_picker(root,props,"Hue updated")
+end
+fn hue_strip_down(element,event,props)
+    props.dragging_hue = true
+    update_hue_from_pointer(element,event,props)
+    event.prevent_default()
+    return 0
+end
+fn hue_strip_move(element,event,props)
+    if props.dragging_hue then update_hue_from_pointer(element,event,props) end
+    return 0
+end
+fn hue_strip_up(element,event,props)
+    if props.dragging_hue then update_hue_from_pointer(element,event,props) end
+    props.dragging_hue = false
+    return 0
+end
+
+fn update_alpha_from_pointer(element,event,props)
+    local width = element.content_width
+    if width <= 0.0 then width = element.width end
+    local ratio = (event.x-element.content_x)/width
+    if ratio < 0.0 then ratio = 0.0 end
+    if ratio > 1.0 then ratio = 1.0 end
+    props.alpha = ratio*100.0
+    local root = element
+    while root.parent ~= null do root = root.parent end
+    refresh_color_picker(root,props,"Alpha updated")
+end
+fn alpha_strip_down(element,event,props)
+    props.dragging_alpha = true
+    update_alpha_from_pointer(element,event,props)
+    event.prevent_default()
+    return 0
+end
+fn alpha_strip_move(element,event,props)
+    if props.dragging_alpha then update_alpha_from_pointer(element,event,props) end
+    return 0
+end
+fn alpha_strip_up(element,event,props)
+    if props.dragging_alpha then update_alpha_from_pointer(element,event,props) end
+    props.dragging_alpha = false
+    return 0
+end
+
+fn color_channel_input(element,event,props)
+    local root = element
+    while root.parent ~= null do root = root.parent end
+    local current = hsv_to_color(props.hue,props.saturation,props.brightness)
+    local red = current % 256
+    local green = current / 256 % 256
+    local blue = current / 65536 % 256
+    local alpha = props.alpha/100.0*255.0+0.5
+    if element.id_hash == UI.hash("channel-r") then red = parse_channel(element.value,red)
+    elseif element.id_hash == UI.hash("channel-g") then green = parse_channel(element.value,green)
+    elseif element.id_hash == UI.hash("channel-b") then blue = parse_channel(element.value,blue)
+    elseif element.id_hash == UI.hash("channel-a") then alpha = parse_channel(element.value,alpha) end
+    set_hsv_from_rgba(props,red,green,blue,alpha)
+    refresh_color_picker(root,props,"RGBA channel updated")
+    return 0
+end
+
+fn hex_color_input(element,event,props)
+    local current = apply_alpha(hsv_to_color(props.hue,props.saturation,props.brightness),props.alpha)
+    local parsed = parse_hex_color(element.value,current)
+    if parsed == current and (element.value == null or (string.length(element.value) ~= 7 and string.length(element.value) ~= 9)) then return 0 end
+    local red = parsed % 256
+    local green = parsed / 256 % 256
+    local blue = parsed / 65536 % 256
+    local alpha = parsed / 16777216 % 256
+    set_hsv_from_rgba(props,red,green,blue,alpha)
+    local root = element
+    while root.parent ~= null do root = root.parent end
+    refresh_color_picker(root,props,"Hex color updated")
+    return 0
+end
+
+fn preset_clicked(element,event,props)
+    if element.parent ~= null then
+        local index = 0
+        while index < element.parent.children.length() do
+            local sibling = element.parent.children[index]
+            sibling.selected = false
+            sibling.mark_visual_dirty()
+            index = index + 1
+        end
+    end
+    element.selected = true
+    element.mark_visual_dirty()
+    props.hue = element.number_value
+    props.saturation = element.min_value
+    props.brightness = element.max_value
+    local root = element
+    while root.parent ~= null do root = root.parent end
+    refresh_color_picker(root,props,"Saved swatch selected")
+    return 0
+end
+
+fn initialize_color_picker(root,props)
+    props.red_text = UI.CounterText.new()
+    props.green_text = UI.CounterText.new()
+    props.blue_text = UI.CounterText.new()
+    props.alpha_text = UI.CounterText.new()
+    props.red_text.initialize(null,32)
+    props.green_text.initialize(null,32)
+    props.blue_text.initialize(null,32)
+    props.alpha_text.initialize(null,32)
+    local presets = root.find_id(UI.hash("color-presets"))
+    if presets ~= null then
+        local index = 0
+        while index < presets.children.length() do
+            local cell = presets.children[index]
+            set_panel_color(cell,hsv_to_color(cell.number_value,cell.min_value,cell.max_value))
+            index = index + 1
+        end
+    end
+    refresh_color_picker(root,props,"Color picker ready")
+end
+
+fn absolute_value(value)
+    if value < 0.0 then return -value end
+    return value
+end
+
+fn element_owns_hit(root,element)
+    if root == null or element == null then return false end
+    local width = element.content_width
+    local height = element.content_height
+    if width <= 0.0 then width = element.width end
+    if height <= 0.0 then height = element.height end
+    local target = UI.hit_test(root,element.content_x+width*0.5,element.content_y+height*0.5)
+    if target == null then return false end
+    return target.id_hash == element.id_hash
+end
+
+fn verify_color_picker_interactions(document,root,props)
+    if document == null or root == null or props == null then return false end
+    local plane = root.find_id(UI.hash("color-plane"))
+    local hueStrip = root.find_id(UI.hash("color-hue-strip"))
+    local alphaStrip = root.find_id(UI.hash("color-alpha-strip"))
+    local picker = root.find_id(UI.hash("live-color"))
+    local colorPanel = root.find_id(UI.hash("color-panel"))
+    if plane == null or hueStrip == null or alphaStrip == null or picker == null or colorPanel == null then return false end
+
+    -- The gallery column is intentionally scrollable. Exercise the controls
+    -- through the same visible Document hit-test path a user reaches after
+    -- scrolling instead of testing coordinates clipped outside the viewport.
+    local originalPanelScroll = colorPanel.scroll_y
+    colorPanel.scroll_y = plane.y-colorPanel.content_y-24.0
+    if colorPanel.scroll_y < 0.0 then colorPanel.scroll_y = 0.0 end
+    colorPanel.mark_layout_dirty()
+    document.resize(document.width,document.height)
+    if not element_owns_hit(root,plane) or not element_owns_hit(root,hueStrip) or not element_owns_hit(root,alphaStrip) or not element_owns_hit(root,picker) then
+        colorPanel.scroll_y = originalPanelScroll
+        colorPanel.mark_layout_dirty()
+        document.resize(document.width,document.height)
+        return false
+    end
+
+    local originalHue = props.hue
+    local originalSaturation = props.saturation
+    local originalBrightness = props.brightness
+    local originalAlpha = props.alpha
+    local originalStatus = props.status
+    local originalChanges = props.changes
+    local passed = true
+
+    -- Verify the actual HSV conversion across every sector. This catches
+    -- optimizer mistakes that preserve the hue slider value but lose the
+    -- required f32-to-i64 sector truncation.
+    if hsv_to_color(0.0,100.0,100.0) ~= UI.rgba(255,0,0,255) then passed = false end
+    if hsv_to_color(60.0,100.0,100.0) ~= UI.rgba(255,255,0,255) then passed = false end
+    if hsv_to_color(120.0,100.0,100.0) ~= UI.rgba(0,255,0,255) then passed = false end
+    if hsv_to_color(180.0,100.0,100.0) ~= UI.rgba(0,255,255,255) then passed = false end
+    if hsv_to_color(240.0,100.0,100.0) ~= UI.rgba(0,0,255,255) then passed = false end
+    if hsv_to_color(300.0,100.0,100.0) ~= UI.rgba(255,0,255,255) then passed = false end
+
+    local planeX = plane.content_x+plane.content_width*0.25
+    local planeY = plane.content_y+plane.content_height*0.75
+    document.pointer_move(planeX,planeY)
+    document.pointer_down_button(LSG.Mouse.Left)
+    document.pointer_up_button(LSG.Mouse.Left)
+    if absolute_value(props.saturation-25.0) > 1.0 or absolute_value(props.brightness-25.0) > 1.0 then passed = false end
+
+    local hueX = hueStrip.content_x+hueStrip.content_width*0.5
+    local hueY = hueStrip.content_y+hueStrip.content_height*0.5
+    document.pointer_move(hueX,hueY)
+    document.pointer_down_button(LSG.Mouse.Left)
+    document.pointer_up_button(LSG.Mouse.Left)
+    if absolute_value(props.hue-180.0) > 1.0 then passed = false end
+
+    local alphaX = alphaStrip.content_x+alphaStrip.content_width*0.4
+    local alphaY = alphaStrip.content_y+alphaStrip.content_height*0.5
+    document.pointer_move(alphaX,alphaY)
+    document.pointer_down_button(LSG.Mouse.Left)
+    document.pointer_up_button(LSG.Mouse.Left)
+    if absolute_value(props.alpha-40.0) > 1.0 then passed = false end
+
+    document.pointer_move(picker.content_x+picker.content_width*0.6,picker.content_y+picker.content_height*0.5)
+    document.pointer_down_button(LSG.Mouse.Left)
+    document.pointer_up_button(LSG.Mouse.Left)
+    document.key_down(LSG.Key.A,LSG.Modifier.Control)
+    document.input_text("#00FF00FF")
+    if picker.value == null or not string.equals(picker.value,"#00FF00FF") then passed = false end
+    if absolute_value(props.hue-120.0) > 1.0 or absolute_value(props.saturation-100.0) > 1.0 or absolute_value(props.brightness-100.0) > 1.0 then passed = false end
+
+    document.focus(null)
+    props.dragging_sv = false
+    props.dragging_hue = false
+    props.dragging_alpha = false
+    props.hue = originalHue
+    props.saturation = originalSaturation
+    props.brightness = originalBrightness
+    props.alpha = originalAlpha
+    props.status = originalStatus
+    props.changes = originalChanges
+    refresh_color_picker(root,props,null)
+    local status = root.find_id(UI.hash("status"))
+    if status ~= null then status.set_text(props.status) end
+    colorPanel.scroll_y = originalPanelScroll
+    colorPanel.mark_layout_dirty()
+    document.resize(document.width,document.height)
+    return passed
+end
+
+fn control_input(element,event,props)
+    update_status(element,props,"Input updated - keyboard, caret and selection are active")
+    return 0
+end
+
+fn control_change(element,event,props)
+    update_status(element,props,"Control value changed")
+    return 0
+end
+
+fn button_clicked(element,event,props)
+    update_status(element,props,"Primary button clicked")
+    return 0
+end
+
+fn main()
+    LSG.use_vulkan()
+    local window = LSG.open("58 - Vulkan LazyUI controls gallery",1320,820)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return fail(window.error()) end
+
+    local props = GalleryProps.new()
+    local root = gallery_view(props)
+    local checkerTexture = LSG.load_ui_texture("assets/checkerboard.png")
+    if not checkerTexture.ready() then
+        local message = checkerTexture.error()
+        checkerTexture.destroy()
+        root.destroy()
+        props.destroy()
+        window.destroy()
+        return fail(message)
+    end
+    local alphaChecker = root.find_id(UI.hash("alpha-checker"))
+    if alphaChecker ~= null then alphaChecker.texture = checkerTexture alphaChecker.mark_visual_dirty() end
+    local imageDemo = root.find_id(UI.hash("image-demo"))
+    if imageDemo ~= null then imageDemo.set_texture(checkerTexture,checkerTexture.width,checkerTexture.height) end
+    initialize_color_picker(root,props)
+    local renderer = UIRenderer.create(null,64)
+    if not renderer.ready then return fail("LazyUI Vulkan renderer initialization failed.") end
+    local document = UI.document(root)
+    local windowInput = UI.connect_graphics_input(window,document)
+    local logicalSize = LSG.window_size()
+    local cursor = LSG.cursor()
+    local mouseDown = false
+    local previousWidth = 0
+    local previousHeight = 0
+
+    window.running()
+    logicalSize.refresh(window)
+    document.resize(window.width,window.height)
+    refresh_color_picker(root,props,null)
+    document.resize(window.width,window.height)
+
+    while window.running() do
+        logicalSize.refresh(window)
+        document.resize(window.width,window.height)
+        if window.width ~= previousWidth or window.height ~= previousHeight then
+            previousWidth = window.width
+            previousHeight = window.height
+            refresh_color_picker(root,props,null)
+            document.resize(window.width,window.height)
+        end
+        window.cursor_position(cursor)
+        document.pointer_move_scaled(cursor.x,cursor.y,logicalSize.width,logicalSize.height)
+        local pressed = window.is_mouse_down(LSG.Mouse.Left)
+        if pressed and not mouseDown then document.pointer_down_button(LSG.Mouse.Left) end
+        if not pressed and mouseDown then document.pointer_up_button(LSG.Mouse.Left) end
+        mouseDown = pressed
+        document.resize(window.width,window.height)
+        window.begin(0.02,0.025,0.04)
+        renderer.begin(window.width,window.height)
+        renderer.submit(root)
+        renderer.flush()
+        window.end()
+    end
+
+    windowInput.destroy()
+    cursor.destroy()
+    logicalSize.destroy()
+    document.destroy()
+    checkerTexture.destroy()
+    props.destroy()
+    renderer.destroy()
+    window.destroy()
+    return 0
+end
+
+fn fail(message) return LSG.show_error(message) end

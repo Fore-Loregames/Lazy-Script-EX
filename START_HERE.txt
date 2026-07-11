@@ -1,31 +1,9 @@
-LazyScriptEX — START HERE
-========================
+LazyScriptEX 0.21.5
 
-Open the full beginner guide:
-  Double-click START_HERE.bat
+1. Run setup-runtime.bat
+2. Run INSTALL_VSCODE_EXTENSION.bat
+3. Run open-api.bat
+4. Create a project with new-project.bat MyGame
+5. Build Projects\MyGame\build.bat
 
-Required setup:
-  1. Run setup-runtime.bat
-     Downloads/prepares the native libraries used by the toolkit.
-
-  2. Run INSTALL_VSCODE_EXTENSION.bat
-     Restart VS Code afterward and open this complete toolkit root folder.
-
-Optional setup:
-  3. Run build-all.bat
-     Rebuilds every bundled example locally. This is useful if Windows warns
-     about the prebuilt downloaded example executables.
-
-Create a project:
-  Open Command Prompt in this toolkit root and run:
-
-    new-project.bat MyFirstGame
-
-Then edit:
-  Projects\MyFirstGame\main.lsx
-
-Build it with:
-  Projects\MyFirstGame\build.bat
-
-Run it from:
-  Projects\MyFirstGame\build\MyFirstGame.exe
+OpenGL is the default graphics backend. Call LSG.use_vulkan() before LSG.open() to use Vulkan with the same LSG/LSSL front-end API.

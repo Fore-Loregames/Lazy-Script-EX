@@ -1,0 +1,165 @@
+shader LazyUIBox
+vulkan
+overlay
+strip
+vertex
+    storage boxData = Vector4 at 0
+    uniform viewport = Vector2
+    output pixelPosition = Vector2
+    output boxRect = Vector4
+    output backgroundA = Vector4
+    output backgroundB = Vector4
+    output shadowColor = Vector4
+    output cornerRadii = Vector4
+    output borderWidths = Vector4
+    output shadowParams = Vector4
+    output clipRect = Vector4
+    output clipRadii = Vector4
+    output misc = Vector4
+    output extra = Vector4
+    output extra2 = Vector4
+    output geometry = Vector4
+
+    main = fn()
+        local corner = Vector2(0.0,0.0)
+        if vertex.id == 1 then
+            corner = Vector2(1.0,0.0)
+        end
+        if vertex.id == 2 then
+            corner = Vector2(0.0,1.0)
+        end
+        if vertex.id == 3 then
+            corner = Vector2(1.0,1.0)
+        end
+
+        local item = instance.id
+        local offset = item * 15
+        boxRect = boxData[offset]
+        backgroundA = boxData[offset + 1]
+        backgroundB = boxData[offset + 2]
+        shadowColor = boxData[offset + 5]
+        cornerRadii = boxData[offset + 6]
+        borderWidths = boxData[offset + 7]
+        shadowParams = boxData[offset + 8]
+        clipRect = boxData[offset + 9]
+        clipRadii = boxData[offset + 10]
+        misc = boxData[offset + 11]
+        extra = boxData[offset + 12]
+        extra2 = boxData[offset + 13]
+        geometry = boxData[offset + 14]
+
+        local expansion = Number(max(shadowParams.z * 2.0 + abs(shadowParams.w),misc.w + extra2.x) + 2.0)
+        local shadowOffset = shadowParams.xy
+        local minimum = Vector2(boxRect.xy - Vector2(expansion,expansion) + min(shadowOffset,Vector2(0.0,0.0)))
+        local maximum = Vector2(boxRect.xy + boxRect.zw + Vector2(expansion,expansion) + max(shadowOffset,Vector2(0.0,0.0)))
+        pixelPosition = mix(minimum,maximum,corner)
+        local ndc = (pixelPosition / viewport) * Vector2(2.0,-2.0) + Vector2(-1.0,1.0)
+        screen.position = Vector4(ndc,0.0,1.0)
+    end
+end
+fragment
+    input pixelPosition = Vector2
+    input boxRect = Vector4
+    input backgroundA = Vector4
+    input backgroundB = Vector4
+    input shadowColor = Vector4
+    input cornerRadii = Vector4
+    input borderWidths = Vector4
+    input shadowParams = Vector4
+    input clipRect = Vector4
+    input clipRadii = Vector4
+    input misc = Vector4
+    input extra = Vector4
+    input extra2 = Vector4
+    input geometry = Vector4
+    output finalColor = Color4
+
+    main = fn()
+        local clipCoverage = Number(1.0)
+        if clipRect.z > 0.0 and clipRect.w > 0.0 then
+            local clipCenter = Vector2(clipRect.xy + clipRect.zw * 0.5)
+            local clipHalf = Vector2(max(clipRect.zw * 0.5,Vector2(0.0,0.0)))
+            local clipPoint = Vector2(pixelPosition - clipCenter)
+            local clipRadius = clipRadii.x
+            if clipPoint.x >= 0.0 and clipPoint.y < 0.0 then clipRadius = clipRadii.y end
+            if clipPoint.x >= 0.0 and clipPoint.y >= 0.0 then clipRadius = clipRadii.z end
+            if clipPoint.x < 0.0 and clipPoint.y >= 0.0 then clipRadius = clipRadii.w end
+            local clipQ = Vector2(abs(clipPoint) - clipHalf + Vector2(clipRadius,clipRadius))
+            local clipDistance = Number(min(max(clipQ.x,clipQ.y),0.0) + length(max(clipQ,Vector2(0.0,0.0))) - clipRadius)
+            local clipAA = Number(max(fwidth(clipDistance),0.75))
+            clipCoverage = 1.0 - smoothstep(-clipAA,clipAA,clipDistance)
+            if clipCoverage <= 0.001 then discard end
+        end
+
+        local center = Vector2(boxRect.xy + boxRect.zw * 0.5)
+        local halfSize = Vector2(max(boxRect.zw * 0.5,Vector2(0.0,0.0)))
+        local radius = Number(max(max(cornerRadii.x,cornerRadii.y),max(cornerRadii.z,cornerRadii.w)))
+        local point = Vector2(pixelPosition - center)
+        local q = Vector2(abs(point) - halfSize + Vector2(radius,radius))
+        local distanceValue = Number(min(max(q.x,q.y),0.0) + length(max(q,Vector2(0.0,0.0))) - radius)
+        local shapeMode = extra2.y
+
+        if shapeMode > 0.5 and shapeMode < 1.5 then
+            distanceValue = length(point) - min(halfSize.x,halfSize.y)
+        else if shapeMode > 1.5 and shapeMode < 2.5 then
+            local segment = geometry.zw - geometry.xy
+            local fromStart = pixelPosition - geometry.xy
+            local amount = Number(clamp(dot(fromStart,segment) / max(dot(segment,segment),0.00001),0.0,1.0))
+            distanceValue = length(fromStart - segment * amount) - max(extra2.z * 0.5,0.5)
+        else if shapeMode > 2.5 and shapeMode < 3.5 then
+            local safeHalf = Vector2(max(halfSize,Vector2(0.001,0.001)))
+            distanceValue = (length(point / safeHalf) - 1.0) * min(safeHalf.x,safeHalf.y)
+        end
+
+        local aa = Number(max(fwidth(distanceValue),0.75))
+        local bodyAlpha = Number(1.0 - smoothstep(-aa,aa,distanceValue))
+
+        local shadowCenter = Vector2(center + shadowParams.xy)
+        local shadowHalf = Vector2(halfSize + Vector2(shadowParams.w,shadowParams.w))
+        local shadowPoint = Vector2(pixelPosition - shadowCenter)
+        local shadowQ = Vector2(abs(shadowPoint) - shadowHalf + Vector2(radius,radius))
+        local shadowDistance = Number(min(max(shadowQ.x,shadowQ.y),0.0) + length(max(shadowQ,Vector2(0.0,0.0))) - radius)
+        local blur = Number(max(shadowParams.z,0.001))
+        local shadowAlpha = Number((1.0 - smoothstep(-aa,blur,shadowDistance)) * shadowColor.a)
+
+        local normalized = Vector2((pixelPosition - boxRect.xy) / max(boxRect.zw,Vector2(1.0,1.0)))
+        local gradient = Number(normalized.y)
+        if misc.y > 0.5 and misc.y < 1.5 then
+            local angle = Number(radians(misc.z))
+            local direction = Vector2(cos(angle),sin(angle))
+            gradient = clamp(dot(normalized - Vector2(0.5,0.5),direction) + 0.5,0.0,1.0)
+        else if misc.y > 1.5 then
+            gradient = clamp(length((normalized - Vector2(0.5,0.5)) * 2.0),0.0,1.0)
+        end
+        local fill = mix(backgroundA,backgroundB,gradient)
+
+        local borderWidth = Number(max(max(borderWidths.x,borderWidths.y),max(borderWidths.z,borderWidths.w)))
+        local innerAlpha = Number(1.0 - smoothstep(-aa,aa,distanceValue + borderWidth))
+        local borderAlpha = Number(max(0.0,bodyAlpha - innerAlpha))
+        local borderColor = extra
+        if borderColor.a <= 0.001 then
+            borderColor = Vector4(fill.rgb,1.0)
+        end
+
+        local alpha = Number(fill.a * innerAlpha + borderColor.a * borderAlpha)
+        local rgb = Vector3(fill.rgb * innerAlpha + borderColor.rgb * borderAlpha)
+        local shadowOnly = Number(max(0.0,shadowAlpha - bodyAlpha))
+        rgb = rgb + shadowColor.rgb * shadowOnly
+        alpha = alpha + shadowOnly
+
+        local outlineWidth = Number(max(misc.w,0.0))
+        if outlineWidth > 0.0 then
+            local outlineAlpha = Number((1.0 - smoothstep(-aa,aa,distanceValue - outlineWidth)) - bodyAlpha)
+            outlineAlpha = max(outlineAlpha,0.0) * extra.a
+            rgb = rgb + extra.rgb * outlineAlpha
+            alpha = alpha + outlineAlpha
+        end
+
+        alpha = alpha * misc.x
+        if alpha <= 0.001 then
+                discard
+            end
+        finalColor = Color4(rgb,alpha)
+    end
+end
+end

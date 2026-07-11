@@ -1,0 +1,74 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "shaders/shadows.lssl" as Shadows
+use "shaders/reflections.lssl" as Reflections
+use "shaders/gi.lssl" as GI
+use "shaders/ao.lssl" as AO
+
+fn title_for(scene,debug_view)
+    if scene == 1 and not debug_view then return "48 - RT Shadows | FINAL | 1-4 scenes, Space debug" end
+    if scene == 1 then return "48 - RT Shadows | DEBUG | 1-4 scenes, Space debug" end
+    if scene == 2 and not debug_view then return "48 - RT Reflections | FINAL | 1-4 scenes, Space debug" end
+    if scene == 2 then return "48 - RT Reflections | DEBUG | 1-4 scenes, Space debug" end
+    if scene == 3 and not debug_view then return "48 - RT Global Illumination | FINAL | 1-4 scenes, Space debug" end
+    if scene == 3 then return "48 - RT Global Illumination | DEBUG | 1-4 scenes, Space debug" end
+    if not debug_view then return "48 - RT Ambient Occlusion | FINAL | 1-4 scenes, Space debug" end
+    return "48 - RT Ambient Occlusion | DEBUG | 1-4 scenes, Space debug"
+end
+
+fn main()
+    LSG.use_vulkan()
+    LSG.set_ray_tracing(true)
+    local window = LSG.open("48 - RT Shadows | FINAL | 1-4 scenes, Space debug",960,540)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+
+    local shadows = Shadows.create()
+    local reflections = Reflections.create()
+    local gi = GI.create()
+    local ao = AO.create()
+    if not shadows.ready() then return LSG.show_error(shadows.error()) end
+    if not reflections.ready() then return LSG.show_error(reflections.error()) end
+    if not gi.ready() then return LSG.show_error(gi.error()) end
+    if not ao.ready() then return LSG.show_error(ao.error()) end
+
+    local screen = LSG.empty_mesh(3)
+    if not screen.ready() then return LSG.show_error(screen.error()) end
+    local rayTarget = LSG.framebuffer(720,405)
+    if not rayTarget.ready() then return LSG.show_error(rayTarget.error()) end
+    local scene = 1
+    local debug_view = false
+    local space_was_down = false
+
+    while window.running() do
+        local changed = false
+        if window.is_key_down(LSG.Key.One) and scene ~= 1 then scene = 1 changed = true end
+        if window.is_key_down(LSG.Key.Two) and scene ~= 2 then scene = 2 changed = true end
+        if window.is_key_down(LSG.Key.Three) and scene ~= 3 then scene = 3 changed = true end
+        if window.is_key_down(LSG.Key.Four) and scene ~= 4 then scene = 4 changed = true end
+        local space_down = window.is_key_down(LSG.Key.Space)
+        if space_down and not space_was_down then debug_view = not debug_view changed = true end
+        space_was_down = space_down
+        if changed then window.set_title(title_for(scene,debug_view)) end
+
+        rayTarget.begin(0.01,0.015,0.025)
+        local shader = shadows
+        if scene == 2 then shader = reflections end
+        if scene == 3 then shader = gi end
+        if scene == 4 then shader = ao end
+        shader.bind()
+        if debug_view then shader.number("debugView",1.0) else shader.number("debugView",0.0) end
+        screen.draw()
+        rayTarget.display(window,LSG.LINEAR)
+        window.end()
+    end
+
+    rayTarget.destroy()
+    screen.destroy()
+    ao.destroy()
+    gi.destroy()
+    reflections.destroy()
+    shadows.destroy()
+    window.destroy()
+    return 0
+end

@@ -1,0 +1,23 @@
+shader Cube
+vertex
+    input position = Vector3
+    output color = Color3
+    uniform time = Number
+
+    main = fn()
+        local sine = sin(time)
+        local cosine = cos(time)
+        local rotated = Vector3(cosine * position.x + sine * position.z,position.y,-sine * position.x + cosine * position.z)
+        color = position * 0.5 + 0.5
+        screen.position = Vector4(rotated.x * 0.55,rotated.y * 0.55,rotated.z * 0.25,1.0)
+    end
+end
+fragment
+    input color = Color3
+    output finalColor = Color4
+
+    main = fn()
+        finalColor = Color4(color,1.0)
+    end
+end
+end

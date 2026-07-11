@@ -1,0 +1,15 @@
+shader VulkanGi
+vulkan
+raytracing gi
+fragment
+    uniform debugView = Number
+    output finalColor = Color4
+    main = fn()
+        if debugView > 0.5 then
+            finalColor = ray.debug()
+        else
+            finalColor = ray.render()
+        end
+    end
+end
+end

@@ -11,6 +11,6 @@ fn main() -> i32
         if total > 1000000.0 then total = total * 0.000001 end
         repeat = repeat + 1
     end
-    if total < 0.0 then return 1 end
+    if total < 991000.0 or total > 992000.0 then return 1 end
     return 0
 end

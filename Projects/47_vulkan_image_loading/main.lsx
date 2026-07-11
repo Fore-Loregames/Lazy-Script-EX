@@ -1,0 +1,37 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "shaders/image.lssl" as Image
+
+fn main()
+    LSG.use_vulkan()
+    local window = LSG.open("47 - Vulkan image loading",960,540)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+    local texture = LSG.load_ui_texture("assets/loaded_texture.png")
+    if not texture.ready() then return LSG.show_error(texture.error()) end
+    local shader = Image.create()
+    if not shader.ready() then return LSG.show_error(shader.error()) end
+    local vertices = {
+        -0.82,-0.82, 0.0,1.0,
+         0.82,-0.82, 1.0,1.0,
+        -0.82, 0.82, 0.0,0.0,
+        -0.82, 0.82, 0.0,0.0,
+         0.82,-0.82, 1.0,1.0,
+         0.82, 0.82, 1.0,0.0
+    }
+    local quad = LSG.mesh(vertices,Image.vertex_layout)
+    if not quad.ready() then return LSG.show_error(quad.error()) end
+    while window.running() do
+        window.begin(0.01,0.015,0.025)
+        shader.bind()
+        texture.bind(0)
+        quad.draw()
+        window.end()
+    end
+    quad.destroy()
+    vertices.destroy()
+    shader.destroy()
+    texture.destroy()
+    window.destroy()
+    return 0
+end

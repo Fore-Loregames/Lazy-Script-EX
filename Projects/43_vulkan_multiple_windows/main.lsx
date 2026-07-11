@@ -1,0 +1,21 @@
+use "@LazyScript/LSG.lsx" as LSG
+fn main()
+    LSG.use_vulkan()
+    local first = LSG.open("43A - Vulkan window A",640,400)
+    if first.ready() then first.set_vsync(false) end
+    if not first.ready() then return LSG.show_error(first.error()) end
+    local second = LSG.open("43B - Vulkan window B",640,400)
+    if second.ready() then second.set_vsync(false) end
+    if not second.ready() then return LSG.show_error(second.error()) end
+    while first.running() and second.running() do
+        first.activate()
+        first.begin(0.20,0.04,0.06)
+        first.end()
+        second.activate()
+        second.begin(0.03,0.08,0.22)
+        second.end()
+    end
+    second.destroy()
+    first.destroy()
+    return 0
+end

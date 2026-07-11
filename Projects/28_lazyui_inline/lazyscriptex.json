@@ -1,6 +1,6 @@
 {
   "entry": "main.lsx",
   "output": "build/lazyui-inline.exe",
-  "subsystem": "console",
+  "subsystem": "windows",
   "optimization": 6
 }

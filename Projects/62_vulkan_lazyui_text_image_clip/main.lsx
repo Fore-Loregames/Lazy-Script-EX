@@ -1,0 +1,168 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
+use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
+
+lscss .root = {
+    width = "100vw"
+    height = "100vh"
+    padding = "28px"
+    gap = "18px"
+    background = "linear-gradient(135deg, #111827, #1d2940)"
+    color = "#f4f7ff"
+}
+
+lscss .title = {
+    font_size = "30px"
+    color = "#ffffff"
+}
+
+lscss .note = {
+    font_size = "16px"
+    color = "#a9bad7"
+}
+
+lscss .row = {
+    flex_direction = "row"
+    gap = "18px"
+    flex_grow = 1
+}
+
+lscss .card = {
+    flex_grow = 1
+    padding = "18px"
+    gap = "12px"
+    background = "#172237"
+    border = "1px #425677"
+    border_radius = "14px"
+    box_shadow = "0 10 28 0 rgba(0,0,0,0.35)"
+}
+
+lscss .clip = {
+    width = "320px"
+    height = "220px"
+    overflow = "hidden"
+    border = "3px #7da7ff"
+    border_radius = "24px"
+    background = "#08101d"
+}
+
+lscss #test-image = {
+    width = "480px"
+    height = "320px"
+}
+
+lscss .button = {
+    width = "180px"
+    padding = "10px 16px"
+    background = "linear-gradient(90deg, #3b82f6, #7c5cff)"
+    border = "1px #9ab8ff"
+    border_radius = "10px"
+    color = "#ffffff"
+    cursor = "pointer"
+    hover = {
+        background = "linear-gradient(90deg, #55a0ff, #9475ff)"
+    }
+}
+
+lshtml test_view() = {(
+    <ui class="root">
+        <h1 class="title">Vulkan LazyUI text, image, clipping, and input</h1>
+        <span class="note">This page uses the real retained LazyUI renderer through LSG Vulkan.</span>
+        <row class="row">
+            <column class="card">
+                <h2>Real SDF text</h2>
+                <span id="status">The quick brown fox jumps over the lazy dog. 0123456789</span>
+                <button class="button" onclick={button_clicked}>Click this button</button>
+            </column>
+            <column class="card">
+                <h2>Backend-neutral image clipped by a rounded panel</h2>
+                <panel class="clip">
+                    <img id="test-image" />
+                </panel>
+            </column>
+        </row>
+    </ui>
+)}
+
+fn make_checker()
+    local pixels = LSG.pixel_image(128,128)
+    local y = 0
+    while y < 128 do
+        local x = 0
+        while x < 128 do
+            local checker = ((x / 16) + (y / 16)) % 2
+            if checker == 0 then
+                pixels.set(x,y,LSG.rgba(255,105,135,255))
+            else
+                pixels.set(x,y,LSG.rgba(70,210,245,255))
+            end
+            x += 1
+        end
+        y += 1
+    end
+    return pixels
+end
+
+fn main()
+    LSG.use_vulkan()
+    local window = LSG.open("62 - Vulkan LazyUI text image clipping",1100,650)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return fail(window.error()) end
+
+    local renderer = UIRenderer.create(null,64)
+    if not renderer.ready then return fail("LazyUI Vulkan renderer initialization failed.") end
+
+    local root = test_view()
+    local pixels = make_checker()
+    local texture = LSG.texture_from_pixels(pixels)
+    pixels.destroy()
+    if not texture.ready() then return fail(texture.error()) end
+
+    local image = root.find_id(UI.hash("test-image"))
+    if image == null then return fail("The test image element was not created.") end
+    image.set_texture(texture,128,128)
+
+    local document = UI.document(root)
+    local input = UI.connect_graphics_input(window,document)
+    local logical = LSG.window_size()
+    local cursor = LSG.cursor()
+    local mouse_down = false
+
+    while window.running() do
+        logical.refresh(window)
+        document.resize(window.width,window.height)
+        window.cursor_position(cursor)
+        document.pointer_move_scaled(cursor.x,cursor.y,logical.width,logical.height)
+        local pressed = window.is_mouse_down(LSG.Mouse.Left)
+        if pressed and not mouse_down then document.pointer_down_button(LSG.Mouse.Left) end
+        if not pressed and mouse_down then document.pointer_up_button(LSG.Mouse.Left) end
+        mouse_down = pressed
+
+        window.begin(0.025,0.035,0.055)
+        renderer.begin(window.width,window.height)
+        renderer.submit(root)
+        renderer.flush()
+        window.end()
+    end
+
+    input.destroy()
+    cursor.destroy()
+    logical.destroy()
+    document.destroy()
+    texture.destroy()
+    renderer.destroy()
+    window.destroy()
+    return 0
+end
+
+fn button_clicked(element,event,context)
+    local root = element.parent.parent.parent
+    local status = root.find_id(UI.hash("status"))
+    if status ~= null then
+        status.text = "Vulkan input callback worked. Text, images, clipping, and controls share one renderer."
+        status.mark_layout_dirty()
+    end
+    return 0
+end
+
+fn fail(message) return LSG.show_error(message) end

@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/vulkan-lazyui-node-graph.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

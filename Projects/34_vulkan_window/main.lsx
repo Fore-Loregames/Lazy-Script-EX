@@ -1,0 +1,17 @@
+use "@LazyScript/LSG.lsx" as LSG
+
+fn main()
+    LSG.use_vulkan()
+
+    local window = LSG.open("34 - Vulkan window",960,540)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+
+    while window.running() do
+        window.begin(0.025,0.035,0.065)
+        window.end()
+    end
+
+    window.destroy()
+    return 0
+end

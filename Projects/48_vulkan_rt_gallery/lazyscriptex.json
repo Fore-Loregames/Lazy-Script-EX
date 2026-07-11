@@ -1,0 +1,7 @@
+{
+  "name": "48_vulkan_rt_gallery",
+  "entry": "main.lsx",
+  "output": "build/48_vulkan_rt_gallery.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

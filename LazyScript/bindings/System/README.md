@@ -52,6 +52,26 @@ Available primitives:
 
 A context object must remain alive until every worker using it has completed. Closing a `Thread` handle without joining detaches the handle but does not terminate the native thread.
 
+
+## Persistent parallel kernels
+
+```lsx
+use "@LazyScript/bindings/System/Parallel.lsx" as Parallel
+```
+
+`Parallel.lsx` creates a fixed native worker set once, assigns large ranges through an atomic chunk counter, and lets the calling thread participate. `pool.run(callback, context, count, grain)` invokes the callback with `[begin, finish)` ranges. Dispatches are serialized per pool, and all workers are joined during `destroy()`. This is intended for independent procedural generation, simulation, transforms, image processing, and other large loops.
+
+```lsx
+use "@LazyScript/bindings/System/KernelRuntime.lsx" as Kernels
+
+local kernels = Kernels.create()
+kernels.set_grain(4096)
+local completed = kernels.run_cpu(generate_chunk, world, cellCount)
+kernels.destroy()
+```
+
+`KernelRuntime.lsx` provides one policy object for scalar, SIMD, worker-pool, and generated-compute thresholds. CPU execution remains explicit and safe. `strategy(count, computeReady)` reports the preferred path so an engine can dispatch a generated LSSL module only when its buffers are already suitable for GPU ownership.
+
 ## Native files
 
 ```lsx

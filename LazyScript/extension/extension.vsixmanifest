@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+	<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
+		<Metadata>
+			<Identity Language="en-US" Id="lazyscriptex-native-gamekit" Version="0.21.5" Publisher="nissyokugames" />
+			<DisplayName>LazyScriptEX Native GameKit</DisplayName>
+			<Description xml:space="preserve">LazyScriptEX language support with clear LSG front-end names, complete OpenGL/Vulkan LSG and LSSL APIs, autocomplete, signatures, hovers, formatting, diagnostics, and the beginner API browser.</Description>
+			<Tags>LazyScriptEX,lsx,game development,native,threading,sockets,HTTP,GLFW,OpenGL,OpenAL,JSON,file I/O,logging,images,textures,SDF fonts,GLM,vector math,matrix math,quaternions,cameras,LazyUI,LSHTML,LSCSS,retained UI,canvas,game UI,editor UI,declarative canvas,LSG,LSSL,shader language,GLSL,graphics,Vulkan,SPIR-V,ray tracing,snippet,keybindings,lazyscriptex,LSX,__ext_lsx,__ext_lssl</Tags>
+			<Categories>Programming Languages,Other</Categories>
+			<GalleryFlags>Public</GalleryFlags>
+			
+			<Properties>
+				<Property Id="Microsoft.VisualStudio.Code.Engine" Value="^1.85.0" />
+				<Property Id="Microsoft.VisualStudio.Code.ExtensionDependencies" Value="" />
+				<Property Id="Microsoft.VisualStudio.Code.ExtensionPack" Value="" />
+				<Property Id="Microsoft.VisualStudio.Code.ExtensionKind" Value="workspace" />
+				<Property Id="Microsoft.VisualStudio.Code.LocalizedLanguages" Value="" />
+				<Property Id="Microsoft.VisualStudio.Code.EnabledApiProposals" Value="" />
+				
+				<Property Id="Microsoft.VisualStudio.Code.ExecutesCode" Value="true" />
+				
+				
+				
+				
+				
+				
+				<Property Id="Microsoft.VisualStudio.Services.GitHubFlavoredMarkdown" Value="true" />
+				<Property Id="Microsoft.VisualStudio.Services.Content.Pricing" Value="Free"/>
+
+				
+				
+			</Properties>
+			<License>extension/LICENSE.txt</License>
+			<Icon>extension/icons/lsx.png</Icon>
+		</Metadata>
+		<Installation>
+			<InstallationTarget Id="Microsoft.VisualStudio.Code"/>
+		</Installation>
+		<Dependencies/>
+		<Assets>
+			<Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true" />
+			<Asset Type="Microsoft.VisualStudio.Services.Content.Details" Path="extension/readme.md" Addressable="true" />
+<Asset Type="Microsoft.VisualStudio.Services.Content.License" Path="extension/LICENSE.txt" Addressable="true" />
+<Asset Type="Microsoft.VisualStudio.Services.Icons.Default" Path="extension/icons/lsx.png" Addressable="true" />
+		</Assets>
+	</PackageManifest>

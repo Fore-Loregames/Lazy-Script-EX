@@ -1,0 +1,451 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
+use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
+
+const EditorProps = {
+    status = "Ready"
+}
+
+lscss .editor = {
+    width = "100vw"
+    height = "100vh"
+    background = "#0b1018"
+    color = "#dce6f7"
+}
+lscss .menubar = {
+    height = "31px"
+    padding = "5px 8px"
+    flex_direction = "row"
+    gap = "12px"
+    background = "#1c2532"
+    border_bottom = "1px #34445b"
+}
+lscss menuitem = {
+    padding = "3px 7px"
+    border_radius = "4px"
+    hover = { background = "#334663" }
+}
+lscss .toolbar = {
+    height = "44px"
+    padding = "6px 8px"
+    flex_direction = "row"
+    align_items = "center"
+    gap = "6px"
+    background = "#161f2c"
+    border_bottom = "1px #2d3b50"
+}
+lscss .tool = {
+    min_width = "36px"
+    height = "31px"
+    padding = "6px 9px"
+    background = "#25334a"
+    border = "1px #405574"
+    border_radius = "5px"
+    text_align = "center"
+    hover = { background = "#334867"; border = "1px #6685b3" }
+}
+lscss .play = { background = "#244b3b"; border = "1px #3f8064" }
+lscss .workspace = {
+    flex_direction = "row"
+    gap = "4px"
+    flex_grow = 1
+    min_height = "0px"
+    padding = "4px"
+}
+lscss .dock = {
+    background = "#121a26"
+    border = "1px #2f3d52"
+    border_radius = "6px"
+    min_height = "0px"
+    overflow = "hidden"
+}
+lscss .left = { width = "250px"; min_height = "0px" }
+lscss .center = {
+    flex_grow = 1
+    min_width = "0px"
+    min_height = "0px"
+    gap = "4px"
+}
+lscss .right = { width = "340px"; min_height = "0px" }
+lscss .panel-head = {
+    height = "31px"
+    flex_shrink = 0
+    padding = "6px 9px"
+    flex_direction = "row"
+    align_items = "center"
+    background = "#202c3e"
+    border_bottom = "1px #354761"
+    color = "#f1f5ff"
+}
+lscss .hierarchy = {
+    flex_grow = 1
+    min_height = "0px"
+    padding = "4px 20px 4px 4px"
+    gap = "2px"
+    overflow_x = "hidden"
+    overflow_y = "scroll"
+}
+lscss treeitem = {
+    height = "24px"
+    flex_shrink = 0
+    padding = "4px 7px"
+    border_radius = "4px"
+    hover = { background = "#263750" }
+    selected = { background = "#35557e" }
+}
+lscss .indent-1 = { padding_left = "20px" }
+lscss .indent-2 = { padding_left = "34px" }
+lscss .scene = {
+    flex_grow = 1
+    min_height = "0px"
+    background = "#090e15"
+    border = "1px #2e3d54"
+    border_radius = "5px"
+    overflow = "hidden"
+}
+lscss .scene-grid = {
+    background = "linear-gradient(135deg, #19253a, #0c111a)"
+    border = "1px #415a80"
+    border_radius = "12px"
+}
+lscss .bottom = {
+    height = "216px"
+    min_height = "0px"
+    flex_direction = "row"
+    gap = "4px"
+}
+lscss .project = { flex_grow = 1; min_width = "0px"; min_height = "0px" }
+lscss .console = { width = "39%"; min_height = "0px" }
+lscss .asset-scroll = {
+    flex_grow = 1
+    min_height = "0px"
+    padding = "7px 20px 7px 7px"
+    overflow_x = "hidden"
+    overflow_y = "scroll"
+}
+lscss .asset-grid = {
+    display = "grid"
+    grid_columns = 4
+    gap = "7px"
+    flex_shrink = 0
+}
+lscss thumbnail = {
+    height = "74px"
+    flex_shrink = 0
+    padding = "9px"
+    background = "#1a2535"
+    border = "1px #344963"
+    border_radius = "7px"
+    text_align = "center"
+    hover = { border = "1px #6b91c9"; background = "#263750" }
+}
+lscss .console-list = {
+    flex_grow = 1
+    min_height = "0px"
+    padding_right = "20px"
+    overflow_x = "hidden"
+    overflow_y = "scroll"
+}
+lscss .inspector = {
+    flex_grow = 1
+    min_height = "0px"
+    padding = "7px 20px 7px 7px"
+    gap = "6px"
+    overflow_x = "hidden"
+    overflow_y = "scroll"
+}
+lscss componentheader = {
+    height = "31px"
+    flex_shrink = 0
+    padding = "6px 8px"
+    background = "#26354b"
+    border = "1px #405674"
+    border_radius = "5px"
+}
+lscss property = {
+    min_height = "38px"
+    flex_shrink = 0
+    padding = "4px 7px"
+    flex_direction = "row"
+    align_items = "center"
+    gap = "7px"
+    background = "#171f2c"
+    border_bottom = "1px #2a374a"
+}
+lscss .asset-property = { min_height = "58px" }
+lscss .property-label = {
+    width = "82px"
+    flex_shrink = 0
+    color = "#aebdd2"
+}
+lscss .vector-row = {
+    flex_direction = "row"
+    flex_grow = 1
+    min_width = "0px"
+    gap = "4px"
+}
+lscss .axis = {
+    flex_direction = "row"
+    flex_grow = 1
+    min_width = "0px"
+    height = "30px"
+    gap = "0px"
+}
+lscss .axis-label = {
+    width = "20px"
+    flex_shrink = 0
+    padding = "6px 4px"
+    background = "#26354b"
+    border = "1px #405674"
+    border_right = "0px rgba(0,0,0,0)"
+    text_align = "center"
+}
+lscss .axis-value = {
+    flex_grow = 1
+    min_width = "0px"
+    width = "0px"
+    box_sizing = "border-box"
+    border_radius = "0px 4px 4px 0px"
+}
+lscss .wide-value = {
+    flex_grow = 1
+    min_width = "0px"
+    width = "0px"
+    box_sizing = "border-box"
+}
+lscss input, search, number, select = {
+    height = "30px"
+    min_width = "0px"
+    padding = "5px 7px"
+    box_sizing = "border-box"
+    background = "#0d141f"
+    border = "1px #354760"
+    border_radius = "4px"
+    color = "#dce7fa"
+    focus = { border = "2px #6696ff" }
+}
+lscss checkbox = {
+    height = "28px"
+    padding = "4px"
+    background = "rgba(0,0,0,0)"
+    color = "#dce7fa"
+}
+lscss .asset-picker = {
+    flex_direction = "row"
+    align_items = "center"
+    flex_grow = 1
+    min_width = "0px"
+    height = "48px"
+    padding = "5px"
+    gap = "7px"
+    background = "#0d141f"
+    border = "1px #354760"
+    border_radius = "6px"
+    hover = { border = "1px #6487b8"; background = "#111c2b" }
+}
+lscss .asset-icon = {
+    width = "34px"
+    height = "34px"
+    flex_shrink = 0
+    padding = "8px"
+    text_align = "center"
+    background = "#243a58"
+    border = "1px #4c6d99"
+    border_radius = "5px"
+    color = "#dceaff"
+}
+lscss .material-icon = { background = "#4b315f"; border = "1px #7e55a0" }
+lscss .script-icon = { background = "#2f523f"; border = "1px #4f8867" }
+lscss .audio-icon = { background = "#57422a"; border = "1px #8f6a3c" }
+lscss .asset-copy = { flex_grow = 1; min_width = "0px"; gap = "1px" }
+lscss .asset-title = { color = "#e6efff"; font_size = "13px" }
+lscss .asset-subtitle = { color = "#7f93b0"; font_size = "10px" }
+lscss .picker-button = {
+    width = "29px"
+    height = "29px"
+    flex_shrink = 0
+    padding = "5px"
+    background = "#25364f"
+    border = "1px #496386"
+    border_radius = "5px"
+    text_align = "center"
+    hover = { background = "#334c70" }
+}
+lscss .tabs = {
+    height = "31px"
+    flex_shrink = 0
+    flex_direction = "row"
+    gap = "2px"
+    background = "#111925"
+}
+lscss tab = {
+    padding = "6px 10px"
+    background = "#1a2535"
+    border = "1px #31435d"
+    selected = { background = "#2f4668"; border = "1px #6283b5" }
+}
+lscss consoleentry = {
+    height = "24px"
+    flex_shrink = 0
+    padding = "4px 7px"
+    font_size = "12px"
+    border_bottom = "1px #243147"
+}
+lscss .warn = { color = "#ffd37a" }
+lscss .error = { color = "#ff8b9a" }
+lscss .success = { color = "#7fe0aa" }
+lscss .status = {
+    height = "27px"
+    flex_shrink = 0
+    padding = "5px 9px"
+    flex_direction = "row"
+    background = "#1b2636"
+    border_top = "1px #34445d"
+    color = "#98aac5"
+    font_size = "12px"
+}
+
+lshtml workspace(props) = {(
+    <ui class="editor">
+        <menubar class="menubar"><menuitem>File</menuitem><menuitem>Edit</menuitem><menuitem>Assets</menuitem><menuitem>GameObject</menuitem><menuitem>Window</menuitem><menuitem>Help</menuitem></menubar>
+        <toolbar class="toolbar"><button class="tool">W</button><button class="tool">E</button><button class="tool">R</button><separator /><button class="tool play">Play</button><button class="tool">Pause</button><spacer /><badge>Local</badge><badge>Shaded</badge></toolbar>
+        <row class="workspace">
+            <dockpanel class="dock left">
+                <titlebar class="panel-head"><span>Hierarchy</span><spacer /><badge>34</badge></titlebar>
+                <hierarchy class="hierarchy">
+                    <treeitem selected>v Main Scene</treeitem>
+                    <treeitem class="indent-1">Directional Light</treeitem><treeitem class="indent-1">Global Volume</treeitem><treeitem class="indent-1">Reflection Probe</treeitem>
+                    <treeitem>v Environment</treeitem><treeitem class="indent-1">Terrain</treeitem><treeitem class="indent-1">Water Plane</treeitem><treeitem class="indent-1">Sky Controller</treeitem><treeitem class="indent-1">Fog Volume</treeitem>
+                    <treeitem>v Characters</treeitem><treeitem class="indent-1">Player</treeitem><treeitem class="indent-2">Body Mesh</treeitem><treeitem class="indent-2">Animator</treeitem><treeitem class="indent-2">Camera Target</treeitem><treeitem class="indent-1">Companion</treeitem><treeitem class="indent-2">Body Mesh</treeitem><treeitem class="indent-2">AI Controller</treeitem>
+                    <treeitem>v Gameplay Systems</treeitem><treeitem class="indent-1">Quest Manager</treeitem><treeitem class="indent-1">Dialogue Manager</treeitem><treeitem class="indent-1">Inventory Manager</treeitem><treeitem class="indent-1">Save System</treeitem><treeitem class="indent-1">LazyBehavior Host</treeitem>
+                    <treeitem>v Props</treeitem><treeitem class="indent-1">Farm House</treeitem><treeitem class="indent-1">Well</treeitem><treeitem class="indent-1">Barn</treeitem><treeitem class="indent-1">Fence Group</treeitem><treeitem class="indent-1">Market Stall</treeitem><treeitem class="indent-1">Road Signs</treeitem><treeitem class="indent-1">Bridge</treeitem><treeitem class="indent-1">Windmill</treeitem><treeitem class="indent-1">Lantern Group</treeitem><treeitem class="indent-1">Ambient Audio</treeitem>
+                </hierarchy>
+            </dockpanel>
+            <column class="center">
+                <dockpanel class="dock scene">
+                    <tabs class="tabs"><tab selected>Scene</tab><tab>Game</tab><tab>Lighting</tab><spacer /><badge>Perspective</badge></tabs>
+                    <canvas class="scene">
+                        <rect class="scene-grid" x=55 y=40 width=620 height=330 />
+                        <line x1=80 y1=300 x2=640 y2=300 stroke="#49617f" stroke_width=2 />
+                        <line x1=360 y1=65 x2=360 y2=340 stroke="#49617f" stroke_width=2 />
+                        <circle cx=360 cy=205 r=72 fill="#3e82ff" />
+                        <canvas-text x=90 y=80 fill="#dce9ff" font_size=20>Scene viewport and gizmo canvas</canvas-text>
+                    </canvas>
+                </dockpanel>
+                <row class="bottom">
+                    <projectbrowser class="dock project">
+                        <row class="panel-head"><breadcrumb>Assets / Environment / Materials</breadcrumb><spacer /><search placeholder="Search assets..." /></row>
+                        <column class="asset-scroll">
+                            <grid class="asset-grid">
+                                <thumbnail>Grass</thumbnail><thumbnail>Rock</thumbnail><thumbnail>Water</thumbnail><thumbnail>Sky</thumbnail>
+                                <thumbnail>Tree</thumbnail><thumbnail>Path</thumbnail><thumbnail>House</thumbnail><thumbnail>Fence</thumbnail>
+                                <thumbnail>Mud</thumbnail><thumbnail>Roof</thumbnail><thumbnail>Glass</thumbnail><thumbnail>Metal</thumbnail>
+                                <thumbnail>Lantern</thumbnail><thumbnail>Flower</thumbnail><thumbnail>Bridge</thumbnail><thumbnail>Windmill</thumbnail>
+                                <thumbnail>Hay</thumbnail><thumbnail>Stone Wall</thumbnail><thumbnail>River Foam</thumbnail><thumbnail>Clouds</thumbnail>
+                            </grid>
+                        </column>
+                    </projectbrowser>
+                    <console class="dock console">
+                        <tabs class="tabs"><tab selected>Console</tab><tab>Profiler</tab><tab>Jobs</tab></tabs>
+                        <column class="console-list">
+                            <consoleentry class="success">Renderer initialized in 18.2 ms</consoleentry><consoleentry>Loaded scene MainScene.lsx</consoleentry>
+                            <consoleentry>Compiled 12 LazyBehavior scripts</consoleentry><consoleentry>Uploaded 148 material instances</consoleentry>
+                            <consoleentry class="warn">Warning: reflection probe uses fallback cubemap</consoleentry><consoleentry>Terrain streaming cell 4,7 ready</consoleentry>
+                            <consoleentry>Audio mixer initialized</consoleentry><consoleentry>Navigation mesh rebuilt in 6.4 ms</consoleentry>
+                            <consoleentry>Saved autosave/MainScene_004.scene</consoleentry><consoleentry class="error">Example error row for styling</consoleentry>
+                            <consoleentry>Shader cache hit: 97.3%</consoleentry><consoleentry>UI batches: 4 draws</consoleentry>
+                            <consoleentry>Hierarchy virtualization active</consoleentry><consoleentry>Editor frame complete</consoleentry>
+                        </column>
+                    </console>
+                </row>
+            </column>
+            <dockpanel class="dock right">
+                <titlebar class="panel-head"><span>Inspector</span><spacer /><badge>Player</badge></titlebar>
+                <propertyeditor class="inspector">
+                    <componentheader>Transform</componentheader>
+                    <property><label class="property-label">Position</label><row class="vector-row"><row class="axis"><span class="axis-label">X</span><number class="axis-value" value="0.0" /></row><row class="axis"><span class="axis-label">Y</span><number class="axis-value" value="1.0" /></row><row class="axis"><span class="axis-label">Z</span><number class="axis-value" value="0.0" /></row></row></property>
+                    <property><label class="property-label">Rotation</label><row class="vector-row"><row class="axis"><span class="axis-label">X</span><number class="axis-value" value="0.0" /></row><row class="axis"><span class="axis-label">Y</span><number class="axis-value" value="35.0" /></row><row class="axis"><span class="axis-label">Z</span><number class="axis-value" value="0.0" /></row></row></property>
+                    <property><label class="property-label">Scale</label><row class="vector-row"><row class="axis"><span class="axis-label">X</span><number class="axis-value" value="1.0" /></row><row class="axis"><span class="axis-label">Y</span><number class="axis-value" value="1.0" /></row><row class="axis"><span class="axis-label">Z</span><number class="axis-value" value="1.0" /></row></row></property>
+                    <componentheader>Mesh Renderer</componentheader>
+                    <property class="asset-property"><label class="property-label">Mesh</label><row class="asset-picker"><panel class="asset-icon">M</panel><column class="asset-copy"><span class="asset-title">PlayerBody.glb</span><span class="asset-subtitle">Skinned mesh | 42,816 vertices</span></column><button class="picker-button" onclick={asset_clicked} context={props}>...</button></row></property>
+                    <property class="asset-property"><label class="property-label">Material</label><row class="asset-picker"><panel class="asset-icon material-icon">MAT</panel><column class="asset-copy"><span class="asset-title">M_PlayerSkin</span><span class="asset-subtitle">PBR material instance</span></column><button class="picker-button" onclick={asset_clicked} context={props}>...</button></row></property>
+                    <property><label class="property-label">Cast Shadows</label><checkbox checked>Enabled</checkbox></property>
+                    <property><label class="property-label">Receive Shadows</label><checkbox checked>Enabled</checkbox></property>
+                    <property><label class="property-label">Render Layer</label><select class="wide-value" value="Default"><option value="Default" selected>Default</option><option value="Characters">Characters</option><option value="Environment">Environment</option><option value="UI Preview">UI Preview</option></select></property>
+                    <componentheader>Rigidbody</componentheader>
+                    <property><label class="property-label">Mass</label><number class="wide-value" value="75.0" /></property>
+                    <property><label class="property-label">Drag</label><number class="wide-value" value="0.15" /></property>
+                    <property><label class="property-label">Use Gravity</label><checkbox checked>Enabled</checkbox></property>
+                    <property><label class="property-label">Kinematic</label><checkbox>Disabled</checkbox></property>
+                    <componentheader>Capsule Collider</componentheader>
+                    <property><label class="property-label">Center</label><row class="vector-row"><row class="axis"><span class="axis-label">X</span><number class="axis-value" value="0.0" /></row><row class="axis"><span class="axis-label">Y</span><number class="axis-value" value="0.9" /></row><row class="axis"><span class="axis-label">Z</span><number class="axis-value" value="0.0" /></row></row></property>
+                    <property><label class="property-label">Radius</label><number class="wide-value" value="0.45" /></property>
+                    <property><label class="property-label">Height</label><number class="wide-value" value="1.8" /></property>
+                    <componentheader>LazyBehavior</componentheader>
+                    <property class="asset-property"><label class="property-label">Script</label><row class="asset-picker"><panel class="asset-icon script-icon">LSX</panel><column class="asset-copy"><span class="asset-title">PlayerController.lsx</span><span class="asset-subtitle">Compiled LazyBehavior</span></column><button class="picker-button" onclick={asset_clicked} context={props}>...</button></row></property>
+                    <property><label class="property-label">Speed</label><number class="wide-value" value="6.5" /></property>
+                    <property><label class="property-label">Jump Force</label><number class="wide-value" value="8.0" /></property>
+                    <property><label class="property-label">Input Map</label><select class="wide-value" value="Player"><option value="Player" selected>Player</option><option value="UI">UI</option><option value="Vehicle">Vehicle</option></select></property>
+                    <componentheader>Audio Source</componentheader>
+                    <property class="asset-property"><label class="property-label">Clip</label><row class="asset-picker"><panel class="asset-icon audio-icon">SFX</panel><column class="asset-copy"><span class="asset-title">Footsteps_Grass.wav</span><span class="asset-subtitle">48 kHz mono clip</span></column><button class="picker-button" onclick={asset_clicked} context={props}>...</button></row></property>
+                    <property><label class="property-label">Volume</label><range class="wide-value" min=0 max=100 step=1 number-value=72 /></property>
+                    <property><label class="property-label">Spatial</label><checkbox checked>3D</checkbox></property>
+                </propertyeditor>
+            </dockpanel>
+        </row>
+        <statusbar class="status"><span id="editor-status">{props.status}</span><spacer /><span>4 instanced draws | visible independent scrollbars | SDF text</span></statusbar>
+    </ui>
+)}
+
+fn asset_clicked(element,event,props)
+    props.status = "Asset picker button clicked - hierarchy, project, console and inspector keep separate scroll state"
+    local root = element
+    while root.parent ~= null do root = root.parent end
+    local status = root.find_id(UI.hash("editor-status"))
+    if status ~= null then status.set_text(props.status) end
+    return 0
+end
+
+fn main()
+    LSG.use_vulkan()
+    local props = EditorProps.new()
+    local root = workspace(props)
+    local window = LSG.open("59 - Vulkan LazyUI editor workspace",1440,850)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return fail(window.error()) end
+    local renderer = UIRenderer.create(null,64)
+    if not renderer.ready then return fail("LazyUI Vulkan renderer initialization failed.") end
+    local document = UI.document(root)
+    local windowInput = UI.connect_graphics_input(window,document)
+    local logicalSize = LSG.window_size()
+    local cursor = LSG.cursor()
+    local mouseDown = false
+
+    while window.running() do
+        logicalSize.refresh(window)
+        document.resize(window.width,window.height)
+        window.cursor_position(cursor)
+        document.pointer_move_scaled(cursor.x,cursor.y,logicalSize.width,logicalSize.height)
+        local pressed = window.is_mouse_down(LSG.Mouse.Left)
+        if pressed and not mouseDown then document.pointer_down_button(LSG.Mouse.Left) end
+        if not pressed and mouseDown then document.pointer_up_button(LSG.Mouse.Left) end
+        mouseDown = pressed
+        document.resize(window.width,window.height)
+        window.begin(0.02,0.025,0.035)
+        renderer.begin(window.width,window.height)
+        renderer.submit(root)
+        renderer.flush()
+        window.end()
+    end
+
+    windowInput.destroy()
+    cursor.destroy()
+    logicalSize.destroy()
+    document.destroy()
+    props.destroy()
+    renderer.destroy()
+    window.destroy()
+    return 0
+end
+
+fn fail(message) return LSG.show_error(message) end

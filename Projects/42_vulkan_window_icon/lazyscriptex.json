@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/42_vulkan_window_icon.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

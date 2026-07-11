@@ -21,6 +21,8 @@ function walk(dir) {
 }
 
 function moduleName(file) {
+  if (path.resolve(file) === path.join(root, 'LSG.lsx')) return 'LSG';
+  if (path.resolve(file) === path.join(root, 'LSSL.lsx')) return 'LSSL';
   const rel = path.relative(bindingsRoot, file).replace(/\\/g, '/').replace(/\.lsx$/, '');
   if (rel === 'GLFW/GLFW') return 'GLFW';
   if (rel === 'OpenGL/OpenGL46') return 'OpenGL';
@@ -44,6 +46,8 @@ function fallbackDescription(module, kind, name, owner = '', dll = '') {
   if (kind === 'constant') return `${module} constant ${name}.`;
   if (kind === 'field') return `Native field ${qualified} with a fixed compile-time layout.`;
   if (kind === 'typed object' || kind === 'typed struct') return `Packed native LSX type ${name} with fixed field offsets and direct method calls.`;
+  if (module === 'LSG') return `Beginner-facing graphics operation ${qualified}; GLFW and OpenGL details stay inside LSG.`;
+  if (module === 'LSSL') return `Beginner-facing shader-program operation ${qualified} for compiled .lssl shaders.`;
   if (module === 'OpenGL') return `OpenGL API binding for ${name}${dll ? ` imported through ${dll}` : ''}.`;
   if (module === 'GLFW') return `GLFW window, input, monitor, or context API binding for ${name}${dll ? ` imported through ${dll}` : ''}.`;
   if (module === 'OpenAL' || module.startsWith('OpenAL/')) return `OpenAL audio API binding for ${name}${dll ? ` imported through ${dll}` : ''}.`;
@@ -65,7 +69,7 @@ function fallbackDescription(module, kind, name, owner = '', dll = '') {
   if (module === 'Math/Camera') return `Typed LSX camera operation ${qualified} built on the wrapped GLM transform and projection APIs.`;
   if (module === 'Math/OpenGL') return `Direct OpenGL uniform upload helper for wrapped GLM matrix data: ${qualified}.`;
   if (module === 'UI/LazyUI') return kind === 'method' ? `Retained LazyUI ${owner} operation ${qualified}.` : `Native LSHTML/LSCSS element, style, event, layout, or canvas operation ${qualified}.`;
-  if (module === 'UI/Renderer') return `Batched LazyUI OpenGL renderer operation ${qualified}.`;
+  if (module === 'UI/Renderer') return `Batched LazyUI LSG renderer operation ${qualified} for OpenGL or Vulkan.`;
   if (module === 'UI/ShaderSources') return `Embedded LazyUI shader source ${qualified}.`;
   if (kind === 'method') return `Method ${qualified} on a packed native LSX object.`;
   return `${module} ${kind} ${qualified}.`;
@@ -126,7 +130,8 @@ function extractObject(lines, start, module, rel, owner) {
 }
 
 const entries = [];
-for (const file of walk(bindingsRoot).sort()) {
+const documentedFiles = [...walk(bindingsRoot), path.join(root, 'LSG.lsx'), path.join(root, 'LSSL.lsx')].sort();
+for (const file of documentedFiles) {
   const text = fs.readFileSync(file, 'utf8');
   const lines = text.split(/\r?\n/);
   const module = moduleName(file);

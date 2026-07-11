@@ -1,0 +1,457 @@
+-- Lazy Shader Language runtime.
+-- .lssl files are translated by the compiler into GLSL strings. This module
+-- compiles those strings with the current OpenGL context and keeps the real
+-- driver error when a stage or program cannot be created.
+
+use "bindings/OpenGL/OpenGL46.lsx" as GL
+use "bindings/Math/OpenGL.lsx" as GLMOpenGL
+use "bindings/Vulkan/Vulkan.lsx" as Vulkan
+use "LSG.lsx" as LSG
+
+static const CompileState = {
+    error_message:string = null
+}
+
+fn shader_log(shader)
+    local text = GL.shaderInfoLog(shader)
+    if text == null or text == "" then return "The graphics driver did not provide a shader error log." end
+    return text
+end
+
+fn program_log(program)
+    local text = GL.programInfoLog(program)
+    if text == null or text == "" then return "The graphics driver did not provide a program link log." end
+    return text
+end
+
+fn compile_stage(kind,source)
+    CompileState.error_message = null
+    if source == null or source == "" then
+        CompileState.error_message = "Shader source is empty."
+        return 0
+    end
+
+    local shader = GL.glCreateShader(kind)
+    if shader == 0 then
+        CompileState.error_message = "OpenGL could not create the shader object."
+        return 0
+    end
+
+    -- glShaderSource expects a pointer to a list of strings. This one-item
+    -- positional table is that list; the native pointer never reaches user code.
+    local source_list = {source}
+    GL.glShaderSource(shader,1,source_list,0)
+    GL.glCompileShader(shader)
+    source_list.destroy()
+
+    if not GL.shaderCompiled(shader) then
+        CompileState.error_message = shader_log(shader)
+        GL.glDeleteShader(shader)
+        return 0
+    end
+    return shader
+end
+
+fn link_graphics(vertex,fragment)
+    CompileState.error_message = null
+    local program = GL.glCreateProgram()
+    if program == 0 then
+        CompileState.error_message = "OpenGL could not create a shader program."
+        return 0
+    end
+    GL.glAttachShader(program,vertex)
+    GL.glAttachShader(program,fragment)
+    GL.glLinkProgram(program)
+    if not GL.programLinked(program) then
+        CompileState.error_message = program_log(program)
+        GL.glDeleteProgram(program)
+        return 0
+    end
+    return program
+end
+
+fn link_compute(compute)
+    CompileState.error_message = null
+    local program = GL.glCreateProgram()
+    if program == 0 then
+        CompileState.error_message = "OpenGL could not create a compute program."
+        return 0
+    end
+    GL.glAttachShader(program,compute)
+    GL.glLinkProgram(program)
+    if not GL.programLinked(program) then
+        CompileState.error_message = program_log(program)
+        GL.glDeleteProgram(program)
+        return 0
+    end
+    return program
+end
+
+export const Shader = {
+    id:u32 = 0,
+    native_shader:ptr = 0,
+    owner_context:ptr = 0,
+    graphics_backend:i32 = LSG.OPENGL,
+    ok:bool = false,
+    error_message:string = null,
+    auto_viewport:bool = false,
+    uniform_count:i32 = 0,
+    uniform_name0:string = null,
+    uniform_offset0:i32 = -1,
+    uniform_name1:string = null,
+    uniform_offset1:i32 = -1,
+    uniform_name2:string = null,
+    uniform_offset2:i32 = -1,
+    uniform_name3:string = null,
+    uniform_offset3:i32 = -1,
+    uniform_name4:string = null,
+    uniform_offset4:i32 = -1,
+    uniform_name5:string = null,
+    uniform_offset5:i32 = -1,
+    uniform_name6:string = null,
+    uniform_offset6:i32 = -1,
+    uniform_name7:string = null,
+    uniform_offset7:i32 = -1,
+    uniform_name8:string = null,
+    uniform_offset8:i32 = -1,
+    uniform_name9:string = null,
+    uniform_offset9:i32 = -1,
+    uniform_name10:string = null,
+    uniform_offset10:i32 = -1,
+    uniform_name11:string = null,
+    uniform_offset11:i32 = -1,
+    uniform_name12:string = null,
+    uniform_offset12:i32 = -1,
+    uniform_name13:string = null,
+    uniform_offset13:i32 = -1,
+    uniform_name14:string = null,
+    uniform_offset14:i32 = -1,
+    uniform_name15:string = null,
+    uniform_offset15:i32 = -1,
+    uniform_name16:string = null,
+    uniform_offset16:i32 = -1,
+    uniform_name17:string = null,
+    uniform_offset17:i32 = -1,
+    uniform_name18:string = null,
+    uniform_offset18:i32 = -1,
+    uniform_name19:string = null,
+    uniform_offset19:i32 = -1,
+    uniform_name20:string = null,
+    uniform_offset20:i32 = -1,
+    uniform_name21:string = null,
+    uniform_offset21:i32 = -1,
+    uniform_name22:string = null,
+    uniform_offset22:i32 = -1,
+    uniform_name23:string = null,
+    uniform_offset23:i32 = -1,
+    uniform_name24:string = null,
+    uniform_offset24:i32 = -1,
+    uniform_name25:string = null,
+    uniform_offset25:i32 = -1,
+    uniform_name26:string = null,
+    uniform_offset26:i32 = -1,
+    uniform_name27:string = null,
+    uniform_offset27:i32 = -1,
+    uniform_name28:string = null,
+    uniform_offset28:i32 = -1,
+    uniform_name29:string = null,
+    uniform_offset29:i32 = -1,
+    uniform_name30:string = null,
+    uniform_offset30:i32 = -1,
+    uniform_name31:string = null,
+    uniform_offset31:i32 = -1,
+
+    ready = fn()
+        if self.graphics_backend == LSG.VULKAN then return self.ok and Vulkan.shader_ready(self.native_shader) end
+        return self.ok and self.id ~= 0
+    end,
+
+    error = fn()
+        if self.error_message ~= null then return self.error_message end
+        if self.ready() then return "No shader error" end
+        return "The shader program could not be created"
+    end,
+
+    bind = fn()
+        if self.graphics_backend == LSG.VULKAN then
+            if self.native_shader ~= 0 then Vulkan.bind_shader(self.owner_context,self.native_shader) end
+            if self.auto_viewport then self.vector2("lsxViewport",LSG.frame_width(),LSG.frame_height()) end
+            return
+        end
+        if self.id ~= 0 then GL.glUseProgram(self.id) end
+    end,
+
+    register_uniform = fn(name:string,offset:i32)
+        if self.uniform_count == 0 then self.uniform_name0 = name self.uniform_offset0 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 1 then self.uniform_name1 = name self.uniform_offset1 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 2 then self.uniform_name2 = name self.uniform_offset2 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 3 then self.uniform_name3 = name self.uniform_offset3 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 4 then self.uniform_name4 = name self.uniform_offset4 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 5 then self.uniform_name5 = name self.uniform_offset5 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 6 then self.uniform_name6 = name self.uniform_offset6 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 7 then self.uniform_name7 = name self.uniform_offset7 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 8 then self.uniform_name8 = name self.uniform_offset8 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 9 then self.uniform_name9 = name self.uniform_offset9 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 10 then self.uniform_name10 = name self.uniform_offset10 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 11 then self.uniform_name11 = name self.uniform_offset11 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 12 then self.uniform_name12 = name self.uniform_offset12 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 13 then self.uniform_name13 = name self.uniform_offset13 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 14 then self.uniform_name14 = name self.uniform_offset14 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 15 then self.uniform_name15 = name self.uniform_offset15 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 16 then self.uniform_name16 = name self.uniform_offset16 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 17 then self.uniform_name17 = name self.uniform_offset17 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 18 then self.uniform_name18 = name self.uniform_offset18 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 19 then self.uniform_name19 = name self.uniform_offset19 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 20 then self.uniform_name20 = name self.uniform_offset20 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 21 then self.uniform_name21 = name self.uniform_offset21 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 22 then self.uniform_name22 = name self.uniform_offset22 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 23 then self.uniform_name23 = name self.uniform_offset23 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 24 then self.uniform_name24 = name self.uniform_offset24 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 25 then self.uniform_name25 = name self.uniform_offset25 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 26 then self.uniform_name26 = name self.uniform_offset26 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 27 then self.uniform_name27 = name self.uniform_offset27 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 28 then self.uniform_name28 = name self.uniform_offset28 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 29 then self.uniform_name29 = name self.uniform_offset29 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 30 then self.uniform_name30 = name self.uniform_offset30 = offset self.uniform_count += 1 return self end
+        if self.uniform_count == 31 then self.uniform_name31 = name self.uniform_offset31 = offset self.uniform_count += 1 return self end
+        return self
+    end,
+
+    uniform_location = fn(name:string)
+        if self.uniform_count > 0 and self.uniform_name0 == name then return self.uniform_offset0 end
+        if self.uniform_count > 1 and self.uniform_name1 == name then return self.uniform_offset1 end
+        if self.uniform_count > 2 and self.uniform_name2 == name then return self.uniform_offset2 end
+        if self.uniform_count > 3 and self.uniform_name3 == name then return self.uniform_offset3 end
+        if self.uniform_count > 4 and self.uniform_name4 == name then return self.uniform_offset4 end
+        if self.uniform_count > 5 and self.uniform_name5 == name then return self.uniform_offset5 end
+        if self.uniform_count > 6 and self.uniform_name6 == name then return self.uniform_offset6 end
+        if self.uniform_count > 7 and self.uniform_name7 == name then return self.uniform_offset7 end
+        if self.uniform_count > 8 and self.uniform_name8 == name then return self.uniform_offset8 end
+        if self.uniform_count > 9 and self.uniform_name9 == name then return self.uniform_offset9 end
+        if self.uniform_count > 10 and self.uniform_name10 == name then return self.uniform_offset10 end
+        if self.uniform_count > 11 and self.uniform_name11 == name then return self.uniform_offset11 end
+        if self.uniform_count > 12 and self.uniform_name12 == name then return self.uniform_offset12 end
+        if self.uniform_count > 13 and self.uniform_name13 == name then return self.uniform_offset13 end
+        if self.uniform_count > 14 and self.uniform_name14 == name then return self.uniform_offset14 end
+        if self.uniform_count > 15 and self.uniform_name15 == name then return self.uniform_offset15 end
+        if self.uniform_count > 16 and self.uniform_name16 == name then return self.uniform_offset16 end
+        if self.uniform_count > 17 and self.uniform_name17 == name then return self.uniform_offset17 end
+        if self.uniform_count > 18 and self.uniform_name18 == name then return self.uniform_offset18 end
+        if self.uniform_count > 19 and self.uniform_name19 == name then return self.uniform_offset19 end
+        if self.uniform_count > 20 and self.uniform_name20 == name then return self.uniform_offset20 end
+        if self.uniform_count > 21 and self.uniform_name21 == name then return self.uniform_offset21 end
+        if self.uniform_count > 22 and self.uniform_name22 == name then return self.uniform_offset22 end
+        if self.uniform_count > 23 and self.uniform_name23 == name then return self.uniform_offset23 end
+        if self.uniform_count > 24 and self.uniform_name24 == name then return self.uniform_offset24 end
+        if self.uniform_count > 25 and self.uniform_name25 == name then return self.uniform_offset25 end
+        if self.uniform_count > 26 and self.uniform_name26 == name then return self.uniform_offset26 end
+        if self.uniform_count > 27 and self.uniform_name27 == name then return self.uniform_offset27 end
+        if self.uniform_count > 28 and self.uniform_name28 == name then return self.uniform_offset28 end
+        if self.uniform_count > 29 and self.uniform_name29 == name then return self.uniform_offset29 end
+        if self.uniform_count > 30 and self.uniform_name30 == name then return self.uniform_offset30 end
+        if self.uniform_count > 31 and self.uniform_name31 == name then return self.uniform_offset31 end
+        return -1
+    end,
+
+    location = fn(name)
+        if self.graphics_backend == LSG.VULKAN then return self.uniform_location(name) end
+        if self.id == 0 then return -1 end
+        return GL.glGetUniformLocation(self.id,name)
+    end,
+
+    number = fn(name,value)
+        local spot = self.location(name)
+        if spot < 0 then return end
+        if self.graphics_backend == LSG.VULKAN then Vulkan.uniform_number(self.owner_context,spot,value) return end
+        GL.glUniform1f(spot,value)
+    end,
+
+    whole = fn(name,value)
+        local spot = self.location(name)
+        if spot < 0 then return end
+        if self.graphics_backend == LSG.VULKAN then Vulkan.uniform_whole(self.owner_context,spot,value) return end
+        GL.glUniform1i(spot,value)
+    end,
+
+    texture = fn(name,unit)
+        self.whole(name,unit)
+    end,
+
+    truth = fn(name,value)
+        local spot = self.location(name)
+        if spot < 0 then return end
+        if self.graphics_backend == LSG.VULKAN then
+            if value then Vulkan.uniform_whole(self.owner_context,spot,1) else Vulkan.uniform_whole(self.owner_context,spot,0) end
+            return
+        end
+        if value then GL.glUniform1i(spot,1) else GL.glUniform1i(spot,0) end
+    end,
+
+    vector2 = fn(name,x,y)
+        local spot = self.location(name)
+        if spot < 0 then return end
+        if self.graphics_backend == LSG.VULKAN then Vulkan.uniform_vector2(self.owner_context,spot,x,y) return end
+        GL.glUniform2f(spot,x,y)
+    end,
+
+    vector3 = fn(name,x,y,z)
+        local spot = self.location(name)
+        if spot < 0 then return end
+        if self.graphics_backend == LSG.VULKAN then Vulkan.uniform_vector3(self.owner_context,spot,x,y,z) return end
+        GL.glUniform3f(spot,x,y,z)
+    end,
+
+    vector4 = fn(name,x,y,z,w)
+        local spot = self.location(name)
+        if spot < 0 then return end
+        if self.graphics_backend == LSG.VULKAN then Vulkan.uniform_vector4(self.owner_context,spot,x,y,z,w) return end
+        GL.glUniform4f(spot,x,y,z,w)
+    end,
+
+    matrix4 = fn(name,value)
+        local spot = self.location(name)
+        if spot < 0 then return end
+        if self.graphics_backend == LSG.VULKAN then Vulkan.uniform_matrix4(self.owner_context,spot,memory.ptr(value.data,0)) return end
+        GLMOpenGL.uniform_mat4(spot,value)
+    end,
+
+    run = fn(groupsX,groupsY,groupsZ)
+        if self.graphics_backend == LSG.VULKAN then
+            if self.native_shader ~= 0 then return Vulkan.dispatch(self.owner_context,self.native_shader,groupsX,groupsY,groupsZ) end
+            return false
+        end
+        if self.id == 0 then return false end
+        GL.glUseProgram(self.id)
+        GL.glDispatchCompute(groupsX,groupsY,groupsZ)
+        return true
+    end,
+
+    wait_for_storage = fn()
+        if self.graphics_backend == LSG.VULKAN then return end
+        GL.glMemoryBarrier(GL.GL_SHADER_STORAGE_BARRIER_BIT + GL.GL_BUFFER_UPDATE_BARRIER_BIT)
+    end,
+
+    wait_for_images = fn()
+        if self.graphics_backend == LSG.VULKAN then return end
+        GL.glMemoryBarrier(GL.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT + GL.GL_TEXTURE_FETCH_BARRIER_BIT)
+    end,
+
+    wait_for_everything = fn()
+        if self.graphics_backend == LSG.VULKAN then return end
+        GL.glMemoryBarrier(GL.GL_ALL_BARRIER_BITS)
+    end,
+
+    destroy = fn()
+        if self.graphics_backend == LSG.VULKAN then
+            if self.native_shader ~= 0 then Vulkan.destroy_shader(self.owner_context,self.native_shader) end
+            self.native_shader = 0
+            self.owner_context = 0
+        else
+            if self.id ~= 0 then GL.glDeleteProgram(self.id) self.id = 0 end
+        end
+        self.uniform_count = 0
+        self.auto_viewport = false
+        self.ok = false
+        self.error_message = null
+    end
+}
+
+
+export fn using_vulkan()
+    return LSG.current_backend() == LSG.VULKAN
+end
+
+export fn ray_tracing_enabled()
+    return LSG.is_ray_tracing_enabled()
+end
+
+export fn unavailable(message)
+    local shader = Shader.new()
+    shader.graphics_backend = LSG.current_backend()
+    shader.error_message = message
+    return shader
+end
+
+export fn create(vertexSource,fragmentSource)
+    local shader = Shader.new()
+    local vertex = compile_stage(GL.GL_VERTEX_SHADER,vertexSource)
+    if vertex == 0 then
+        shader.error_message = CompileState.error_message
+        return shader
+    end
+
+    local fragment = compile_stage(GL.GL_FRAGMENT_SHADER,fragmentSource)
+    if fragment == 0 then
+        GL.glDeleteShader(vertex)
+        shader.error_message = CompileState.error_message
+        return shader
+    end
+
+    shader.id = link_graphics(vertex,fragment)
+    GL.glDeleteShader(vertex)
+    GL.glDeleteShader(fragment)
+    if shader.id == 0 then
+        shader.error_message = CompileState.error_message
+        return shader
+    end
+    shader.ok = true
+    return shader
+end
+
+export fn create_graphics(vertexSource,fragmentSource,vertexPointer,vertexCount,fragmentPointer,fragmentCount,vertexLayout,pipelineFlags,rayFlags,modelOffset)
+    if LSG.current_backend() == LSG.VULKAN then
+        local shader = Shader.new()
+        shader.graphics_backend = LSG.VULKAN
+        shader.owner_context = LSG.active_context()
+        if shader.owner_context == 0 then
+            shader.error_message = "Open a Vulkan LSG window before creating the shader."
+            return shader
+        end
+        shader.native_shader = Vulkan.create_shader(shader.owner_context,vertexPointer,vertexCount,fragmentPointer,fragmentCount,vertexLayout,pipelineFlags,rayFlags,modelOffset)
+        if not Vulkan.shader_ready(shader.native_shader) then
+            shader.error_message = Vulkan.shader_error(shader.native_shader)
+            return shader
+        end
+        shader.ok = true
+        return shader
+    end
+    return create(vertexSource,fragmentSource)
+end
+
+export fn create_compute(computeSource)
+    local shader = Shader.new()
+    local compute = compile_stage(GL.GL_COMPUTE_SHADER,computeSource)
+    if compute == 0 then
+        shader.error_message = CompileState.error_message
+        return shader
+    end
+    shader.id = link_compute(compute)
+    GL.glDeleteShader(compute)
+    if shader.id == 0 then
+        shader.error_message = CompileState.error_message
+        return shader
+    end
+    shader.ok = true
+    return shader
+end
+
+
+export fn create_compute_embedded(computeSource,computePointer,computeCount)
+    if LSG.current_backend() == LSG.VULKAN then
+        local shader = Shader.new()
+        shader.graphics_backend = LSG.VULKAN
+        shader.owner_context = LSG.active_context()
+        if shader.owner_context == 0 then
+            shader.error_message = "Open a Vulkan LSG window before creating the compute shader."
+            return shader
+        end
+        shader.native_shader = Vulkan.create_compute_shader(shader.owner_context,computePointer,computeCount)
+        if not Vulkan.shader_ready(shader.native_shader) then
+            shader.error_message = Vulkan.shader_error(shader.native_shader)
+            return shader
+        end
+        shader.ok = true
+        return shader
+    end
+    return create_compute(computeSource)
+end

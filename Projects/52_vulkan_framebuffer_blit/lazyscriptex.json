@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/52_vulkan_framebuffer_blit.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

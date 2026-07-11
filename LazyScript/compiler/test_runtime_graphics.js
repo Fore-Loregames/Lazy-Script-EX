@@ -1,0 +1,28 @@
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const root = path.resolve(__dirname, '..', '..');
+const read = p => fs.readFileSync(path.join(root,p),'utf8');
+function need(condition,message){ if(!condition) throw new Error(message); }
+const lsg=read('LazyScript/LSG.lsx');
+const pixel=lsg.slice(lsg.indexOf('export const PixelImage'),lsg.indexOf('export const Texture',lsg.indexOf('export const PixelImage')));
+need(pixel.includes('set_rgba = fn'),'PixelImage.set_rgba is missing');
+need(!/set = fn[\s\S]*?self\.ready\(\)/.test(pixel),'PixelImage.set must not call ready before using x/y');
+need(!/set_rgba = fn[\s\S]*?self\.set\(/.test(pixel),'PixelImage.set_rgba must write bytes directly');
+need(!/fill = fn[\s\S]*?self\.set\(/.test(pixel),'PixelImage.fill must write bytes directly');
+const renderer=read('LazyScript/bindings/UI/Renderer.lsx');
+need(renderer.includes('vulkan_retired_storage'),'Vulkan LazyUI retired storage is missing');
+need(renderer.includes('LazyUI Vulkan flush complete'),'Vulkan LazyUI completion diagnostics are missing');
+const native=read('LazyScript/native/lsx_vulkan.c');
+need(native.includes('fallback_texture'),'Vulkan fallback texture is missing');
+need(native.includes('fallback_storage'),'Vulkan fallback storage is missing');
+need(native.includes('texture_key?texture_key:c->fallback_texture'),'All Vulkan texture descriptors are not initialized');
+need(native.includes('storage_key?storage_key:c->fallback_storage'),'All Vulkan storage descriptors are not initialized');
+need(native.includes('lsx_reset_resource_cache_frame'),'Vulkan descriptor cache invalidation is missing');
+need(native.includes('resource_cached_version[2]'),'Vulkan persistent descriptor reuse is missing');
+need(native.includes('storage->mapped[frame]'),'Vulkan retained storage persistent mapping is missing');
+const lssl=read('LazyScript/compiler/lssl.js');
+need(lssl.includes('Cornell-cave room'),'Improved GI scene is missing');
+need(lssl.includes('sampleIndex<6'),'Optimized stable GI bounce samples are missing');
+need(lssl.includes('vec3 color=lsx_gi_sample(pixel,debugView);'),'Single-pass GI sampling is missing');
+console.log('Procedural pixels, Vulkan descriptors, LazyUI lifetime, and optimized GI contracts passed.');

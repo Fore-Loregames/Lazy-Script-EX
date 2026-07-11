@@ -1,0 +1,120 @@
+-- Runtime policy for compiler-generated LSX kernels.
+--
+-- O6 already emits scalar and SIMD versions of safe loops. This dispatcher
+-- adds a persistent worker-pool path for larger jobs and reports when a job is
+-- large enough to justify a generated LSSL compute kernel. CPU callbacks use
+-- ordinary LSX functions and context objects; pointer details stay internal.
+
+use "Parallel.lsx" as Parallel
+
+export const SCALAR = 0
+export const SIMD = 1
+export const WORKERS = 2
+export const COMPUTE = 3
+
+export const Dispatcher = {
+    pool = null
+    parallel_threshold = 32768
+    compute_threshold = 262144
+    grain = 1024
+    cached_bucket = -1
+    cached_compute_ready = false
+    cached_pool_ready = false
+    cached_strategy = SCALAR
+    cache_hits = 0
+    cache_misses = 0
+
+    create = fn()
+        local value = Dispatcher.new()
+        value.pool = Parallel.create()
+        return value
+    end
+
+    ready = fn()
+        return self.pool ~= null and self.pool.ready()
+    end
+
+    strategy = fn(count,computeReady)
+        local poolReady = self.ready()
+        local bucket = 0
+        if count >= self.compute_threshold then
+            bucket = 3
+        else
+            if count >= self.parallel_threshold then
+                bucket = 2
+            else
+                if count >= 8 then bucket = 1 end
+            end
+        end
+
+        if bucket == self.cached_bucket and computeReady == self.cached_compute_ready and poolReady == self.cached_pool_ready then
+            self.cache_hits += 1
+            return self.cached_strategy
+        end
+
+        local selected = SCALAR
+        if computeReady and bucket == 3 then
+            selected = COMPUTE
+        else
+            if poolReady and bucket >= 2 then
+                selected = WORKERS
+            else
+                if bucket >= 1 then selected = SIMD end
+            end
+        end
+
+        self.cached_bucket = bucket
+        self.cached_compute_ready = computeReady
+        self.cached_pool_ready = poolReady
+        self.cached_strategy = selected
+        self.cache_misses += 1
+        return selected
+    end
+
+    run_cpu = fn(callback,context,count)
+        if callback == null or count <= 0 then return count <= 0 end
+        if self.ready() and count >= self.parallel_threshold then
+            return self.pool.run(callback,context,count,self.grain)
+        end
+        ffi.call3(callback,0,count,memory.ptr(context,0))
+        return true
+    end
+
+    set_thresholds = fn(parallelCount,computeCount)
+        if parallelCount > 0 then self.parallel_threshold = parallelCount end
+        if computeCount > 0 then self.compute_threshold = computeCount end
+        self.clear_cache()
+    end
+
+    clear_cache = fn()
+        self.cached_bucket = -1
+        self.cached_compute_ready = false
+        self.cached_pool_ready = false
+        self.cached_strategy = SCALAR
+    end
+
+    cache_hit_count = fn()
+        return self.cache_hits
+    end
+
+    cache_miss_count = fn()
+        return self.cache_misses
+    end
+
+    set_grain = fn(value)
+        if value > 0 then self.grain = value end
+    end
+
+    close = fn()
+        if self.pool ~= null then self.pool.destroy() self.pool = null end
+        self.clear_cache()
+    end
+
+    destroy = fn()
+        self.close()
+    end
+}
+
+export fn create()
+    return Dispatcher.create()
+end

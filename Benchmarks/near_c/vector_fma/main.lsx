@@ -18,6 +18,7 @@ fn main() -> i32
         end
         repeat = repeat + 1
     end
-    if output[0] <= 0.0 then return 1 end
+    if output[0] < 2200.0 or output[0] > 2400.0 then return 1 end
+    if output[15] < 42000.0 or output[15] > 42200.0 then return 1 end
     return 0
 end

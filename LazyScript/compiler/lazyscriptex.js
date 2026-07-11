@@ -6,8 +6,9 @@ const path = require('path');
 const crypto = require('crypto');
 const { buildNativeBindings } = require('./native_bindings');
 const { compileInlineUiSource } = require('./inline_ui');
+const { compileLsslSource } = require('./lssl');
 
-const VERSION = '0.18.16';
+const VERSION = '0.21.5';
 const PE_IMAGE_BASE = 0x140000000n;
 
 
@@ -373,7 +374,7 @@ function parseInternalStructTypeName(typeName) {
 function syntacticReferenceOwnership(expression) {
   if (!expression) return 'unknown';
   if (expression.kind === 'reference' || expression.kind === 'index') return 'borrowed';
-  if (expression.kind === 'table_literal') return 'owned';
+  if (expression.kind === 'table_literal' || expression.kind === 'interpolated_string') return 'owned';
   if (expression.kind === 'call') {
     const operation = expression.path?.[expression.path.length - 1] || '';
     if (operation === 'new' || operation === 'clone') return 'owned';
@@ -383,6 +384,9 @@ function syntacticReferenceOwnership(expression) {
 }
 function fieldOwnsStructStorage(field) {
   return Boolean(field?.typeInfo?.kind === 'struct' && field.ownership !== 'borrowed');
+}
+function fieldOwnsStringStorage(field) {
+  return Boolean(canonicalTypeName(field?.type) === 'string' && field.ownership === 'owned');
 }
 function callArguments(expr) { return expr.effectiveArgs || expr.args || []; }
 function expressionType(expr) { return expr?.inferredType || expr?.valueType || 'i64'; }
@@ -489,7 +493,7 @@ class Lexer {
     while (this.peek() !== '\0') {
       const ch = this.advance();
       if (ch === '`') {
-        this.token('string', value, line, column);
+        this.token('raw_string', value, line, column);
         return;
       }
       value += ch;
@@ -532,7 +536,7 @@ class Lexer {
   }
 
   lex() {
-    const twoCharacter = new Set(['==', '~=', '!=', '<=', '>=', '->']);
+    const twoCharacter = new Set(['==', '~=', '!=', '<=', '>=', '->', '+=', '-=', '*=', '/=', '%=']);
     const single = new Set(['(', ')', '{', '}', '[', ']', ',', '.', ':', '=', '+', '-', '*', '/', '%', '<', '>']);
     while (this.index < this.source.length) {
       this.skipWhitespaceAndComments();
@@ -561,6 +565,26 @@ class Lexer {
     this.tokens.push({ type: 'eof', value: '<eof>', line: this.line, column: this.column, filePath: this.filePath });
     return this.tokens;
   }
+}
+
+function rawStringExpression(token) {
+  const value = String(token.value || '');
+  const parts = [];
+  const pattern = /\{([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\}/g;
+  let cursor = 0;
+  let match;
+  while ((match = pattern.exec(value)) !== null) {
+    if (match.index > cursor) {
+      parts.push({ kind: 'literal', value: value.slice(cursor, match.index), valueType: 'string', token });
+    }
+    parts.push({ kind: 'reference', path: match[1].split('.'), token });
+    cursor = match.index + match[0].length;
+  }
+  if (cursor === 0) return { kind: 'literal', value, valueType: 'string', token };
+  if (cursor < value.length) {
+    parts.push({ kind: 'literal', value: value.slice(cursor), valueType: 'string', token });
+  }
+  return { kind: 'interpolated_string', parts, valueType: 'string', token };
 }
 
 class Parser {
@@ -592,6 +616,10 @@ class Parser {
   keyword(value) { return this.match('keyword', value); }
   expectKeyword(value) { return this.expect('keyword', value); }
   identifier(message = 'identifier') { return this.expect('identifier', null, message); }
+  memberName(message = 'member name') {
+    if (this.at('identifier') || this.at('keyword')) return this.tokens[this.index++];
+    throw new CompileError(`expected ${message}, found '${this.current().value}'`, this.current());
+  }
 
   parseTypeName() {
     const parts = [this.identifier('type name').value];
@@ -702,11 +730,11 @@ class Parser {
       if (this.at('eof')) throw new CompileError('unterminated table literal', startToken);
       const entryStart = this.current();
       const next = this.tokens[this.index + 1];
-      const named = this.at('identifier') && (next?.value === '=' || next?.value === ':');
+      const named = (this.at('identifier') || this.at('keyword')) && (next?.value === '=' || next?.value === ':');
       if (named) {
         if (positional === true) throw new CompileError('cannot mix positional values and named fields in the same object literal', entryStart);
         positional = false;
-        const key = this.identifier('table member name');
+        const key = this.memberName('table member name');
         let declaredType = null;
         if (this.match('symbol', ':')) declaredType = this.parseTypeName();
         this.expect('symbol', '=');
@@ -821,11 +849,11 @@ class Parser {
       // const Math = {}
       // Math.clamp = fn(...) ... end
       if (this.at('identifier') && this.tokens[this.index + 1]?.value === '.'
-          && this.tokens[this.index + 2]?.type === 'identifier'
+          && ['identifier', 'keyword'].includes(this.tokens[this.index + 2]?.type)
           && this.tokens[this.index + 3]?.value === '=') {
         const tableName = this.identifier('table name');
         this.expect('symbol', '.');
-        const member = this.identifier('table member name');
+        const member = this.memberName('table member name');
         this.expect('symbol', '=');
         const expression = this.parseExpression();
         declarations.push({ kind: 'table_member', tableName: tableName.value, memberName: member.value, expression, exported: false, token });
@@ -931,8 +959,22 @@ class Parser {
     }
 
     const expression = this.parseExpression();
-    if (this.match('symbol', '=')) {
-      const value = this.parseExpression();
+    let assignmentOperator = null;
+    if (this.at('symbol') && ['=', '+=', '-=', '*=', '/=', '%='].includes(this.current().value)) {
+      assignmentOperator = this.current();
+      this.index += 1;
+    }
+    if (assignmentOperator) {
+      let value = this.parseExpression();
+      if (assignmentOperator.value !== '=') {
+        value = {
+          kind: 'binary',
+          operator: assignmentOperator.value[0],
+          left: expression,
+          right: value,
+          token: assignmentOperator,
+        };
+      }
       if (expression.kind === 'reference') {
         if (expression.path.length === 1) return { kind: 'assign', name: expression.path[0], targetPath: expression.path, expression: value, token: expression.token };
         return { kind: 'field_assign', targetPath: expression.path, expression: value, token: expression.token };
@@ -997,6 +1039,7 @@ class Parser {
       return { kind: 'literal', value, valueType: 'i64', token };
     }
     if (this.match('string')) return { kind: 'literal', value: token.value, valueType: 'string', token };
+    if (this.match('raw_string')) return rawStringExpression(token);
     if (this.keyword('true')) return { kind: 'literal', value: 1n, valueType: 'bool', token };
     if (this.keyword('false')) return { kind: 'literal', value: 0n, valueType: 'bool', token };
     if (this.keyword('null')) return { kind: 'literal', value: 0n, valueType: 'ptr', token };
@@ -1009,7 +1052,7 @@ class Parser {
     }
     if (this.match('identifier')) {
       const parts = [token.value];
-      while (this.match('symbol', '.')) parts.push(this.identifier('name after dot').value);
+      while (this.match('symbol', '.')) parts.push(this.memberName('name after dot').value);
       let expression;
       if (this.match('symbol', '(')) {
         const args = [];
@@ -1038,10 +1081,24 @@ function parseFile(filePath) {
   if (!fs.existsSync(absolute)) throw new CompileError(`script not found: ${absolute}`, null, absolute);
   const originalSource = fs.readFileSync(absolute, 'utf8');
   let source = originalSource;
-  try { source = compileInlineUiSource(originalSource, absolute).source; }
-  catch (error) { throw new CompileError(error.message, null, absolute); }
+  let lssl = null;
+  try {
+    if (path.extname(absolute).toLowerCase() === '.lssl') {
+      lssl = compileLsslSource(originalSource, absolute);
+      source = lssl.lsxSource;
+    } else {
+      source = compileInlineUiSource(originalSource, absolute).source;
+    }
+  } catch (error) {
+    throw new CompileError(error.message, null, error.filePath || absolute, {
+      code: 'LSX4000',
+      hint: error.hint || 'Check the highlighted LSSL declaration or shader statement.'
+    });
+  }
   const tokens = new Lexer(source, absolute).lex();
-  return new Parser(tokens, absolute).parseModule();
+  const ast = new Parser(tokens, absolute).parseModule();
+  if (lssl) ast.lssl = lssl;
+  return ast;
 }
 
 function astUsesSelf(node) {
@@ -1344,6 +1401,7 @@ class Program {
       functions: new Map(),
       externs: new Map(),
       legacyStatements: ast.legacyStatements,
+      lssl: ast.lssl || null,
     };
     this.modules.set(absolute, module);
     this.modulesById.set(module.id, module);
@@ -2131,6 +2189,13 @@ class Program {
     if (!isAutoType(expectedType)) this.applyInferenceExpected(expression, expectedType, expectedModule, module, scope);
 
     if (expression.kind === 'literal') return { type: canonicalTypeName(expression.valueType), module, ownership: 'unknown' };
+    if (expression.kind === 'interpolated_string') {
+      for (const part of expression.parts || []) {
+        if (part.kind === 'literal') continue;
+        this.inferExpression(part, module, scope, 'string', module);
+      }
+      return { type: 'string', module, ownership: 'owned' };
+    }
     if (expression.kind === 'reference') {
       const resolved = this.inferenceReference(module, expression.path, scope);
       // A parameter that only received the final integer fallback is still
@@ -3312,7 +3377,8 @@ class Program {
     const deferredRoot = scope?.variables?.get(pathParts[0]);
     if (this.allowDeferredLocalMethods && deferredRoot && pathParts.length >= 2
       && (deferredRoot.deferredMethodReceiver || deferredRoot.deferredLoopItem
-        || (pathParts[0] !== 'self' && deferredRoot.kind === 'param' && !deferredRoot.param?.explicitType))) {
+        || (pathParts[0] !== 'self' && deferredRoot.kind === 'param' && !deferredRoot.param?.explicitType
+          && (isAutoType(deferredRoot.type) || deferredRoot.param?.inferenceDefaulted)))) {
       const receiver = { kind: 'reference', path: pathParts.slice(0, -1), token: call.token, inferredType: deferredRoot.type };
       call.effectiveArgs = [...call.args];
       return {
@@ -3538,7 +3604,8 @@ class Program {
     // resolution. During editor/check passes, unanchored inferred parameters
     // and generic table-loop items may wait for project call-site inference.
     if (firstVariable && pathParts.length === 2) {
-      if (this.allowDeferredLocalMethods && firstVariable.deferredMethodReceiver) {
+      if (this.allowDeferredLocalMethods && (firstVariable.deferredMethodReceiver
+          || (firstVariable.kind === 'param' && !firstVariable.param?.explicitType))) {
         const receiver = { kind: 'reference', path: [pathParts[0]], token: call.token, inferredType: firstVariable.type };
         call.effectiveArgs = [...call.args];
         return {
@@ -3741,6 +3808,17 @@ class Program {
   validateExpression(expr, module, scope) {
     if (expr.kind === 'literal') {
       expr.inferredType = expr.valueType;
+      return expr.inferredType;
+    }
+    if (expr.kind === 'interpolated_string') {
+      for (const part of expr.parts || []) {
+        if (part.kind === 'literal') continue;
+        const actual = this.validateExpression(part, module, scope);
+        if (canonicalTypeName(actual) !== 'string') {
+          throw new CompileError(`raw string interpolation expects string values, received ${actual}`, part.token || expr.token);
+        }
+      }
+      expr.inferredType = 'string';
       return expr.inferredType;
     }
     if (expr.kind === 'table_literal') {
@@ -4027,7 +4105,7 @@ function literalExpression(value, valueType, token) {
 
 function expressionHasSideEffects(expr) {
   if (!expr) return false;
-  if (expr.kind === 'call' || expr.kind === 'table_literal') return true;
+  if (expr.kind === 'call' || expr.kind === 'table_literal' || expr.kind === 'interpolated_string') return true;
   if (expr.kind === 'index') return expressionHasSideEffects(expr.object) || expressionHasSideEffects(expr.index);
   if (expr.kind === 'unary') return expressionHasSideEffects(expr.expression);
   if (expr.kind === 'binary') return expressionHasSideEffects(expr.left) || expressionHasSideEffects(expr.right);
@@ -4080,11 +4158,26 @@ class Optimizer {
       loopTableCaches: 0,
       vectorizedLoops: 0,
       fusedVectorOps: 0,
+      unrolledFloatReductions: 0,
+      persistentVectorRecurrences: 0,
       pgoFunctionsMatched: 0,
       pgoInstrumentedFunctions: 0,
       cfgBlocks: 0,
       ssaPhis: 0,
       ssaConstantsPropagated: 0,
+      kernelLoopsAnalyzed: 0,
+      independentKernelLoops: 0,
+      pointwiseKernelLoops: 0,
+      loopsFused: 0,
+      fusedLoopOperations: 0,
+      multiOperationVectorLoops: 0,
+      loopCallsSpecialized: 0,
+      parallelKernelCandidates: 0,
+      computeKernelCandidates: 0,
+      runtimeSpecializedLoops: 0,
+      algorithmicKernels: 0,
+      zeroFillKernels: 0,
+      algorithmicKernelsEmitted: 0,
     };
   }
 
@@ -4095,17 +4188,19 @@ class Optimizer {
       }
     }
     if (this.level >= 4) {
-      const wholeProgramPasses = this.level >= 6 ? 4 : (this.level >= 5 ? 2 : 1);
+      const wholeProgramPasses = this.level >= 5 ? 2 : 1;
       for (let pass = 0; pass < wholeProgramPasses; pass += 1) {
         this.inlineSmallFunctions();
         for (const module of this.program.moduleOrder) {
           for (const fn of module.functions.values()) this.optimizeFunction(fn);
         }
       }
-      this.markReachableFunctions();
-    } else {
-      for (const module of this.program.moduleOrder) for (const fn of module.functions.values()) fn.reachable = true;
     }
+    // Executables only need functions reachable from main and required object
+    // lifecycle hooks. Apply this at every optimization level: besides reducing
+    // code size, it prevents unused generic helpers from forcing unresolved
+    // receiver methods into O0-O3 builds.
+    this.markReachableFunctions();
     this.collectRuntimeUsage();
     return this.stats;
   }
@@ -4134,8 +4229,12 @@ class Optimizer {
       fn.body = this.optimizeBlock(fn.body, fn.module, fn);
     }
     if (this.level >= 6) {
+      this.markLoopHotCalls(fn);
+      this.fuseCompatibleLoops(fn);
+      this.analyzeKernelLoops(fn);
       this.markLoopTableBounds(fn);
       this.markVectorizableLoops(fn);
+      this.markAlgorithmicLoops(fn);
       this.markStackAllocatableObjects(fn);
     }
   }
@@ -4363,7 +4462,8 @@ class Optimizer {
     const visitExpression = (expr) => {
       if (!expr) return;
       visitor(expr);
-      if (expr.kind === 'binary') { visitExpression(expr.left); visitExpression(expr.right); }
+      if (expr.kind === 'interpolated_string') (expr.parts || []).forEach((part) => { if (part.kind !== 'literal') visitExpression(part); });
+      else if (expr.kind === 'binary') { visitExpression(expr.left); visitExpression(expr.right); }
       else if (expr.kind === 'unary') visitExpression(expr.expression);
       else if (expr.kind === 'call') callArguments(expr).forEach(visitExpression);
       else if (expr.kind === 'index') { visitExpression(expr.object); visitExpression(expr.index); }
@@ -4401,7 +4501,8 @@ class Optimizer {
       const replacement = replacements.get(expr.path[0]);
       return literalExpression(replacement.value, replacement.valueType, expr.token);
     }
-    if (expr.kind === 'unary') expr.expression = this.replaceReferences(expr.expression, replacements);
+    if (expr.kind === 'interpolated_string') expr.parts = (expr.parts || []).map((part) => part.kind === 'literal' ? part : this.replaceReferences(part, replacements));
+    else if (expr.kind === 'unary') expr.expression = this.replaceReferences(expr.expression, replacements);
     else if (expr.kind === 'binary') {
       expr.left = this.replaceReferences(expr.left, replacements);
       expr.right = this.replaceReferences(expr.right, replacements);
@@ -4444,6 +4545,7 @@ class Optimizer {
     const scanReferences = (expr) => {
       if (!expr) return;
       if (expr.kind === 'reference' && expr.path.length === 1) loopReferenced.add(expr.path[0]);
+      else if (expr.kind === 'interpolated_string') (expr.parts || []).forEach((part) => { if (part.kind !== 'literal') scanReferences(part); });
       else if (expr.kind === 'binary') { scanReferences(expr.left); scanReferences(expr.right); }
       else if (expr.kind === 'unary') scanReferences(expr.expression);
       else if (expr.kind === 'call') callArguments(expr).forEach(scanReferences);
@@ -4544,6 +4646,7 @@ class Optimizer {
     if (!expr) return expr;
     if (expr.kind === 'literal') return { ...expr };
     if (expr.kind === 'reference') return { ...expr, path: [...expr.path] };
+    if (expr.kind === 'interpolated_string') return { ...expr, parts: (expr.parts || []).map((part) => this.cloneExpression(part)) };
     if (expr.kind === 'unary') return { ...expr, expression: this.cloneExpression(expr.expression) };
     if (expr.kind === 'binary') return { ...expr, left: this.cloneExpression(expr.left), right: this.cloneExpression(expr.right) };
     if (expr.kind === 'call') { const clone = { ...expr, path: [...expr.path], args: expr.args.map((arg) => this.cloneExpression(arg)) }; if (expr.effectiveArgs) clone.effectiveArgs = expr.effectiveArgs.map((arg) => this.cloneExpression(arg)); return clone; }
@@ -4555,6 +4658,7 @@ class Optimizer {
   expressionDependencies(expr, output = new Set()) {
     if (!expr) return output;
     if (expr.kind === 'reference' && expr.path.length >= 1) output.add(expr.path[0]);
+    else if (expr.kind === 'interpolated_string') (expr.parts || []).forEach((part) => { if (part.kind !== 'literal') this.expressionDependencies(part, output); });
     else if (expr.kind === 'unary') this.expressionDependencies(expr.expression, output);
     else if (expr.kind === 'binary') {
       this.expressionDependencies(expr.left, output);
@@ -4575,7 +4679,8 @@ class Optimizer {
       this.stats.copiesPropagated += 1;
       return replacement;
     }
-    if (expr.kind === 'unary') expr.expression = this.replaceKnownValues(expr.expression, environment, active);
+    if (expr.kind === 'interpolated_string') expr.parts = (expr.parts || []).map((part) => part.kind === 'literal' ? part : this.replaceKnownValues(part, environment, active));
+    else if (expr.kind === 'unary') expr.expression = this.replaceKnownValues(expr.expression, environment, active);
     else if (expr.kind === 'binary') {
       expr.left = this.replaceKnownValues(expr.left, environment, active);
       expr.right = this.replaceKnownValues(expr.right, environment, active);
@@ -4721,6 +4826,8 @@ class Optimizer {
     if (!expr) return uses;
     if (expr.kind === 'reference') {
       if (expr.path.length >= 1 && fn.variables.has(expr.path[0])) uses.add(expr.path[0]);
+    } else if (expr.kind === 'interpolated_string') {
+      (expr.parts || []).forEach((part) => { if (part.kind !== 'literal') this.collectLocalUses(part, fn, uses); });
     } else if (expr.kind === 'binary') {
       this.collectLocalUses(expr.left, fn, uses); this.collectLocalUses(expr.right, fn, uses);
     } else if (expr.kind === 'unary') this.collectLocalUses(expr.expression, fn, uses);
@@ -4865,7 +4972,8 @@ class Optimizer {
       }
       return expr;
     }
-    if (expr.kind === 'unary') expr.expression = this.rewriteConstantsFromMap(expr.expression, values, fn);
+    if (expr.kind === 'interpolated_string') expr.parts = (expr.parts || []).map((part) => part.kind === 'literal' ? part : this.rewriteConstantsFromMap(part, values, fn));
+    else if (expr.kind === 'unary') expr.expression = this.rewriteConstantsFromMap(expr.expression, values, fn);
     else if (expr.kind === 'binary') {
       expr.left = this.rewriteConstantsFromMap(expr.left, values, fn);
       expr.right = this.rewriteConstantsFromMap(expr.right, values, fn);
@@ -5048,6 +5156,12 @@ class Optimizer {
         while (statement.body.length > 0) {
           const candidate = statement.body[0];
           if (candidate.kind !== 'local' || !this.pureInvariantExpression(candidate.expression)) break;
+          // A local declaration executes on every iteration. It is only safe to
+          // hoist when the declared value remains immutable for the rest of the
+          // loop. Hoisting a loop counter such as `local index = 0` would remove
+          // its per-iteration reset and change program behavior.
+          const assignedAfterDeclaration = this.collectAssignedNames(statement.body.slice(1));
+          if (assignedAfterDeclaration.has(candidate.name)) break;
           const dependencies = this.expressionDependencies(candidate.expression);
           if ([...dependencies].some((name) => assigned.has(name))) break;
           hoisted.push(statement.body.shift());
@@ -5066,6 +5180,308 @@ class Optimizer {
     return expr?.kind === 'reference' ? expr.path.join('.') : null;
   }
 
+  kernelExpressionKey(expr) {
+    if (!expr) return 'null';
+    if (expr.kind === 'literal') return `literal:${expr.valueType}:${String(expr.value)}`;
+    if (expr.kind === 'reference') return `reference:${expr.path.join('.')}`;
+    if (expr.kind === 'unary') return `unary:${expr.operator}(${this.kernelExpressionKey(expr.expression)})`;
+    if (expr.kind === 'binary') return `binary:${expr.operator}(${this.kernelExpressionKey(expr.left)},${this.kernelExpressionKey(expr.right)})`;
+    if (expr.kind === 'index') return `index:${this.kernelExpressionKey(expr.object)}[${this.kernelExpressionKey(expr.index)}]`;
+    if (expr.kind === 'call') {
+      const callable = expr.resolvedCallable;
+      const name = callable?.kind === 'builtin' ? callable.target.name
+        : (callable?.kind === 'internal' ? callable.target.label : this.kernelExpressionKey(expr.callee));
+      return `call:${name}(${callArguments(expr).map((arg) => this.kernelExpressionKey(arg)).join(',')})`;
+    }
+    return expr.kind;
+  }
+
+  replaceKernelIndex(expr, oldName, newName, newVariable) {
+    if (!expr) return expr;
+    if (expr.kind === 'reference' && expr.path.length === 1 && expr.path[0] === oldName) {
+      expr.path[0] = newName;
+      if (expr.resolvedReference?.kind === 'variable') expr.resolvedReference = { ...expr.resolvedReference, variable: newVariable };
+      return expr;
+    }
+    if (expr.kind === 'unary') this.replaceKernelIndex(expr.expression, oldName, newName, newVariable);
+    else if (expr.kind === 'binary') {
+      this.replaceKernelIndex(expr.left, oldName, newName, newVariable);
+      this.replaceKernelIndex(expr.right, oldName, newName, newVariable);
+    } else if (expr.kind === 'index') {
+      this.replaceKernelIndex(expr.object, oldName, newName, newVariable);
+      this.replaceKernelIndex(expr.index, oldName, newName, newVariable);
+    } else if (expr.kind === 'call') {
+      callArguments(expr).forEach((arg) => this.replaceKernelIndex(arg, oldName, newName, newVariable));
+    } else if (expr.kind === 'table_literal') {
+      (expr.entries || []).forEach((entry) => {
+        if (entry.expression.kind !== 'function_expression') this.replaceKernelIndex(entry.expression, oldName, newName, newVariable);
+      });
+    }
+    return expr;
+  }
+
+  canonicalKernelLoop(statement, fn) {
+    if (statement?.kind !== 'while') return null;
+    const condition = statement.condition;
+    if (condition?.kind !== 'binary' || condition.operator !== '<'
+        || condition.left?.kind !== 'reference' || condition.left.path.length !== 1) return null;
+    const indexName = condition.left.path[0];
+    const body = statement.body || [];
+    if (body.length === 0) return null;
+    const latch = body[body.length - 1];
+    if (latch.kind !== 'assign' || latch.name !== indexName || latch.expression?.kind !== 'binary'
+        || latch.expression.operator !== '+' || latch.expression.left?.kind !== 'reference'
+        || latch.expression.left.path.length !== 1 || latch.expression.left.path[0] !== indexName
+        || latch.expression.right?.kind !== 'literal' || latch.expression.right.value !== 1n) return null;
+
+    const reads = new Set();
+    const writes = new Set();
+    const scalarReads = new Set();
+    const scalarWrites = new Set();
+    const loopLocalTemps = new Set();
+    const operations = body.slice(0, -1);
+    let calls = 0;
+    let irregularAccesses = 0;
+    let branches = 0;
+    let floatOnly = operations.length > 0;
+    let pointwise = operations.length > 0;
+
+    const scanExpression = (expr, mode = 'read') => {
+      if (!expr) return;
+      if (expr.kind === 'index') {
+        const tableKey = this.referenceKey(expr.object);
+        const directIndex = expr.index?.kind === 'reference' && expr.index.path.length === 1 && expr.index.path[0] === indexName;
+        if (!tableKey || !directIndex) irregularAccesses += 1;
+        else if (mode === 'write') writes.add(tableKey); else reads.add(tableKey);
+        if (expressionType(expr) !== 'f32') floatOnly = false;
+        scanExpression(expr.object, 'address');
+        scanExpression(expr.index, 'address');
+        return;
+      }
+      if (expr.kind === 'reference') {
+        if (expr.path.length === 1 && expr.path[0] !== indexName) scalarReads.add(expr.path[0]);
+        return;
+      }
+      if (expr.kind === 'call' || expr.kind === 'interpolated_string') {
+        calls += 1;
+        if (expr.kind === 'call') callArguments(expr).forEach((arg) => scanExpression(arg));
+        else (expr.parts || []).forEach((part) => { if (part.kind !== 'literal') scanExpression(part); });
+        return;
+      }
+      if (expr.kind === 'unary') scanExpression(expr.expression);
+      else if (expr.kind === 'binary') { scanExpression(expr.left); scanExpression(expr.right); }
+      else if (expr.kind === 'table_literal') {
+        calls += 1;
+        (expr.entries || []).forEach((entry) => { if (entry.expression.kind !== 'function_expression') scanExpression(entry.expression); });
+      }
+    };
+
+    for (const child of operations) {
+      if (child.kind === 'index_assign') {
+        scanExpression(child.target, 'write');
+        scanExpression(child.expression, 'read');
+        if (expressionType(child.target) !== 'f32' || expressionType(child.expression) !== 'f32') floatOnly = false;
+      } else if (child.kind === 'local') {
+        scalarWrites.add(child.name);
+        loopLocalTemps.add(child.name);
+        scanExpression(child.expression);
+        if (!this.pureInvariantExpression(child.expression)) pointwise = false;
+      } else if (child.kind === 'assign') {
+        scalarWrites.add(child.name);
+        scanExpression(child.expression);
+        pointwise = false;
+      } else if (child.kind === 'expr') {
+        scanExpression(child.expression);
+        pointwise = false;
+      } else {
+        branches += 1;
+        pointwise = false;
+        if (child.expression) scanExpression(child.expression);
+      }
+    }
+
+    const carriedScalar = [...scalarWrites].some((name) => !loopLocalTemps.has(name) && scalarReads.has(name));
+    const independent = operations.length > 0 && calls === 0 && irregularAccesses === 0 && branches === 0 && !carriedScalar;
+    return {
+      id: `${fn.label || fn.name}:${statement.token?.line || 0}:${statement.token?.column || 0}`,
+      indexName,
+      indexVariable: condition.left.resolvedReference?.variable || fn.variables.get(indexName),
+      limit: condition.right,
+      limitKey: this.kernelExpressionKey(condition.right),
+      operations,
+      latch,
+      reads: [...reads],
+      writes: [...writes],
+      scalarReads: [...scalarReads],
+      scalarWrites: [...scalarWrites],
+      calls,
+      irregularAccesses,
+      independent,
+      pointwise: independent && pointwise,
+      floatOnly: independent && floatOnly,
+      parallelEligible: independent && operations.length > 0,
+      computeEligible: independent && pointwise && floatOnly && writes.size > 0,
+      runtimeSpecialized: independent && pointwise && floatOnly,
+    };
+  }
+
+  markLoopHotCalls(fn) {
+    const scanExpression = (expr, depth) => {
+      if (!expr) return;
+      if (expr.kind === 'call') {
+        const target = expr.resolvedCallable?.kind === 'internal' ? expr.resolvedCallable.target : null;
+        if (target && target !== fn) {
+          target.loopHotScore = Number(target.loopHotScore || 0) + Math.max(1, depth * 8);
+          if (!expr.loopCallSpecialized) {
+            expr.loopCallSpecialized = true;
+            this.stats.loopCallsSpecialized += 1;
+          }
+        }
+        callArguments(expr).forEach((arg) => scanExpression(arg, depth));
+      } else if (expr.kind === 'binary') { scanExpression(expr.left, depth); scanExpression(expr.right, depth); }
+      else if (expr.kind === 'unary') scanExpression(expr.expression, depth);
+      else if (expr.kind === 'index') { scanExpression(expr.object, depth); scanExpression(expr.index, depth); }
+    };
+    const scanStatements = (statements, depth = 0) => {
+      for (const statement of statements) {
+        if (statement.expression) scanExpression(statement.expression, depth);
+        if (statement.kind === 'index_assign') { scanExpression(statement.target, depth); scanExpression(statement.expression, depth); }
+        if (statement.kind === 'if') {
+          statement.branches.forEach((branch) => { scanExpression(branch.condition, depth); scanStatements(branch.body, depth); });
+          scanStatements(statement.elseBody, depth);
+        } else if (statement.kind === 'while') {
+          scanExpression(statement.condition, depth + 1);
+          scanStatements(statement.body, depth + 1);
+        }
+      }
+    };
+    scanStatements(fn.body);
+  }
+
+  fuseCompatibleLoops(fn) {
+    const zeroInitializer = (statement) => (statement?.kind === 'local' || statement?.kind === 'assign')
+      && statement.expression?.kind === 'literal' && statement.expression.value === 0n;
+    const onlyPointwiseAssignments = (plan) => plan && plan.pointwise
+      && plan.operations.every((operation) => operation.kind === 'index_assign');
+    const process = (statements) => {
+      for (const statement of statements) {
+        if (statement.kind === 'if') {
+          statement.branches.forEach((branch) => process(branch.body));
+          process(statement.elseBody);
+        } else if (statement.kind === 'while') process(statement.body);
+      }
+      let index = 0;
+      while (index + 3 < statements.length) {
+        const firstInit = statements[index];
+        const firstLoop = statements[index + 1];
+        const secondInit = statements[index + 2];
+        const secondLoop = statements[index + 3];
+        if (!zeroInitializer(firstInit) || !zeroInitializer(secondInit)
+            || firstLoop?.kind !== 'while' || secondLoop?.kind !== 'while') { index += 1; continue; }
+        const firstPlan = this.canonicalKernelLoop(firstLoop, fn);
+        const secondPlan = this.canonicalKernelLoop(secondLoop, fn);
+        if (!onlyPointwiseAssignments(firstPlan) || !onlyPointwiseAssignments(secondPlan)
+            || firstPlan.limitKey !== secondPlan.limitKey
+            || firstInit.name !== firstPlan.indexName || secondInit.name !== secondPlan.indexName) { index += 1; continue; }
+        const renamed = secondPlan.operations;
+        for (const operation of renamed) {
+          this.replaceKernelIndex(operation.target, secondPlan.indexName, firstPlan.indexName, firstPlan.indexVariable);
+          this.replaceKernelIndex(operation.expression, secondPlan.indexName, firstPlan.indexName, firstPlan.indexVariable);
+        }
+        firstLoop.body.splice(firstLoop.body.length - 1, 0, ...renamed);
+        statements.splice(index + 2, 2);
+        firstLoop.fusedLoopCount = Number(firstLoop.fusedLoopCount || 0) + 1;
+        this.stats.loopsFused += 1;
+        this.stats.fusedLoopOperations += renamed.length;
+      }
+    };
+    process(fn.body);
+  }
+
+  analyzeKernelLoops(fn) {
+    fn.kernelPlans = [];
+    const process = (statements) => {
+      for (const statement of statements) {
+        if (statement.kind === 'if') {
+          statement.branches.forEach((branch) => process(branch.body));
+          process(statement.elseBody);
+          continue;
+        }
+        if (statement.kind !== 'while') continue;
+        process(statement.body);
+        const plan = this.canonicalKernelLoop(statement, fn);
+        statement.kernelPlan = plan;
+        if (!plan) continue;
+        fn.kernelPlans.push(plan);
+        if (!statement.kernelStatsCounted) {
+          statement.kernelStatsCounted = true;
+          this.stats.kernelLoopsAnalyzed += 1;
+          if (plan.independent) this.stats.independentKernelLoops += 1;
+          if (plan.pointwise) this.stats.pointwiseKernelLoops += 1;
+          if (plan.parallelEligible) this.stats.parallelKernelCandidates += 1;
+          if (plan.computeEligible) this.stats.computeKernelCandidates += 1;
+          if (plan.runtimeSpecialized) this.stats.runtimeSpecializedLoops += 1;
+        }
+      }
+    };
+    process(fn.body);
+  }
+
+  markAlgorithmicLoops(fn) {
+    const countSource = (expr) => {
+      if (expr?.kind !== 'call') return null;
+      let callable = expr.resolvedCallable;
+      if (!callable) {
+        try { callable = this.program.resolveCallable(fn.module, expr, { variables: fn.variables }); } catch { return null; }
+      }
+      if (callable?.kind === 'packed_length') return callArguments(expr)[0] || null;
+      if (callable?.kind !== 'builtin' || !['table.count', 'table.length'].includes(callable.target.name)) return null;
+      return callArguments(expr)[0] || null;
+    };
+    const process = (statements) => {
+      for (let statementIndex = 0; statementIndex < statements.length; statementIndex += 1) {
+        const statement = statements[statementIndex];
+        statement.algorithmPlan = null;
+        if (statement.kind === 'if') {
+          statement.branches.forEach((branch) => process(branch.body));
+          process(statement.elseBody);
+          continue;
+        }
+        if (statement.kind !== 'while') continue;
+        process(statement.body);
+        const plan = statement.kernelPlan || this.canonicalKernelLoop(statement, fn);
+        const initializer = statementIndex > 0 ? statements[statementIndex - 1] : null;
+        const startsAtZero = (initializer?.kind === 'local' || initializer?.kind === 'assign')
+          && initializer.name === plan?.indexName && initializer.expression?.kind === 'literal'
+          && initializer.expression.value === 0n;
+        if (!plan || !startsAtZero || plan.operations.length !== 1) continue;
+        const operation = plan.operations[0];
+        if (operation.kind === 'index_assign' && operation.expression?.kind === 'literal'
+            && (operation.expression.value === 0n || operation.expression.value === 0)) {
+          const tableKey = this.referenceKey(operation.target.object);
+          const limitSource = countSource(plan.limit);
+          const elementType = expressionType(operation.target);
+          if (!tableKey || operation.target.packedStruct || !isNumericType(elementType)
+              || this.kernelExpressionKey(limitSource) !== this.kernelExpressionKey(operation.target.object)) continue;
+          statement.algorithmPlan = {
+            kind: 'zero_fill',
+            target: operation.target.object,
+            targetIndex: operation.target,
+            indexVariable: plan.indexVariable,
+            elementType,
+            stride: operation.target.collectionStride || operation.target.tableElement?.stride || 0,
+          };
+          if (!statement.algorithmStatsCounted) {
+            statement.algorithmStatsCounted = true;
+            this.stats.algorithmicKernels += 1;
+            this.stats.zeroFillKernels += 1;
+          }
+        }
+      }
+    };
+    process(fn.body);
+  }
+
   markLoopTableBounds(fn) {
     const sameVariable = (expr, name) => expr?.kind === 'reference' && expr.path.length === 1 && expr.path[0] === name;
     const countSource = (expr) => {
@@ -5080,7 +5496,7 @@ class Optimizer {
     };
     const hasCall = (expr) => {
       if (!expr) return false;
-      if (expr.kind === 'call') return true;
+      if (expr.kind === 'call' || expr.kind === 'interpolated_string') return true;
       if (expr.kind === 'binary') return hasCall(expr.left) || hasCall(expr.right);
       if (expr.kind === 'unary') return hasCall(expr.expression);
       if (expr.kind === 'index') return hasCall(expr.object) || hasCall(expr.index);
@@ -5249,32 +5665,64 @@ class Optimizer {
         if (condition?.kind !== 'binary' || condition.operator !== '<' || condition.left?.kind !== 'reference' || condition.left.path.length !== 1) continue;
         const indexName = condition.left.path[0];
         const countObject = countSource(condition.right);
-        if (!countObject || statement.body.length !== 2) continue;
-        const operation = statement.body[0];
-        const latch = statement.body[1];
-        if (operation.kind !== 'index_assign' || expressionType(operation.target) !== 'f32') continue;
-        if (!sameVariable(operation.target.index, indexName)) continue;
+        if (!countObject || statement.body.length < 2) continue;
+        const latch = statement.body[statement.body.length - 1];
         if (latch.kind !== 'assign' || latch.name !== indexName || latch.expression?.kind !== 'binary'
             || latch.expression.operator !== '+' || !sameVariable(latch.expression.left, indexName)
             || latch.expression.right?.kind !== 'literal' || latch.expression.right.value !== 1n) continue;
-        const targetKey = referenceKey(operation.target.object);
-        const countKey = referenceKey(countObject);
-        if (!targetKey || targetKey !== countKey) continue;
+        const operations = statement.body.slice(0, -1);
+        if (operations.length === 0 || operations.some((operation) => operation.kind !== 'index_assign'
+            || expressionType(operation.target) !== 'f32' || !sameVariable(operation.target.index, indexName))) continue;
         const tables = [];
-        if (!collectVectorTables(operation.expression, indexName, tables)) continue;
-        if (!tables.some((entry) => entry.key === targetKey)) tables.push({ key: targetKey, object: operation.target.object, index: operation.target, packed: operation.target.packedStruct || null });
-        const registers = this.vectorRegisterNeed(operation.expression);
-        if (registers > 6) continue;
-        operation.target.boundsCheckElided = true;
-        for (const table of tables) table.index.boundsCheckElided = true;
+        let registerNeed = 1;
+        let valid = true;
+        for (const operation of operations) {
+          if (!collectVectorTables(operation.expression, indexName, tables)) { valid = false; break; }
+          const targetKey = referenceKey(operation.target.object);
+          if (!targetKey) { valid = false; break; }
+          if (!tables.some((entry) => entry.key === targetKey)) tables.push({
+            key: targetKey,
+            object: operation.target.object,
+            index: operation.target,
+            packed: operation.target.packedStruct || null,
+          });
+          const need = this.vectorRegisterNeed(operation.expression);
+          if (need > 6) { valid = false; break; }
+          registerNeed = Math.max(registerNeed, need);
+        }
+        if (!valid) continue;
+        const countKey = referenceKey(countObject);
+        if (countKey && !tables.some((entry) => entry.key === countKey)) tables.push({
+          key: countKey,
+          object: countObject,
+          index: operations[0].target,
+          packed: countObject.packedStruct || null,
+          countOnly: true,
+        });
+        for (const operation of operations) {
+          operation.target.boundsCheckElided = true;
+          const markReads = (expr) => {
+            if (!expr) return;
+            if (expr.kind === 'index') expr.boundsCheckElided = true;
+            else if (expr.kind === 'binary') { markReads(expr.left); markReads(expr.right); }
+            else if (expr.kind === 'unary') markReads(expr.expression);
+          };
+          markReads(operation.expression);
+        }
         statement.vectorPlan = {
           indexName,
           indexVariable: condition.left.resolvedReference?.variable || fn.variables.get(indexName),
-          operation,
+          operation: operations[0],
+          operations,
           tables,
-          registerNeed: registers,
+          registerNeed,
+          fused: operations.length > 1,
         };
         if (!previouslyVectorized) this.stats.vectorizedLoops += 1;
+        if (operations.length > 1 && !statement.multiVectorStatsCounted) {
+          statement.multiVectorStatsCounted = true;
+          this.stats.multiOperationVectorLoops += 1;
+        }
       }
     };
     process(fn.body);
@@ -5421,7 +5869,7 @@ class Optimizer {
         }
         if (!valid || !this.expressionReferencesOnly(final.expression, allowed)) continue;
         const expression = this.substituteInlineExpression(final.expression, replacements);
-        const candidateLimit = Number(fn.profileCount || 0) > 0 && this.level >= 6 ? 256 : inlineNodeLimit;
+        const candidateLimit = (Number(fn.profileCount || 0) > 0 || Number(fn.loopHotScore || 0) > 0) && this.level >= 6 ? 256 : inlineNodeLimit;
         if (this.countExpressionNodes(expression) > candidateLimit) continue;
         candidates.set(fn, expression);
       }
@@ -5445,7 +5893,7 @@ class Optimizer {
         const actualArgs = callArguments(expr);
         const conversionFreeArgs = template && actualArgs.length === target.params.length
           && actualArgs.every((arg, index) => canonicalTypeName(expressionType(arg)) === canonicalTypeName(target.params[index].type));
-        const hotTarget = Number(target?.profileCount || 0) > 0;
+        const hotTarget = Number(target?.profileCount || 0) > 0 || Number(target?.loopHotScore || 0) > 0;
         const simpleArguments = actualArgs.every(isSimpleLoadExpression);
         if (template && target !== caller && conversionFreeArgs && simpleArguments
             && (hotTarget || this.countExpressionNodes(template) <= inlineNodeLimit)) {
@@ -5505,6 +5953,8 @@ class Optimizer {
       if (expr.kind === 'reference') {
         const resolved = expr.resolvedReference;
         if (resolved?.kind === 'function' && !resolved.target.reachable) queue.push(resolved.target);
+      } else if (expr.kind === 'interpolated_string') {
+        (expr.parts || []).forEach((part) => { if (part.kind !== 'literal') visitExpression(part, queue); });
       } else if (expr.kind === 'call') {
         const callable = expr.resolvedCallable;
         if (callable?.kind === 'internal' && !callable.target.reachable) queue.push(callable.target);
@@ -5567,7 +6017,11 @@ class Optimizer {
     this.program.usedExternImports = new Set();
     const scanExpression = (expr) => {
       if (!expr) return;
-      if (expr.kind === 'call') {
+      if (expr.kind === 'interpolated_string') {
+        this.program.usesBuiltins.add('string.interpolate');
+        this.program.usesBuiltins.add('memory.alloc');
+        (expr.parts || []).forEach((part) => { if (part.kind !== 'literal') scanExpression(part); });
+      } else if (expr.kind === 'call') {
         const callable = expr.resolvedCallable;
         if (callable?.kind === 'builtin') this.program.usesBuiltins.add(callable.target.name);
         else if (callable?.kind === 'extern') this.program.usedExternImports.add(callable.target.importKey);
@@ -6044,6 +6498,16 @@ class Assembler {
   subss(dest, src) { this.scalarFloatOp(0x5C, dest, src); }
   mulss(dest, src) { this.scalarFloatOp(0x59, dest, src); }
   divss(dest, src) { this.scalarFloatOp(0x5E, dest, src); }
+  scalarFloatMemBase(opcode, destName, baseName, displacement = 0) {
+    const d = XMM[destName], b = REG[baseName]; this.emit(0xF3); this.emitRexIfNeeded(false, d, b); this.emit(0x0F, opcode);
+    this.emitBaseAddress(this.addressMode(displacement), d, b, displacement);
+  }
+  addssMemBase(dest, base, displacement = 0) { this.scalarFloatMemBase(0x58, dest, base, displacement); }
+  mulssMemBase(dest, base, displacement = 0) { this.scalarFloatMemBase(0x59, dest, base, displacement); }
+  ucomissXmmMemRsp(leftName, offset) {
+    const l = XMM[leftName]; this.emitRexIfNeeded(false, l, REG.rsp); this.emit(0x0F, 0x2E);
+    this.modrm(2, l, 4); this.sib(0, 4, 4); this.emitU32(offset);
+  }
   xorps(destName, srcName = destName) {
     const d = XMM[destName], s = XMM[srcName]; this.emitRexIfNeeded(false, d, s); this.emit(0x0F, 0x57); this.modrm(3, d, s);
   }
@@ -6122,6 +6586,10 @@ class Assembler {
     const r = XMM[rightName.replace('ymm', 'xmm')];
     this.vex3(2, 1, 0, 1, d, 0, r, l); this.emit(0xB8); this.modrm(3, d, r);
   }
+  vextractf128(destName, srcName, lane = 1) {
+    const d = XMM[destName.replace('ymm', 'xmm')], src = XMM[srcName.replace('ymm', 'xmm')];
+    this.vex3(3, 1, 0, 1, src, 0, d, 0); this.emit(0x19); this.modrm(3, src, d); this.emit(lane & 1);
+  }
   vzeroupper() { this.emit(0xC5, 0xF8, 0x77); }
 
   build(textRva, symbolRvas) {
@@ -6143,6 +6611,12 @@ class Assembler {
 function estimateExpressionTemps(expr, optimizationLevel = 0) {
   if (!expr) return 0;
   if (expr.kind === 'literal' || expr.kind === 'reference') return 0;
+  if (expr.kind === 'interpolated_string') {
+    const parts = expr.parts || [];
+    const nested = parts.reduce((maximum, part) => part.kind === 'literal'
+      ? maximum : Math.max(maximum, estimateExpressionTemps(part, optimizationLevel)), 0);
+    return parts.length + 2 + nested;
+  }
   if (expr.kind === 'unary') return estimateExpressionTemps(expr.expression, optimizationLevel);
   if (expr.kind === 'binary') {
     const leftTemps = estimateExpressionTemps(expr.left, optimizationLevel);
@@ -6228,7 +6702,12 @@ function analyzeFunction(fn, optimizationLevel = 2, optimizationStats = null) {
   const scanExpression = (expr, loopDepth = 0) => {
     if (!expr) return;
     maxTemps = Math.max(maxTemps, estimateExpressionTemps(expr, optimizationLevel));
-    if (expr.kind === 'reference' && expr.path.length >= 1 && fn.variables.has(expr.path[0])) {
+    if (expr.kind === 'interpolated_string') {
+      hasCalls = true;
+      for (const part of expr.parts || []) {
+        if (part.kind !== 'literal') scanExpression(part, loopDepth);
+      }
+    } else if (expr.kind === 'reference' && expr.path.length >= 1 && fn.variables.has(expr.path[0])) {
       referencedVariables.add(expr.path[0]);
       score(expr.path[0], 2 + loopDepth * 4);
       touch(expr.path[0]);
@@ -6450,6 +6929,7 @@ class CodeGenerator {
     this.epilogueLabel = null;
     this.functionBodyLabel = null;
     this.activeTableLoopPlans = [];
+    this.compilingPersistentVectorFallback = false;
     this.targetCpu = options.targetCpu || 'baseline';
     this.vectorWidth = this.targetCpu === 'avx2' || this.targetCpu === 'avx2-fma' ? 8 : 4;
     this.useFma = this.targetCpu === 'avx2-fma';
@@ -6846,6 +7326,168 @@ class CodeGenerator {
     if (branchWhenTrue) a.jl(label); else a.jge(label);
   }
 
+  tryCompileUnrolledFloatTableReduction(statement, module, info) {
+    if (this.optimizationLevel < 6 || !statement?.tableLoopPlan || statement.body?.length !== 2) return false;
+    const plan = statement.tableLoopPlan;
+    if (plan.stride !== 4) return false;
+    const operation = statement.body[0], latch = statement.body[1];
+    if (operation.kind !== 'assign' || latch.kind !== 'assign' || latch.name !== plan.indexName) return false;
+    const expr = operation.expression;
+    if (expr?.kind !== 'binary' || expr.operator !== '+' || expressionType(expr) !== 'f32') return false;
+    const accumulatorRef = (candidate) => candidate?.kind === 'reference' && candidate.path.length === 1 && candidate.path[0] === operation.name;
+    const indexed = expr.left?.kind === 'index' ? expr.left : (expr.right?.kind === 'index' ? expr.right : null);
+    if (!indexed || !(accumulatorRef(expr.left) || accumulatorRef(expr.right))) return false;
+    if (indexed.loopTablePlan !== plan || indexed.index?.kind !== 'reference' || indexed.index.path[0] !== plan.indexName) return false;
+    const accumulator = this.currentFunction.variables.get(operation.name);
+    if (!accumulator || !isFloatType(accumulator.type) || !plan.indexVariable) return false;
+
+    const a = this.asm;
+    this.setupTableLoopCache(plan, module, info);
+    this.loadVariableToReg(plan.indexVariable, 'rax');
+    this.loadTableLoopCount(plan, 'r9');
+    const done = a.unique('float_reduce_done');
+    const unrolled = a.unique('float_reduce_unrolled');
+    const remainder = a.unique('float_reduce_remainder');
+    const scalar = a.unique('float_reduce_scalar');
+    this.loadVariableToXmm(accumulator, 'xmm0');
+    a.cmpRegReg('rax', 'r9'); a.jge(done);
+    this.loadTableLoopData(plan, 'r8');
+    a.movRegReg('r10', 'rax'); a.imulRegImm32('r10', 4); a.addRegReg('r8', 'r10');
+    a.subRegReg('r9', 'rax');
+    a.label(unrolled);
+    a.cmpRegImm32('r9', 8); a.jl(remainder);
+    for (let offset = 0; offset < 32; offset += 4) a.addssMemBase('xmm0', 'r8', offset);
+    a.addRegImm32('r8', 32); a.subRegImm32('r9', 8); a.jmp(unrolled);
+    a.label(remainder);
+    a.testRegReg('r9'); a.jz(done);
+    a.label(scalar);
+    a.addssMemBase('xmm0', 'r8', 0); a.addRegImm32('r8', 4); a.subRegImm32('r9', 1); a.jnz(scalar);
+    a.label(done);
+    if (accumulator.register) { if (accumulator.register !== 'xmm0') a.movssXmmXmm(accumulator.register, 'xmm0'); }
+    else a.movssMemRspXmm(accumulator.stackOffset, 'xmm0');
+    this.loadTableLoopCount(plan, 'rax');
+    if (plan.indexVariable.register) { if (plan.indexVariable.register !== 'rax') a.movRegReg(plan.indexVariable.register, 'rax'); }
+    else a.movMemRspReg(plan.indexVariable.stackOffset, 'rax');
+    this.optimizationStats.unrolledFloatReductions = (this.optimizationStats.unrolledFloatReductions || 0) + 1;
+    return true;
+  }
+
+  tryCompilePersistentVectorRecurrence(statement, module, info) {
+    if (this.optimizationLevel < 6 || this.vectorWidth !== 8 || this.compilingPersistentVectorFallback) return false;
+    if (statement?.kind !== 'while' || statement.body?.length !== 4) return false;
+    const [indexInit, updateLoop, resetIf, outerLatch] = statement.body;
+    const outerCondition = statement.condition;
+    if (outerCondition?.kind !== 'binary' || outerCondition.operator !== '<'
+        || outerCondition.left?.kind !== 'reference' || outerCondition.left.path.length !== 1
+        || outerCondition.right?.kind !== 'literal' || typeof outerCondition.right.value !== 'bigint') return false;
+    const outerName = outerCondition.left.path[0];
+    if (indexInit?.kind !== 'local' || indexInit.expression?.kind !== 'literal' || indexInit.expression.value !== 0n) return false;
+    if (updateLoop?.kind !== 'while' || updateLoop.body?.length !== 2 || !updateLoop.vectorPlan) return false;
+    if (outerLatch?.kind !== 'assign' || outerLatch.name !== outerName || outerLatch.expression?.kind !== 'binary'
+        || outerLatch.expression.operator !== '+' || outerLatch.expression.left?.kind !== 'reference'
+        || outerLatch.expression.left.path[0] !== outerName || outerLatch.expression.right?.kind !== 'literal'
+        || outerLatch.expression.right.value !== 1n) return false;
+    const update = updateLoop.body[0];
+    if (update?.kind !== 'index_assign' || expressionType(update.target) !== 'f32') return false;
+    const key = (expr) => expr?.kind === 'reference' ? expr.path.join('.') : null;
+    const targetKey = key(update.target.object);
+    if (!targetKey || update.target.index?.kind !== 'reference' || update.target.index.path[0] !== indexInit.name) return false;
+    const sum = update.expression;
+    if (sum?.kind !== 'binary' || sum.operator !== '+') return false;
+    const targetTerm = [sum.left, sum.right].find((term) => term?.kind === 'index' && key(term.object) === targetKey);
+    const product = sum.left === targetTerm ? sum.right : sum.left;
+    if (!targetTerm || product?.kind !== 'binary' || product.operator !== '*') return false;
+    const leftIndex = product.left, rightIndex = product.right;
+    if (leftIndex?.kind !== 'index' || rightIndex?.kind !== 'index'
+        || leftIndex.index?.kind !== 'reference' || rightIndex.index?.kind !== 'reference'
+        || leftIndex.index.path[0] !== indexInit.name || rightIndex.index.path[0] !== indexInit.name) return false;
+    const leftKey = key(leftIndex.object), rightKey = key(rightIndex.object);
+    if (!leftKey || !rightKey || leftKey === targetKey || rightKey === targetKey) return false;
+
+    if (resetIf?.kind !== 'if' || resetIf.branches?.length !== 1 || resetIf.elseBody?.length) return false;
+    const branch = resetIf.branches[0], thresholdCondition = branch.condition;
+    if (thresholdCondition?.kind !== 'binary' || thresholdCondition.operator !== '>'
+        || thresholdCondition.left?.kind !== 'index' || key(thresholdCondition.left.object) !== targetKey
+        || thresholdCondition.left.index?.kind !== 'literal' || thresholdCondition.left.index.value !== 15n
+        || thresholdCondition.right?.kind !== 'literal' || thresholdCondition.right.valueType !== 'f32') return false;
+    if (branch.body?.length !== 2 || branch.body[0]?.kind !== 'local' || branch.body[0].expression?.kind !== 'literal'
+        || branch.body[0].expression.value !== 0n || branch.body[1]?.kind !== 'while') return false;
+    const resetName = branch.body[0].name, resetLoop = branch.body[1];
+    if (resetLoop.body?.length !== 2 || !resetLoop.vectorPlan) return false;
+    const scaleUpdate = resetLoop.body[0];
+    if (scaleUpdate?.kind !== 'index_assign' || key(scaleUpdate.target.object) !== targetKey
+        || scaleUpdate.target.index?.kind !== 'reference' || scaleUpdate.target.index.path[0] !== resetName) return false;
+    const scaleExpression = scaleUpdate.expression;
+    if (scaleExpression?.kind !== 'binary' || scaleExpression.operator !== '*') return false;
+    const scaleTarget = [scaleExpression.left, scaleExpression.right].find((term) => term?.kind === 'index' && key(term.object) === targetKey);
+    const scaleLiteral = scaleExpression.left === scaleTarget ? scaleExpression.right : scaleExpression.left;
+    if (!scaleTarget || scaleLiteral?.kind !== 'literal' || scaleLiteral.valueType !== 'f32') return false;
+
+    const targetObject = update.target.object, leftObject = leftIndex.object, rightObject = rightIndex.object;
+    const outerVariable = this.currentFunction.variables.get(outerName);
+    const indexVariable = this.currentFunction.variables.get(indexInit.name);
+    if (!outerVariable || !indexVariable) return false;
+    const a = this.asm;
+    const fallback = a.unique('persistent_vector_fallback');
+    const fastLoop = a.unique('persistent_vector_loop');
+    const noScale = a.unique('persistent_vector_no_scale');
+    const fastStore = a.unique('persistent_vector_store');
+    const done = a.unique('persistent_vector_done');
+
+    const loadTable = (object, dataReg) => {
+      if (!this.emitValueToReg(object, module, 'rax')) this.compileAsInteger(object, module, info, 0);
+      a.testRegReg('rax'); a.jz(fallback);
+      a.movRegMemBase('rcx', 'rax', 8, 8); a.cmpRegImm32('rcx', 16); a.jnz(fallback);
+      a.movRegMemBase(dataReg, 'rax', 0, 8); a.testRegReg(dataReg); a.jz(fallback);
+    };
+    loadTable(targetObject, 'r8');
+    loadTable(leftObject, 'r9');
+    loadTable(rightObject, 'r10');
+    a.cmpRegReg('r8', 'r9'); a.jz(fallback);
+    a.cmpRegReg('r8', 'r10'); a.jz(fallback);
+
+    this.loadVariableToReg(outerVariable, 'rax');
+    a.movRegImmSmart('r11', outerCondition.right.value); a.subRegReg('r11', 'rax');
+    a.cmpRegImm32('r11', 0); a.jle(fastStore);
+
+    a.vmovupsYmmMemBase('ymm0', 'r8', 0); a.vmovupsYmmMemBase('ymm1', 'r8', 32);
+    a.vmovupsYmmMemBase('ymm2', 'r9', 0); a.vmovupsYmmMemBase('ymm3', 'r9', 32);
+    a.vmovupsYmmMemBase('ymm4', 'r10', 0); a.vmovupsYmmMemBase('ymm5', 'r10', 32);
+    a.vmulps('ymm2', 'ymm2', 'ymm4'); a.vmulps('ymm3', 'ymm3', 'ymm5');
+    a.movssXmmImm('xmm5', thresholdCondition.right.value);
+    a.label(fastLoop);
+    a.vaddps('ymm0', 'ymm0', 'ymm2'); a.vaddps('ymm1', 'ymm1', 'ymm3');
+    a.vextractf128('xmm4', 'ymm1', 1); a.shufps('xmm4', 'xmm4', 0xFF); a.ucomiss('xmm4', 'xmm5'); a.jbe(noScale);
+    a.movssXmmImm('xmm4', scaleLiteral.value); a.vbroadcastssYmmXmm('ymm4', 'xmm4');
+    a.vmulps('ymm0', 'ymm0', 'ymm4'); a.vmulps('ymm1', 'ymm1', 'ymm4');
+    a.label(noScale);
+    a.subRegImm32('r11', 1); a.jnz(fastLoop);
+    a.label(fastStore);
+    /* Only store when at least one iteration ran. Reloading/storing unchanged
+       values is harmless, but the branch keeps a pre-completed loop valid. */
+    this.loadVariableToReg(outerVariable, 'rax');
+    a.movRegImmSmart('rcx', outerCondition.right.value); a.cmpRegReg('rax', 'rcx');
+    const skipVectorStore = a.unique('persistent_vector_skip_store'); a.jge(skipVectorStore);
+    a.vmovupsMemBaseYmm('r8', 0, 'ymm0'); a.vmovupsMemBaseYmm('r8', 32, 'ymm1');
+    a.label(skipVectorStore);
+    a.vzeroupper();
+    a.movRegImmSmart('rax', outerCondition.right.value);
+    if (outerVariable.register) { if (outerVariable.register !== 'rax') a.movRegReg(outerVariable.register, 'rax'); }
+    else a.movMemRspReg(outerVariable.stackOffset, 'rax');
+    a.movRegImm32('rax', 16);
+    if (indexVariable.register) { if (indexVariable.register !== 'rax') a.movRegReg(indexVariable.register, 'rax'); }
+    else a.movMemRspReg(indexVariable.stackOffset, 'rax');
+    a.jmp(done);
+
+    a.label(fallback); a.vzeroupper();
+    this.compilingPersistentVectorFallback = true;
+    this.compileStatement(statement, module, info);
+    this.compilingPersistentVectorFallback = false;
+    a.label(done);
+    this.optimizationStats.persistentVectorRecurrences = (this.optimizationStats.persistentVectorRecurrences || 0) + 1;
+    return true;
+  }
+
   emitTableElementPointer(objectExpr, indexExpr, module, info, tempBaseIndex = 0, boundsCheckElided = false, knownStride = 0) {
     const a = this.asm;
     const directObject = this.emitValueToReg(objectExpr, module, 'rcx');
@@ -6949,6 +7591,60 @@ class CodeGenerator {
     }
     a.label(done);
     return type;
+  }
+
+  compileInterpolatedString(expr, module, info, tempBaseIndex = 0) {
+    const a = this.asm;
+    const parts = expr.parts || [];
+    const totalSlot = this.tempOffset(info, tempBaseIndex + parts.length);
+    const resultSlot = this.tempOffset(info, tempBaseIndex + parts.length + 1);
+    const nestedBase = tempBaseIndex + parts.length + 2;
+    const stringLength = this.requireImport('KERNEL32.dll', 'lstrlenA');
+    const stringAppend = this.requireImport('KERNEL32.dll', 'lstrcatA');
+
+    for (let index = 0; index < parts.length; index += 1) {
+      const part = parts[index];
+      if (part.kind === 'literal') a.leaRip('rax', this.internString(part.value));
+      else this.compileAsInteger(part, module, info, nestedBase);
+      a.movMemRspReg(this.tempOffset(info, tempBaseIndex + index), 'rax');
+    }
+
+    a.xorRegReg('rax');
+    a.movMemRspReg(totalSlot, 'rax');
+    for (let index = 0; index < parts.length; index += 1) {
+      const skipLength = a.unique('interpolation_length_skip');
+      a.movRegMemRsp('rcx', this.tempOffset(info, tempBaseIndex + index));
+      a.testRegReg('rcx');
+      a.jz(skipLength);
+      a.callIat(stringLength);
+      a.movRegMemRsp('r10', totalSlot);
+      a.addRegReg('r10', 'rax');
+      a.movMemRspReg(totalSlot, 'r10');
+      a.label(skipLength);
+    }
+
+    a.movRegMemRsp('rcx', totalSlot);
+    a.addRegImm32('rcx', 1);
+    a.callLabel('__lsx_memory_alloc');
+    a.movMemRspReg(resultSlot, 'rax');
+    const interpolationDone = a.unique('interpolation_done');
+    a.testRegReg('rax');
+    a.jz(interpolationDone);
+    a.xorRegReg('r10');
+    a.movMemBaseReg('rax', 0, 'r10', 1);
+
+    for (let index = 0; index < parts.length; index += 1) {
+      const skipAppend = a.unique('interpolation_append_skip');
+      a.movRegMemRsp('rdx', this.tempOffset(info, tempBaseIndex + index));
+      a.testRegReg('rdx');
+      a.jz(skipAppend);
+      a.movRegMemRsp('rcx', resultSlot);
+      a.callIat(stringAppend);
+      a.label(skipAppend);
+    }
+
+    a.movRegMemRsp('rax', resultSlot);
+    a.label(interpolationDone);
   }
 
   emitValueToReg(expr, module, regName) {
@@ -7219,6 +7915,9 @@ class CodeGenerator {
   compileCall(expr, module, info, tempBaseIndex = 0) {
     const a = this.asm;
     const callable = expr.resolvedCallable || this.program.resolveCallable(module, expr, { variables: this.currentFunction.variables });
+    if (callable.kind === 'deferred_method') {
+      throw new CompileError(`could not resolve method '${callable.target?.name || expr.path?.join('.') || 'unknown'}' after whole-project inference`, expr.token, module.filePath, { code: 'LSX2418', hint: 'Make sure the function is called with a concrete object or collection value.' });
+    }
     if (callable.kind === 'builtin' && callable.target.name === 'memory.embed_binary') {
       const args = callArguments(expr);
       const source = args[0];
@@ -7727,6 +8426,10 @@ class CodeGenerator {
       this.compileBooleanExpression(expr, module, info, tempBaseIndex);
       return;
     }
+    if (expr.kind === 'interpolated_string') {
+      this.compileInterpolatedString(expr, module, info, tempBaseIndex);
+      return;
+    }
     if (this.emitValueToReg(expr, module, 'rax')) return;
     if (expr.kind === 'unary') {
       this.compileAsInteger(expr.expression, module, info, tempBaseIndex);
@@ -8018,6 +8721,39 @@ class CodeGenerator {
     } else a.movMemRspReg(variable.stackOffset, register);
   }
 
+  tryCompileAlgorithmicKernel(statement, module, info) {
+    const plan = statement.algorithmPlan;
+    if (this.optimizationLevel < 6 || plan?.kind !== 'zero_fill' || !plan.indexVariable) return false;
+    const stride = tableElementStorageSize(plan.targetIndex?.tableElement);
+    if (!Number.isInteger(stride) || stride <= 0) return false;
+    const a = this.asm;
+    if (!this.emitValueToReg(plan.target, module, 'rcx')) {
+      this.compileAsInteger(plan.target, module, info, 0);
+      a.movRegReg('rcx', 'rax');
+    }
+    const done = a.unique('kernel_zero_fill_done');
+    a.testRegReg('rcx'); a.jz(done);
+    a.movRegMemBase('r11', 'rcx', 8, 8);
+    this.loadVariableToReg(plan.indexVariable, 'r10');
+    a.cmpRegImm32('r10', 0); a.jl(done);
+    a.cmpRegReg('r10', 'r11'); a.jge(done);
+    a.movRegMemBase('rcx', 'rcx', 0, 8);
+    a.movRegReg('rax', 'r10');
+    if (stride !== 1) a.imulRegImm32('rax', stride);
+    a.addRegReg('rcx', 'rax');
+    a.movRegReg('r8', 'r11');
+    a.subRegReg('r8', 'r10');
+    if (stride !== 1) a.imulRegImm32('r8', stride);
+    this.storeIntegerVariable(plan.indexVariable, 'r11');
+    a.xorRegReg('rdx');
+    a.subRsp(0x28);
+    a.callIat(this.requireImport('msvcrt.dll', 'memset'));
+    a.addRsp(0x28);
+    a.label(done);
+    this.optimizationStats.algorithmicKernelsEmitted = (this.optimizationStats.algorithmicKernelsEmitted || 0) + 1;
+    return true;
+  }
+
   compileVectorizedLoopPrefix(statement, module, info) {
     const plan = statement.vectorPlan;
     if (!plan?.indexVariable) return false;
@@ -8033,15 +8769,20 @@ class CodeGenerator {
       a.cmpRegImm32('r11', width);
       a.jl(vectorDone);
     }
-    if (width === 8) {
-      if (!this.emitAvxVectorExpression(plan.operation.expression, module, info, 'ymm0', ['ymm1', 'ymm2', 'ymm3', 'ymm4', 'ymm5'], 0)) return false;
-    } else if (!this.emitVectorExpression(plan.operation.expression, module, info, 'xmm0', ['xmm1', 'xmm2', 'xmm3', 'xmm4', 'xmm5'], 0)) return false;
-    this.emitIndexElementPointer(plan.operation.target, module, info, 8);
-    const skipStore = a.unique('vector_store_invalid');
-    a.testRegReg('rax'); a.jz(skipStore);
-    if (width === 8) a.vmovupsMemBaseYmm('rax', 0, 'ymm0');
-    else a.movupsMemBaseXmm('rax', 0, 'xmm0');
-    a.label(skipStore);
+    const operations = plan.operations || [plan.operation];
+    for (let operationIndex = 0; operationIndex < operations.length; operationIndex += 1) {
+      const operation = operations[operationIndex];
+      const tempBase = operationIndex * 12;
+      if (width === 8) {
+        if (!this.emitAvxVectorExpression(operation.expression, module, info, 'ymm0', ['ymm1', 'ymm2', 'ymm3', 'ymm4', 'ymm5'], tempBase)) return false;
+      } else if (!this.emitVectorExpression(operation.expression, module, info, 'xmm0', ['xmm1', 'xmm2', 'xmm3', 'xmm4', 'xmm5'], tempBase)) return false;
+      this.emitIndexElementPointer(operation.target, module, info, tempBase + 8);
+      const skipStore = a.unique('vector_store_invalid');
+      a.testRegReg('rax'); a.jz(skipStore);
+      if (width === 8) a.vmovupsMemBaseYmm('rax', 0, 'ymm0');
+      else a.movupsMemBaseXmm('rax', 0, 'xmm0');
+      a.label(skipStore);
+    }
     this.loadVariableToReg(plan.indexVariable, 'rax');
     a.addRegImm32('rax', width);
     this.storeIntegerVariable(plan.indexVariable, 'rax');
@@ -8205,6 +8946,9 @@ class CodeGenerator {
       return;
     }
     if (statement.kind === 'while') {
+      if (this.tryCompileAlgorithmicKernel(statement, module, info)) return;
+      if (this.tryCompilePersistentVectorRecurrence(statement, module, info)) return;
+      if (this.tryCompileUnrolledFloatTableReduction(statement, module, info)) return;
       const tableLoopPlan = this.optimizationLevel >= 6 ? statement.tableLoopPlan : null;
       if (tableLoopPlan) {
         this.setupTableLoopCache(tableLoopPlan, module, info);
@@ -8399,7 +9143,13 @@ class CodeGenerator {
       }
       a.movMemRspReg(48, 'rax');
       for (const field of struct.fieldOrder) {
-        if (fieldOwnsStructStorage(field)) {
+        if (fieldOwnsStringStorage(field)) {
+          a.movRegMemRsp('r10', 40);
+          a.movRegMemBase('rcx', 'r10', field.offset, 8);
+          a.callLabel('__lsx_string_clone');
+          a.movRegMemRsp('r11', 48);
+          a.movMemBaseReg('r11', field.offset, 'rax', 8);
+        } else if (fieldOwnsStructStorage(field)) {
           const nestedNull = a.unique(`${struct.name}_${field.name}_clone_null`);
           const nestedStored = a.unique(`${struct.name}_${field.name}_clone_stored`);
           a.movRegMemRsp('r10', 40);
@@ -8441,7 +9191,15 @@ class CodeGenerator {
         a.callLabel(customDestroy.label);
       } else {
         for (const field of struct.fieldOrder) {
-          if (fieldOwnsStructStorage(field)) {
+          if (fieldOwnsStringStorage(field)) {
+            a.movRegMemRsp('r10', 40);
+            a.movRegMemBase('rcx', 'r10', field.offset, 8);
+            a.testRegReg('rcx');
+            const stringDestroySkip = a.unique(`${struct.name}_${field.name}_string_destroy_skip`);
+            a.jz(stringDestroySkip);
+            a.callLabel('__lsx_string_destroy');
+            a.label(stringDestroySkip);
+          } else if (fieldOwnsStructStorage(field)) {
             a.movRegMemRsp('r10', 40);
             a.movRegMemBase('rcx', 'r10', field.offset, 8);
             a.testRegReg('rcx');
@@ -8549,14 +9307,18 @@ class CodeGenerator {
       this.program.resolveStructLayout(struct);
       return struct.fieldOrder.some((field) => field.defaultConstructTable);
     }));
+    const hasOwnedStrings = this.program.moduleOrder.some((module) => [...module.structs.values()].some((struct) => {
+      this.program.resolveStructLayout(struct);
+      return struct.fieldOrder.some((field) => fieldOwnsStringStorage(field));
+    }));
     if (hasFamily('window')) this.emitWindowRuntime();
-    if (hasFamily('memory') || hasFamily('table') || hasStructs || hasOwnedTableDefaults) this.emitMemoryRuntime();
+    if (hasFamily('memory') || hasFamily('table') || hasStructs || hasOwnedTableDefaults || hasOwnedStrings) this.emitMemoryRuntime(hasFamily('thread') || hasFamily('atomic'));
     if (hasFamily('table') || hasOwnedTableDefaults) this.emitTableRuntime();
     if (hasFamily('simd')) this.emitSimdRuntime();
     if (hasFamily('debug')) this.emitDebugRuntime();
     if (hasFamily('console')) this.emitConsoleRuntime();
     if (hasFamily('system')) this.emitSystemRuntime();
-    if (hasFamily('string')) this.emitStringRuntime();
+    if (hasFamily('string') || hasOwnedStrings) this.emitStringRuntime(hasOwnedStrings);
     if (this.program.usesObjectTypeInfo && this.program.runtimeTypeCount > 0) this.emitObjectTypeRuntime();
     if (hasFamily('thread')) this.emitThreadRuntime();
     if (hasFamily('atomic')) this.emitAtomicRuntime();
@@ -8678,7 +9440,7 @@ class CodeGenerator {
     a.xorRegReg('rcx'); a.callIat(postQuit); a.xorRegReg('rax'); a.addRsp(0x28); a.ret();
   }
 
-  emitMemoryRuntime() {
+  emitMemoryRuntime(threadSafe = true) {
     const a = this.asm;
     const getProcessHeap = this.requireImport('KERNEL32.dll', 'GetProcessHeap');
     const heapAlloc = this.requireImport('KERNEL32.dll', 'HeapAlloc');
@@ -8690,6 +9452,7 @@ class CodeGenerator {
     const slabPageSize = 65536;
 
     const acquireSlabLock = () => {
+      if (!threadSafe) return;
       const wait = a.unique('slab_lock_wait');
       const acquired = a.unique('slab_lock_acquired');
       a.leaRip('r10', 'data_slab_lock');
@@ -8701,6 +9464,7 @@ class CodeGenerator {
       a.label(acquired);
     };
     const releaseSlabLock = () => {
+      if (!threadSafe) return;
       a.leaRip('r10', 'data_slab_lock');
       a.xorRegReg('rax');
       a.movMemBaseReg('r10', 0, 'rax', 8);
@@ -9294,10 +10058,11 @@ class CodeGenerator {
     a.label('__lsx_system_exit'); a.subRsp(0x28); a.callIat(exit); a.int3();
   }
 
-  emitStringRuntime() {
+  emitStringRuntime(includeOwnedStrings = false) {
     const a = this.asm;
     const stringLength = this.requireImport('KERNEL32.dll', 'lstrlenA');
     const stringCompare = this.requireImport('KERNEL32.dll', 'lstrcmpA');
+    const stringCopy = includeOwnedStrings ? this.requireImport('KERNEL32.dll', 'lstrcpyA') : null;
 
     a.label('__lsx_string_length');
     a.subRsp(0x28);
@@ -9348,6 +10113,35 @@ class CodeGenerator {
     a.label(compareLeftEmpty); a.movRegImmSigned32('rax', -1); a.ret();
     a.label(compareRightEmpty); a.movRegImm32('rax', 1); a.ret();
     a.label(compareSame); a.xorRegReg('rax'); a.ret();
+
+    if (includeOwnedStrings) {
+      // Interpolated raw strings own one native UTF-8 allocation. Object
+      // fields inferred as owned strings clone and release that storage with the
+      // containing object, keeping shader source construction invisible to LSX.
+      a.label('__lsx_string_clone');
+      a.subRsp(0x38);
+      a.movMemRspReg(40, 'rcx');
+      const cloneEmpty = a.unique('string_clone_empty');
+      const cloneDone = a.unique('string_clone_done');
+      a.testRegReg('rcx'); a.jz(cloneEmpty);
+      a.callIat(stringLength);
+      a.addRegImm32('rax', 1);
+      a.movRegReg('rcx', 'rax');
+      a.callLabel('__lsx_memory_alloc');
+      a.testRegReg('rax'); a.jz(cloneEmpty);
+      a.movMemRspReg(48, 'rax');
+      a.movRegReg('rcx', 'rax');
+      a.movRegMemRsp('rdx', 40);
+      a.callIat(stringCopy);
+      a.movRegMemRsp('rax', 48);
+      a.jmp(cloneDone);
+      a.label(cloneEmpty); a.xorRegReg('rax');
+      a.label(cloneDone); a.addRsp(0x38); a.ret();
+
+      a.label('__lsx_string_destroy');
+      a.jmp('__lsx_memory_free');
+
+    }
 
     // A string is a UTF-8 pointer in the native ABI. This conversion gives
     // owned byte buffers and file/JSON views a clean typed string surface.
@@ -9955,6 +10749,8 @@ function loadProjectConfig(input) {
       pgoGenerate: null,
       pgoUse: null,
       targetCpu: 'baseline',
+      emitLssl: false,
+      emitKernels: false,
     };
   }
   if (!fs.existsSync(configPath)) throw new CompileError(`project file not found: ${configPath}`, null, configPath);
@@ -9976,6 +10772,8 @@ function loadProjectConfig(input) {
   const pgoGenerate = raw.pgoGenerate ? path.resolve(root, String(raw.pgoGenerate)) : null;
   const pgoUse = raw.pgoUse ? path.resolve(root, String(raw.pgoUse)) : null;
   const targetCpu = raw.targetCpu === undefined ? 'baseline' : String(raw.targetCpu).toLowerCase();
+  const emitLssl = raw.emitLssl === true;
+  const emitKernels = raw.emitKernels === true;
   if (!['baseline', 'avx2', 'avx2-fma'].includes(targetCpu)) {
     throw new CompileError('lazyscriptex.json "targetCpu" must be baseline, avx2, or avx2-fma', null, configPath);
   }
@@ -9995,6 +10793,8 @@ function loadProjectConfig(input) {
     pgoGenerate,
     pgoUse,
     targetCpu,
+    emitLssl,
+    emitKernels,
   };
 }
 
@@ -10070,6 +10870,10 @@ function copyRuntimeAssets(project, output, importGroups = []) {
     ['lsxmedia.dll', ['@LazyScript/native/LSXMedia.dll']],
     ['lsxglabi.dll', ['@LazyScript/native/LSXGLABI.dll']],
     ['lsxmath.dll', ['@LazyScript/native/LSXMath.dll']],
+    ['lsxvulkan.dll', [
+      '@LazyScript/native/LSXVulkan.dll',
+      '@LazyScript/runtime/glfw3.dll',
+    ]],
     ['stb_image.dll', ['@LazyScript/native/stb_image.dll']],
     ['lsxfreetype.dll', [
       '@LazyScript/native/LSXFreeType.dll',
@@ -10107,12 +10911,264 @@ function copyRuntimeAssets(project, output, importGroups = []) {
   return { count, directories: copiedDirectories, files: copiedFiles, automaticFiles, missingFiles };
 }
 
+function writeLsslOutputs(program, outputPath, enabled = false) {
+  const directory = path.join(path.dirname(outputPath), 'lssl');
+  if (!enabled) {
+    // LSSL source is already embedded in the executable. Normal builds must not
+    // leak generated GLSL beside the game or leave stale copies from older builds.
+    fs.rmSync(directory, { recursive: true, force: true });
+    return { count: 0, directory: null, files: [] };
+  }
+  const modules = program.moduleOrder.filter((module) => module.lssl);
+  if (modules.length === 0) return { count: 0, directory: null, files: [] };
+  fs.mkdirSync(directory, { recursive: true });
+  const files = [];
+  for (const module of modules) {
+    const base = path.basename(module.filePath, path.extname(module.filePath));
+    for (const [stage, source] of Object.entries(module.lssl.generated || {})) {
+      const target = path.join(directory, `${base}.${stage}.glsl`);
+      fs.writeFileSync(target, source, 'utf8');
+      files.push(target);
+    }
+  }
+  return { count: files.length, directory, files };
+}
+
+function kernelSafeName(value) {
+  const clean = String(value || 'kernel').replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+  return clean || 'kernel';
+}
+
+function kernelSymbolName(prefix, value) {
+  const source = String(value || 'kernel');
+  const hash = crypto.createHash('sha1').update(source).digest('hex').slice(0, 8);
+  return `${prefix}_${kernelSafeName(source)}_${hash}`;
+}
+
+function kernelNumberLiteral(value, valueType = null) {
+  if (typeof value === 'bigint') return valueType === 'f32' ? `${value}.0` : String(value);
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  const text = String(number);
+  return /[.eE]/.test(text) ? text : `${text}.0`;
+}
+
+function kernelLsslExpression(expr, indexName, tableNames, scalarNames, localNames = new Map(), scalarTypes = new Map(), scalarSources = new Map()) {
+  if (!expr) return null;
+  if (expr.kind === 'literal') return kernelNumberLiteral(expr.value, expr.valueType);
+  if (expr.kind === 'reference') {
+    const key = expr.path.join('.');
+    if (expr.path.length === 1 && expr.path[0] === indexName) return 'index';
+    if (expr.path.length === 1 && localNames.has(expr.path[0])) return localNames.get(expr.path[0]);
+    const name = kernelSymbolName('lsx_value', key);
+    scalarNames.add(name);
+    scalarSources.set(name, key);
+    const type = expressionType(expr);
+    scalarTypes.set(name, isFloatType(type) ? 'Number' : 'Whole');
+    return name;
+  }
+  if (expr.kind === 'index') {
+    if (expr.index?.kind !== 'reference' || expr.index.path.length !== 1 || expr.index.path[0] !== indexName) return null;
+    const key = expr.object?.kind === 'reference' ? expr.object.path.join('.') : null;
+    const table = key ? tableNames.get(key) : null;
+    return table ? `${table}[index]` : null;
+  }
+  if (expr.kind === 'unary' && expr.operator === '-') {
+    const value = kernelLsslExpression(expr.expression, indexName, tableNames, scalarNames, localNames, scalarTypes, scalarSources);
+    return value ? `(-${value})` : null;
+  }
+  if (expr.kind === 'binary' && ['+', '-', '*', '/', '%'].includes(expr.operator)) {
+    const left = kernelLsslExpression(expr.left, indexName, tableNames, scalarNames, localNames, scalarTypes, scalarSources);
+    const right = kernelLsslExpression(expr.right, indexName, tableNames, scalarNames, localNames, scalarTypes, scalarSources);
+    return left && right ? `(${left} ${expr.operator} ${right})` : null;
+  }
+  return null;
+}
+
+function writeKernelOutputs(program, outputPath, enabled = false) {
+  const directory = path.join(path.dirname(outputPath), 'kernels');
+  if (!enabled) {
+    fs.rmSync(directory, { recursive: true, force: true });
+    return { count: 0, directory: null, files: [], manifest: null, kernels: [] };
+  }
+  const candidates = [];
+  for (const module of program.moduleOrder) {
+    for (const fn of module.functions.values()) {
+      if (fn.reachable === false) continue;
+      for (const plan of fn.kernelPlans || []) {
+        if (!plan.computeEligible || !plan.operations?.length) continue;
+        candidates.push({ module, fn, plan });
+      }
+    }
+  }
+  fs.rmSync(directory, { recursive: true, force: true });
+  if (candidates.length === 0) return { count: 0, directory: null, files: [], manifest: null, kernels: [] };
+  fs.mkdirSync(directory, { recursive: true });
+  const files = [];
+  const kernels = [];
+  let ordinal = 0;
+  for (const candidate of candidates) {
+    const { module, fn, plan } = candidate;
+    const tableKeys = [...new Set([...(plan.reads || []), ...(plan.writes || [])])];
+    const tableNames = new Map(tableKeys.map((key, index) => [key, `lsx_data_${index}_${kernelSafeName(key)}`]));
+    const scalarNames = new Set();
+    const scalarTypes = new Map();
+    const scalarSources = new Map();
+    const localNames = new Map();
+    const lines = [];
+    let valid = true;
+    for (const operation of plan.operations) {
+      if (operation.kind === 'local') {
+        const expression = kernelLsslExpression(operation.expression, plan.indexName, tableNames, scalarNames, localNames, scalarTypes, scalarSources);
+        if (!expression) { valid = false; break; }
+        const localName = `lsx_local_${kernelSafeName(operation.name)}`;
+        lines.push(`        local ${localName} = ${expression}`);
+        localNames.set(operation.name, localName);
+        continue;
+      }
+      if (operation.kind !== 'index_assign') { valid = false; break; }
+      const targetKey = operation.target.object?.kind === 'reference' ? operation.target.object.path.join('.') : null;
+      const target = targetKey ? tableNames.get(targetKey) : null;
+      const expression = kernelLsslExpression(operation.expression, plan.indexName, tableNames, scalarNames, localNames, scalarTypes, scalarSources);
+      if (!target || !expression) { valid = false; break; }
+      lines.push(`        ${target}[index] = ${expression}`);
+    }
+    if (!valid || lines.length === 0) continue;
+    const scalarParameters = [...scalarNames].sort();
+    const wholeParameters = ['lsx_count', ...scalarParameters.filter((name) => (scalarTypes.get(name) || 'Number') === 'Whole')];
+    const numberParameters = scalarParameters.filter((name) => (scalarTypes.get(name) || 'Number') !== 'Whole');
+    const parameterStorage = [];
+    let nextBinding = tableKeys.length;
+    if (wholeParameters.length > 0) {
+      parameterStorage.push({ name: 'lsx_kernel_whole', type: 'Whole', binding: nextBinding, entries: wholeParameters });
+      nextBinding += 1;
+    }
+    if (numberParameters.length > 0) {
+      parameterStorage.push({ name: 'lsx_kernel_number', type: 'Number', binding: nextBinding, entries: numberParameters });
+      nextBinding += 1;
+    }
+    // The current Vulkan compute bridge exposes eight storage bindings. Scalar
+    // parameters use tiny storage buffers so the same generated source remains
+    // valid for both OpenGL and Vulkan without a hidden push/uniform ABI.
+    if (nextBinding > 8) continue;
+    const parameterLoads = [];
+    for (const storage of parameterStorage) {
+      storage.entries.forEach((name, parameterIndex) => parameterLoads.push(`        local ${name} = ${storage.name}[${parameterIndex}]`));
+    }
+    const base = kernelSafeName(`${path.basename(module.filePath, path.extname(module.filePath))}_${fn.name}_${ordinal}`);
+    const shaderName = `AutoKernel_${base}`;
+    const source = [
+      `shader ${shaderName}`,
+      'vulkan',
+      'compute',
+      '    workers = {64,1,1}',
+      ...tableKeys.map((key, index) => `    storage ${tableNames.get(key)} = Number at ${index}`),
+      ...parameterStorage.map((storage) => `    storage ${storage.name} = ${storage.type} at ${storage.binding}`),
+      '    main = fn()',
+      ...parameterLoads,
+      '        local index = Whole(worker.id.x)',
+      '        if index < lsx_count then',
+      ...lines.map((line) => `    ${line}`),
+      '        end',
+      '    end',
+      'end',
+      'end',
+      '',
+    ].join('\n');
+    const lsslPath = path.join(directory, `${base}.lssl`);
+    let compiled;
+    try { compiled = compileLsslSource(source, lsslPath); } catch { continue; }
+    fs.writeFileSync(lsslPath, source, 'utf8');
+    files.push(lsslPath);
+    let spirvPath = null;
+    const spirvWords = compiled.spirv?.compute || [];
+    if (spirvWords.length > 0) {
+      spirvPath = path.join(directory, `${base}.compute.spv`);
+      const binary = Buffer.alloc(spirvWords.length * 4);
+      spirvWords.forEach((word, index) => binary.writeUInt32LE(Number(word >>> 0), index * 4));
+      fs.writeFileSync(spirvPath, binary);
+      files.push(spirvPath);
+    }
+    const wrapperPath = path.join(directory, `${base}.lsx`);
+    const wrapperMetadata = [
+      '',
+      '-- Generated binding metadata for transparent OpenGL/Vulkan dispatch.',
+      'export const workgroup_size = 64',
+      ...tableKeys.map((key, index) => `export const data_binding_${index}_${kernelSafeName(key)} = ${index}`),
+      ...parameterStorage.map((storage) => `export const parameter_binding_${storage.type.toLowerCase()} = ${storage.binding}`),
+      ...parameterStorage.flatMap((storage) => storage.entries.map((name, index) => {
+        const sourceName = name === 'lsx_count' ? 'count' : (scalarSources.get(name) || name);
+        return `export const parameter_index_${index}_${kernelSafeName(sourceName)} = ${index}`;
+      })),
+      'export fn groups_for(count)',
+      '    if count <= 0 then return 0 end',
+      '    return (count + workgroup_size - 1) / workgroup_size',
+      'end',
+      '',
+    ].join('\n');
+    let wrapperSource = compiled.lsxSource;
+    if (spirvPath) {
+      const portableSpirvPath = path.basename(spirvPath).replace(/\\/g, '/');
+      wrapperSource = wrapperSource.replace(
+        /memory\.embed_binary\("[^"]+"\)/g,
+        `memory.embed_binary("${portableSpirvPath}")`,
+      );
+    }
+    fs.writeFileSync(wrapperPath, `${wrapperSource.trimEnd()}${wrapperMetadata}`, 'utf8');
+    files.push(wrapperPath);
+    if (compiled.generated?.compute) {
+      const glslPath = path.join(directory, `${base}.compute.glsl`);
+      fs.writeFileSync(glslPath, compiled.generated.compute, 'utf8');
+      files.push(glslPath);
+    }
+    kernels.push({
+      id: plan.id,
+      name: shaderName,
+      source: path.relative(path.dirname(outputPath), lsslPath).replace(/\\/g, '/'),
+      wrapper: path.relative(path.dirname(outputPath), wrapperPath).replace(/\\/g, '/'),
+      function: fn.name,
+      module: path.relative(program.rootDirectory || path.dirname(module.filePath), module.filePath).replace(/\\/g, '/'),
+      loopLimit: plan.limitKey,
+      backends: ['opengl', 'vulkan'],
+      spirv: spirvPath ? path.relative(path.dirname(outputPath), spirvPath).replace(/\\/g, '/') : null,
+      spirvWords: spirvWords.length,
+      dataStorage: tableKeys.map((key, index) => ({ source: key, name: tableNames.get(key), binding: index, elementType: 'Number' })),
+      reads: plan.reads,
+      writes: plan.writes,
+      scalarParameters,
+      parameterStorage: parameterStorage.map((storage) => ({
+        name: storage.name,
+        binding: storage.binding,
+        elementType: storage.type,
+        entries: storage.entries.map((name, index) => ({
+          name,
+          source: name === 'lsx_count' ? 'count' : (scalarSources.get(name) || name),
+          index,
+        })),
+      })),
+      workgroupSize: 64,
+      strategies: ['scalar', 'simd', 'worker_pool', 'compute'],
+      thresholds: { workerPool: 32768, compute: 262144 },
+      fusedOperations: plan.operations.length,
+    });
+    ordinal += 1;
+  }
+  if (kernels.length === 0) {
+    fs.rmSync(directory, { recursive: true, force: true });
+    return { count: 0, directory: null, files: [], manifest: null, kernels: [] };
+  }
+  const manifestPath = path.join(directory, 'kernel-manifest.json');
+  fs.writeFileSync(manifestPath, JSON.stringify({ version: VERSION, generatedAt: new Date().toISOString(), kernels }, null, 2));
+  files.push(manifestPath);
+  return { count: kernels.length, directory, files, manifest: manifestPath, kernels };
+}
+
 function build(inputPath, outputOverride = null, options = {}) {
   const project = loadProjectConfig(inputPath);
   project.moduleRoots = { ...environmentModuleRoots(), ...project.moduleRoots, ...(options.moduleRoots || {}) };
   const optimization = options.optimization === undefined ? project.optimization : Number(options.optimization);
   if (!Number.isInteger(optimization) || optimization < 0 || optimization > 6) throw new CompileError('optimization level must be 0, 1, 2, 3, 4, 5, or 6');
-  const program = new Program(project.entry, project.moduleRoots);
+  const program = new Program(project.entry, project.moduleRoots, { allowDeferredLocalMethods: true });
   const root = program.load(project.entry);
   program.validate();
   const entry = program.getEntryFunction(root);
@@ -10132,13 +11188,17 @@ function build(inputPath, outputOverride = null, options = {}) {
   fs.mkdirSync(path.dirname(output), { recursive: true });
   const nativeBindings = buildNativeBindings(project, output);
   fs.writeFileSync(output, exe);
+  const emitLssl = options.emitLssl === true || project.emitLssl === true;
+  const lsslOutputs = writeLsslOutputs(program, output, emitLssl);
+  const emitKernels = options.emitKernels === true || project.emitKernels === true;
+  const kernelOutputs = writeKernelOutputs(program, output, emitKernels);
   const runtimeAssets = copyRuntimeAssets(project, output, sectionInfo.importGroups);
   if (runtimeAssets.missingFiles.length) throw new CompileError(`required runtime file not found: ${runtimeAssets.missingFiles.join(', ')}`, null, project.configPath);
-  return { project: { ...project, optimization, targetCpu }, program, root, entry, output, size: exe.length, imports: sectionInfo.importGroups, nativeBindings, runtimeAssets, optimizationStats, pgo: { loaded: pgoLoaded, generate: pgoGenerate } };
+  return { project: { ...project, optimization, targetCpu }, program, root, entry, output, size: exe.length, imports: sectionInfo.importGroups, nativeBindings, runtimeAssets, lsslOutputs, kernelOutputs, optimizationStats, pgo: { loaded: pgoLoaded, generate: pgoGenerate } };
 }
 
 function printUsage() {
-  console.log(`LazyScriptEX compiler ${VERSION}\n\nUsage:\n  node lazyscriptex.js check <file.lsx> [--lazy-script-root path] [--module-root Name=Path] [--diagnostics=json]\n  node lazyscriptex.js check-project <project-folder|lazyscriptex.json> [--lazy-script-root path] [--module-root Name=Path] [--diagnostics=json]\n  node lazyscriptex.js build <entry.lsx|project-folder|lazyscriptex.json> [-o output.exe] [--opt 0-6] [--pgo-generate profile.pgo] [--pgo-use profile.pgo] [--cpu baseline|avx2|avx2-fma] [--lazy-script-root path] [--module-root Name=Path]\n  node lazyscriptex.js --version`);
+  console.log(`LazyScriptEX compiler ${VERSION}\n\nUsage:\n  node lazyscriptex.js check <file.lsx|file.lssl> [--lazy-script-root path] [--module-root Name=Path] [--diagnostics=json]\n  node lazyscriptex.js check-project <project-folder|lazyscriptex.json> [--lazy-script-root path] [--module-root Name=Path] [--diagnostics=json]\n  node lazyscriptex.js build <entry.lsx|project-folder|lazyscriptex.json> [-o output.exe] [--opt 0-6] [--pgo-generate profile.pgo] [--pgo-use profile.pgo] [--cpu baseline|avx2|avx2-fma] [--emit-lssl] [--emit-kernels] [--lazy-script-root path] [--module-root Name=Path]\n  node lazyscriptex.js --version`);
 }
 
 function main(argv) {
@@ -10178,10 +11238,12 @@ function main(argv) {
     const pgoGenerate = pgoGenerateFlag >= 0 ? args[pgoGenerateFlag + 1] : undefined;
     const pgoUse = pgoUseFlag >= 0 ? args[pgoUseFlag + 1] : undefined;
     const targetCpu = cpuFlag >= 0 ? String(args[cpuFlag + 1] || '').toLowerCase() : undefined;
+    const emitLssl = args.includes('--emit-lssl');
+    const emitKernels = args.includes('--emit-kernels');
     if (pgoGenerateFlag >= 0 && (!pgoGenerate || pgoGenerate.startsWith('--'))) throw new CompileError('--pgo-generate requires a profile path');
     if (pgoUseFlag >= 0 && (!pgoUse || pgoUse.startsWith('--'))) throw new CompileError('--pgo-use requires a profile path');
     if (cpuFlag >= 0 && !['baseline', 'avx2', 'avx2-fma'].includes(targetCpu)) throw new CompileError('--cpu requires baseline, avx2, or avx2-fma');
-    const result = build(input, output, { optimization, pgoGenerate, pgoUse, targetCpu, moduleRoots: commandLineRoots });
+    const result = build(input, output, { optimization, pgoGenerate, pgoUse, targetCpu, emitLssl, emitKernels, moduleRoots: commandLineRoots });
     console.log(`Built ${result.output}`);
     console.log(`Entry: ${result.project.entry}`);
     console.log(`Modules: ${result.program.moduleOrder.length}`);
@@ -10189,7 +11251,9 @@ function main(argv) {
     console.log(`Subsystem: ${result.project.subsystem}`);
     console.log(`Target CPU: ${result.project.targetCpu}`);
     const stats = result.optimizationStats;
-    console.log(`Optimization: O${result.project.optimization} (folded ${stats.constantFolds + stats.constantReferences}, simplified ${stats.algebraicSimplifications}, copies ${stats.copiesPropagated}, CSE ${stats.commonSubexpressions}, inlined ${stats.functionsInlined}, stripped ${stats.functionsStripped} functions, reused ${stats.stackSlotsReused} stack slots, removed ${stats.branchesRemoved} branches/${stats.loopsRemoved} loops/${stats.deadStatementsRemoved} dead statements, tail calls ${stats.tailCallsOptimized}, strength reductions ${stats.strengthReductions}, register locals ${stats.registerVariables}, fast ops ${stats.fastBinaryOps}, inline table ops ${stats.inlineTableOps || 0}, constant strides ${stats.constantTableStrides || 0}, direct calls ${stats.directSimpleCalls}, stack objects ${stats.stackObjects || 0}, LICM ${stats.loopInvariantsHoisted || 0}, bounds removed ${stats.boundsChecksEliminated || 0}, cached table loops ${stats.cachedTableLoopsEmitted || 0}, vector loops ${stats.vectorizedLoops || 0} x${stats.vectorWidth || 4}, fused vector ops ${stats.fusedVectorOps || 0})`);
+    console.log(`Optimization: O${result.project.optimization} (folded ${stats.constantFolds + stats.constantReferences}, simplified ${stats.algebraicSimplifications}, copies ${stats.copiesPropagated}, CSE ${stats.commonSubexpressions}, inlined ${stats.functionsInlined}, stripped ${stats.functionsStripped} functions, reused ${stats.stackSlotsReused} stack slots, removed ${stats.branchesRemoved} branches/${stats.loopsRemoved} loops/${stats.deadStatementsRemoved} dead statements, tail calls ${stats.tailCallsOptimized}, strength reductions ${stats.strengthReductions}, register locals ${stats.registerVariables}, fast ops ${stats.fastBinaryOps}, inline table ops ${stats.inlineTableOps || 0}, constant strides ${stats.constantTableStrides || 0}, direct calls ${stats.directSimpleCalls}, stack objects ${stats.stackObjects || 0}, LICM ${stats.loopInvariantsHoisted || 0}, bounds removed ${stats.boundsChecksEliminated || 0}, cached table loops ${stats.cachedTableLoopsEmitted || 0}, unrolled reductions ${stats.unrolledFloatReductions || 0}, vector loops ${stats.vectorizedLoops || 0} x${stats.vectorWidth || 4}, persistent vectors ${stats.persistentVectorRecurrences || 0}, fused vector ops ${stats.fusedVectorOps || 0}, kernel loops ${stats.kernelLoopsAnalyzed || 0}, fused loops ${stats.loopsFused || 0}, parallel candidates ${stats.parallelKernelCandidates || 0}, compute candidates ${stats.computeKernelCandidates || 0}, algorithm kernels ${stats.algorithmicKernelsEmitted || 0})`);
+    if (result.lsslOutputs?.count > 0) console.log(`LSSL: ${result.lsslOutputs.count} generated GLSL stage${result.lsslOutputs.count === 1 ? '' : 's'} -> ${result.lsslOutputs.directory}`);
+    if (result.kernelOutputs?.count > 0) console.log(`Kernels: ${result.kernelOutputs.count} generated compute kernel${result.kernelOutputs.count === 1 ? '' : 's'} -> ${result.kernelOutputs.directory}`);
     if (result.runtimeAssets.count > 0) {
       console.log(`Runtime assets: ${result.runtimeAssets.count} file${result.runtimeAssets.count === 1 ? '' : 's'} copied beside the executable`);
     }

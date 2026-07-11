@@ -11,6 +11,7 @@ struct SurfaceData {
     vec4 borderWidths;
     vec4 shadowParams;
     vec4 clipRect;
+    vec4 clipRadii;
     vec4 misc;
     vec4 extra;
     vec4 extra2;
@@ -33,6 +34,7 @@ flat out vec4 cornerRadii;
 flat out vec4 borderWidths;
 flat out vec4 shadowParams;
 flat out vec4 clipRect;
+flat out vec4 clipRadii;
 flat out vec4 misc;
 flat out vec4 extra;
 flat out vec4 extra2;
@@ -63,6 +65,7 @@ void main() {
     borderWidths = surface.borderWidths;
     shadowParams = surface.shadowParams;
     clipRect = surface.clipRect;
+    clipRadii = surface.clipRadii;
     misc = surface.misc;
     extra = surface.extra;
     extra2 = surface.extra2;

@@ -8,8 +8,50 @@ const apiRoot = path.resolve(__dirname, '..', 'api');
 const jsonPath = path.join(apiRoot, 'api-data.json');
 const jsPath = path.join(apiRoot, 'api-data.js');
 const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8').replace(/^\uFEFF/, ''));
+const packageInfo = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'compiler', 'package.json'), 'utf8'));
+const API_VERSION = String(packageInfo.version || 'unknown');
 
 const MODULE_GUIDES = {
+  'Vulkan/Vulkan': {
+    level: 'internal', title: 'Vulkan backend bridge',
+    whatItIs: 'The backend wrapper used internally by LSG to manage Vulkan windows, meshes, shaders, frames, and capability checks.',
+    whenToUse: 'Normal project code should not import this module. Select Vulkan with LSG.use_vulkan() and keep using LSG and generated LSSL modules.',
+    beginnerStart: 'LSG.use_vulkan() → LSG.open() → Shader.create() → LSG.mesh() → shader.bind() → mesh.draw() → window.end().',
+    requires: 'A Vulkan-capable Windows driver and the bundled LSXVulkan.dll runtime.',
+    cleanup: 'Destroy public LSG resources and the LSG window; the backend releases its hidden Vulkan objects.'
+  },
+  'Vulkan/VulkanRaw': {
+    level: 'internal', title: 'Raw Vulkan native ABI',
+    whatItIs: 'The private native declarations used by the higher-level Vulkan backend wrapper.',
+    whenToUse: 'Do not use it from game code. It exists for maintaining the LSG Vulkan backend.',
+    beginnerStart: 'Use LSG.use_vulkan() instead of calling this ABI directly.',
+    requires: 'LSXVulkan.dll and the Windows Vulkan loader.',
+    cleanup: 'Cleanup is handled through LSG and the Vulkan wrapper.'
+  },
+  'LSG': {
+    level: 'beginner', title: 'LazyScript Graphics',
+    whatItIs: 'The beginner-facing window, input, mesh, texture, framebuffer, compute-buffer, drawing, and universal shared-scene ray API with OpenGL and Vulkan backends.',
+    whenToUse: 'Use LSG for ordinary game and engine graphics code instead of importing GLFW, OpenGL, or Vulkan directly.',
+    beginnerStart: 'Import @LazyScript/LSG.lsx, optionally call LSG.use_vulkan(), then call LSG.open(), create a mesh, and draw inside window.running(). For modular ray materials, enable ray tracing before creating the shader.',
+    requires: 'The bundled runtime DLLs. OpenGL is the default; Vulkan requires a working Vulkan driver.',
+    cleanup: 'Destroy owned meshes, textures, framebuffers, cursors, and windows when finished.'
+  },
+  'LSSL': {
+    level: 'beginner', title: 'LazyScript Shader Language',
+    whatItIs: 'The cross-backend shader language and runtime used by LSG for graphics, compute, overlays, storage, images, and modular Vulkan ray effects.',
+    whenToUse: 'Write .lssl files for game materials, UI/backend shaders, compute workloads, and ray-enabled materials without exposing GLSL, SPIR-V, shader modules, or pipeline boilerplate.',
+    beginnerStart: 'Declare shader Name, add vertex and fragment stages, import the .lssl file, then call ShaderName.create(). The generated module chooses OpenGL or Vulkan from LSG automatically.',
+    requires: 'A ready LSG window using either the OpenGL or Vulkan backend.',
+    cleanup: 'Call shader.destroy() when the program is no longer needed.'
+  },
+  'OpenAL/Samples': {
+    level: 'beginner', title: 'Generated audio samples',
+    whatItIs: 'A safe helper for making soft PCM16 tones without exposing byte packing, pointers, or native memory operations in project code.',
+    whenToUse: 'Use it for simple generated test tones, notification sounds, and tiny game effects before uploading them to an OpenAL buffer.',
+    beginnerStart: 'Import @LazyScript/bindings/OpenAL/Samples.lsx, call Samples.triangle() or Samples.fading_triangle(), check ready(), upload(buffer), then destroy the sample object.',
+    requires: 'An OpenAL device/context and a valid OpenAL buffer.',
+    cleanup: 'Call destroy() after OpenAL has copied the samples into its buffer.'
+  },
   'Language/Static objects': {
     level: 'beginner', title: 'Static managers and shared services',
     whatItIs: 'One persistent object with shared fields, methods, and an optional zero-argument constructor, initialized once before main() and called without .new().',
@@ -115,12 +157,12 @@ const MODULE_GUIDES = {
     cleanup: 'Selectors are resolved during compiler lowering and require no runtime cleanup.'
   },
   'UI/Renderer': {
-    level: 'intermediate', title: 'LazyUI OpenGL renderer',
-    whatItIs: 'The renderer that turns a retained LazyUI tree into native OpenGL draw calls.',
-    whenToUse: 'Create one for each UI rendering context, call begin(), submit(root), and flush() each frame.',
+    level: 'intermediate', title: 'LazyUI LSG renderer',
+    whatItIs: 'The renderer that turns a retained LazyUI tree into native LSG draw calls on OpenGL or Vulkan.',
+    whenToUse: 'Create one for each UI rendering context, call begin(), submit(root), and flush() each frame on either LSG backend.',
     beginnerStart: 'Most applications only need create(), begin(), submit(), flush(), and destroy().',
-    requires: 'A current OpenGL 4.6 context and loaded OpenGL functions.',
-    cleanup: 'Call renderer.destroy() before destroying the OpenGL window.'
+    requires: 'An open LSG window. OpenGL is the default; call LSG.use_vulkan() before opening the window to use Vulkan.',
+    cleanup: 'Call renderer.destroy() before destroying the LSG window.'
   },
   'UI/ShaderSources': {
     level: 'advanced', title: 'Built-in LazyUI shader source',
@@ -290,6 +332,22 @@ const MODULE_GUIDES = {
     requires: 'Thread entry functions and shared data must remain valid until the worker exits.',
     cleanup: 'Join workers, close thread handles, and destroy synchronization objects.'
   },
+  'System/Parallel': {
+    level: 'intermediate', title: 'Persistent CPU worker pool',
+    whatItIs: 'A fixed set of native LSX worker threads that repeatedly processes independent index ranges without recreating threads for every job.',
+    whenToUse: 'Use it for large procedural-generation, simulation, image, transform, particle, and math jobs whose iterations can run independently.',
+    beginnerStart: 'Create one Pool, call run(callback, context, count, grain) for each large job, then destroy the pool during shutdown.',
+    requires: 'The callback and context must remain alive until run() returns, and each chunk must avoid unsafe shared writes.',
+    cleanup: 'Call pool.destroy() to stop, join, and release every persistent worker and synchronization object.'
+  },
+  'System/KernelRuntime': {
+    level: 'intermediate', title: 'Kernel execution policy',
+    whatItIs: 'A small runtime dispatcher that selects scalar, SIMD, persistent-worker, or generated-compute strategy by job size and backend readiness.',
+    whenToUse: 'Use it when one workload may run on the CPU for small inputs and through workers or a generated LSSL compute kernel for large inputs.',
+    beginnerStart: 'Create a Dispatcher, tune thresholds/grain if needed, call run_cpu() for CPU work, and consult strategy() before explicit GPU dispatch.',
+    requires: 'CPU callbacks must be independent by range. Compute dispatch requires a ready graphics backend and correctly bound buffers.',
+    cleanup: 'Call dispatcher.destroy() so its persistent worker pool is stopped and joined.'
+  },
   'Network/Http': {
     level: 'intermediate', title: 'HTTP and HTTPS client',
     whatItIs: 'Native HTTP requests and responses backed by WinHTTP.',
@@ -341,7 +399,7 @@ const SPECIAL_OBJECTS = {
     howToGet: 'CanvasContext creates these automatically whenever you call a drawing method. Normal game/UI code should not call CanvasCommand.new().',
     workflow: 'Create a canvas element, get its CanvasContext, call a drawing method, and let UI/Renderer consume the generated command list. Inspect CanvasCommand only when diagnosing or extending that last renderer step.',
     commonMistake: 'Do not create a CanvasCommand and guess which fields must be filled. A partially filled command can render incorrectly. Use CanvasContext methods so the correct kind, geometry, color, text, and texture fields are recorded together.',
-    memberSummary: 'kind chooses the drawing operation; x/y/x2/y2/x3/y3 store positions; width/height/radius store shape size; line_width and font_size store drawing settings; color/color2 store packed colors; text stores text payload; texture stores an OpenGL texture ID.',
+    memberSummary: 'kind chooses the drawing operation; x/y/x2/y2/x3/y3 store positions; width/height/radius store shape size; line_width and font_size store drawing settings; color/color2 store packed colors; text stores text payload; texture stores a backend-neutral LSG.Texture object.',
     related: ['UI/LazyUI.CanvasContext', 'UI/LazyUI.canvas', 'UI/LazyUI.canvas_context']
   },
   'UI/LazyUI|CanvasContext': {
@@ -429,6 +487,16 @@ const SPECIAL_OBJECTS = {
     workflow: 'Create one reusable Client → configure timeouts/headers → send a request → check response.succeeded() → check response.status → read response.text()/body → close/destroy response.',
     commonMistake: 'Do not treat response.succeeded() as proof that the server accepted the request. Also check the HTTP status code before using the body.'
   },
+  'OpenAL/Samples|PCM16': {
+    level: 'beginner',
+    friendlyDescription: 'Generated mono 16-bit PCM audio that can upload itself into an OpenAL buffer.',
+    whatItIs: 'It owns tightly packed PCM16 bytes, remembers the sample rate, reports errors, and hides all native pointer and memory details.',
+    whenToUse: 'Use it after Samples.triangle() or Samples.fading_triangle() creates a simple sound.',
+    howToGet: 'Call Samples.triangle(frequency, seconds, volume) or Samples.fading_triangle(frequency, seconds, volume).',
+    workflow: 'Create generated samples → check ready() → create an OpenAL buffer → call samples.upload(buffer) → destroy samples → attach the buffer to a source.',
+    commonMistake: 'Do not destroy the sample object before upload(). OpenAL copies the bytes during upload, so it is safe to destroy immediately afterward.',
+    memberSummary: 'bytes owns packed PCM16 data; sample_rate is samples per second; ready()/error() report state; upload() copies into OpenAL; destroy() releases CPU storage.'
+  },
   'OpenAL/WavPCM|WavPCM': {
     level: 'beginner',
     friendlyDescription: 'Decoded PCM samples from a .wav file, ready to copy into an OpenAL buffer.',
@@ -469,7 +537,7 @@ const FIELD_SPECIAL = {
   'UI/LazyUI|CanvasCommand|color': ['The main packed RGBA color for this command.', 'CanvasContext applies global alpha before storing the value.'],
   'UI/LazyUI|CanvasCommand|color2': ['An optional second packed color reserved for commands that need two colors.', 'Most current commands use color and leave color2 unused.'],
   'UI/LazyUI|CanvasCommand|text': ['The text payload for a canvas text command.', 'It is null for shapes and images.'],
-  'UI/LazyUI|CanvasCommand|texture': ['The OpenGL texture ID used by an image command.', 'It is zero for non-image commands.']
+  'UI/LazyUI|CanvasCommand|texture': ['The backend-neutral LSG.Texture used by an image command.', 'It is null for non-image commands.']
 };
 
 const PARAM_DOCS = {
@@ -479,7 +547,7 @@ const PARAM_DOCS = {
   index: 'Zero-based position in the collection.', count: 'Number of values or items.', size: 'Size in bytes or elements, depending on the function.',
   text: 'UTF-8 LSX text.', path: 'UTF-8 file or asset path.', filename: 'UTF-8 file name or path.',
   window: 'A GLFW window handle created earlier.', monitor: 'A GLFW monitor handle.', device: 'An audio or platform device handle.', context: 'A context object or native context handle.',
-  texture: 'An OpenGL texture ID or texture object.', buffer: 'A buffer handle or data collection.', source: 'An audio source handle or input value.',
+  texture: 'A backend-neutral LSG.Texture object or a texture value accepted by the specific low-level API.', buffer: 'A buffer handle or data collection.', source: 'An audio source handle or input value.',
   target: 'The API target/category being changed.', mode: 'The named operating mode.', flags: 'One or more named bit flags combined together.',
   radians: 'Angle in radians.', degrees: 'Angle in degrees.', minimum: 'Lowest allowed value.', maximum: 'Highest allowed value.',
   nearPlane: 'Near clipping distance.', farPlane: 'Far clipping distance.', aspect: 'Viewport width divided by height.', fov: 'Field of view, normally in radians.',
@@ -521,7 +589,7 @@ function moduleRequirement(module) {
 function levelFor(entry) {
   if (entry.name?.startsWith('_')) return 'internal';
   if (entry.module.includes('Raw') || entry.kind === 'raw function' || entry.module === 'OpenGL' || entry.module === 'OpenAL' || entry.module === 'Platform/Win32') return 'advanced';
-  if (entry.module === 'System/Threading' || entry.module.startsWith('Network/') || entry.module === 'UI/Renderer' || entry.module === 'Math/OpenGL') return 'intermediate';
+  if (['System/Threading', 'System/Parallel', 'System/KernelRuntime'].includes(entry.module) || entry.module.startsWith('Network/') || entry.module === 'UI/Renderer' || entry.module === 'Math/OpenGL') return 'intermediate';
   return 'beginner';
 }
 
@@ -553,6 +621,12 @@ function genericObjectInfo(entry, members) {
     if (/List$|Joystick/.test(name)) {
       return { ...base, friendlyDescription: `A reusable GLFW ${humanize(name)} result collection.`, whatItIs: 'It owns a copied list of values returned by GLFW so normal LSX code can index and inspect them safely.', whenToUse: 'Use the matching refresh/query helper, check the count, then read the values. Destroy it when finished.' };
     }
+  }
+  if (entry.module === 'System/Parallel') {
+    if (name === 'Pool') return { ...base, level: 'intermediate', friendlyDescription: 'A reusable persistent native worker pool.', whatItIs: 'It owns a fixed worker set, synchronization objects, and an atomic chunk cursor so many large jobs can reuse the same threads.', whenToUse: 'Create it once for independent CPU ranges, call run() with a callback/context/count/grain, and destroy it at shutdown.', beginnerNote: 'The callback receives begin and finish indices. Do not let chunks write the same output locations.' };
+  }
+  if (entry.module === 'System/KernelRuntime') {
+    if (name === 'Dispatcher') return { ...base, level: 'intermediate', friendlyDescription: 'A reusable kernel strategy and CPU dispatch object.', whatItIs: 'It owns the persistent worker pool and stores thresholds for scalar, SIMD, worker, and compute execution.', whenToUse: 'Use it around large procedural, simulation, image, or math workloads, especially when generated compute modules are available.', beginnerNote: 'strategy() reports a preferred path; GPU buffer binding and dispatch remain explicit.' };
   }
   if (entry.module === 'System/Threading') {
     const descriptions = {
@@ -598,7 +672,7 @@ function genericObjectInfo(entry, members) {
     };
     if (docs[name]) return { ...base, level: name === 'Glyph' ? 'intermediate' : 'beginner', friendlyDescription: docs[name][0], whatItIs: docs[name][0], whenToUse: docs[name][1] };
   }
-  if (entry.module === 'UI/Renderer' && name === 'Renderer') return { ...base, level: 'intermediate', friendlyDescription: 'The batched OpenGL renderer for a LazyUI element tree.', whatItIs: 'It owns UI shaders, buffers, font atlas resources, batches, and frame submission state.', whenToUse: 'Create it after OpenGL is loaded, call begin()/submit()/flush() each frame, and destroy it before the window.' };
+  if (entry.module === 'UI/Renderer' && name === 'Renderer') return { ...base, level: 'intermediate', friendlyDescription: 'The batched LSG renderer for a LazyUI element tree on OpenGL or Vulkan.', whatItIs: 'It owns backend-matched UI shaders, buffers, font atlas resources, batches, and frame submission state.', whenToUse: 'Create it after opening an LSG window, call begin()/submit()/flush() each frame, and destroy it before the window.' };
   if (entry.module === 'UI/LazyUI') {
     const docs = {
       Style: ['Computed visual and layout settings for one element state.', 'LSCSS usually creates and applies it. Access it when implementing custom element behavior or debugging style resolution.'],
@@ -695,7 +769,7 @@ function functionInfo(entry) {
     if (lower === 'fill_rect') { action = 'Records a filled rectangle command.'; when = 'Use for backgrounds, bars, boxes, and simple custom HUD/editor drawing.'; }
     else if (lower === 'stroke_line' || lower === 'line') { action = 'Records a line command between two points.'; when = 'Use for graph connections, guides, separators, and custom outlines.'; }
     else if (lower === 'fill_text' || lower === 'draw_text') { action = 'Records a text drawing command using the current or supplied color.'; when = 'Use for custom canvas labels when normal LSHTML text is not appropriate.'; }
-    else if (lower === 'image' || lower === 'draw_image') { action = 'Records an image command using an OpenGL texture ID.'; when = 'Use for minimap tiles, icons, thumbnails, and custom textured canvas content.'; }
+    else if (lower === 'image' || lower === 'draw_image') { action = 'Records an image command using a backend-neutral LSG.Texture.'; when = 'Use for minimap tiles, icons, thumbnails, and custom textured canvas content.'; }
   }
   if (entry.module === 'OpenGL') {
     if (n === 'glClearColor') { action = 'Sets the RGBA color OpenGL will use the next time the color buffer is cleared.'; when = 'Set it before GL.glClear(GL.GL_COLOR_BUFFER_BIT), usually once per frame or when the background changes.'; }
@@ -831,8 +905,8 @@ function exampleForCanvasCommand(entry) {
   if (['x3','y3'].includes(entry.name)) draw = 'canvas.triangle(24.0,110.0,96.0,20.0,168.0,110.0,UI.rgba(90,180,125,255))';
   if (entry.name === 'radius') draw = 'canvas.circle(90.0,70.0,42.0,UI.rgba(110,145,240,255))';
   if (['font_size','text'].includes(entry.name)) draw = 'canvas.set_font_size(22.0)\ncanvas.draw_text("Quest updated",20.0,42.0,UI.rgba(245,235,180,255))';
-  if (entry.name === 'texture') draw = 'local texture = Texture2D.load_ui("Assets/icon.png")\ncanvas.image(texture.id,20.0,20.0,64.0,64.0)';
-  const textureImport = entry.name === 'texture' ? '\nuse "@LazyScript/bindings/Graphics/Texture2D.lsx" as Texture2D' : '';
+  if (entry.name === 'texture') draw = 'local texture = LSG.load_ui_texture("Assets/icon.png")\ncanvas.image(texture,20.0,20.0,64.0,64.0)';
+  const textureImport = entry.name === 'texture' ? '\nuse "@LazyScript/LSG.lsx" as LSG' : '';
   const field = entry.kind === 'field' ? `\nlocal value = command.${entry.name}` : '';
   const cleanup = entry.name === 'texture' ? '\ntexture.destroy()' : '';
   return `use "@LazyScript/bindings/UI/LazyUI.lsx" as UI${textureImport}\n\nlocal canvas_element = UI.canvas()\nlocal canvas = UI.canvas_context(canvas_element)\n${draw}\n\n-- CanvasContext created this record for the renderer.\nlocal command = canvas.commands[0]${field}${cleanup}`;
@@ -844,6 +918,15 @@ function entryKey(entry) { return `${entry.module}|${entry.owner || ''}|${entry.
 function practicalExample(entry) {
   const key = entryKey(entry);
   const examples = {
+    'LSG||set_ray_tracing': 'use "@LazyScript/LSG.lsx" as LSG\n\nLSG.use_vulkan()\nLSG.set_ray_tracing(true)\nlocal window = LSG.open("Ray game",1280,720)',
+    'LSG||set_ray_sun': 'LSG.set_ray_sun(-0.4,-0.8,-0.3,1.0,0.95,0.86,2.0,0.10)',
+    'LSG||clear_ray_point_lights': 'LSG.clear_ray_point_lights()',
+    'LSG||add_ray_point_light': 'LSG.add_ray_point_light(0.0,4.0,2.0,0.4,0.6,1.0,12.0,10.0)',
+    'LSG||ray_scene_triangle_count': 'local active_triangles = LSG.ray_scene_triangle_count()',
+    'LSG|Mesh|set_ray_visible': 'mesh.set_ray_visible(false)',
+    'LSG|Mesh|set_ray_transform': 'use "@LazyScript/bindings/Math/GLM.lsx" as GLM\n\nlocal model = GLM.trs(position,rotation,scale)\nmesh.set_ray_transform(model)',
+    'LSG|Mesh|set_ray_material': 'mesh.set_ray_material(0.85,0.18,0.10,0.35,0.0,0.0)',
+    'LSG|Mesh|set_ray_material_rgba': 'mesh.set_ray_material_rgba(0.85,0.18,0.10,1.0,0.35,0.0,0.0)',
     'Data/Json||parse_text': 'use "@LazyScript/bindings/Data/Json.lsx" as Json\n\nlocal document = Json.parse_text("{\\"player\\":\\"Luna\\",\\"level\\":12}")\nif document.valid() then\n    local player = document.get(document.root,"player")\nend\ndocument.destroy()',
     'Data/Json||load': 'use "@LazyScript/bindings/Data/Json.lsx" as Json\n\nlocal document = Json.load("Game/Assets/settings.json")\nif not document.valid() then\n    console.error_line(document.error())\nend\ndocument.destroy()',
     'Graphics/Image||load': 'use "@LazyScript/bindings/Graphics/Image.lsx" as Image\n\nlocal image = Image.load("Game/Assets/icon.png")\nif image.valid() then\n    local width = image.width\n    local height = image.height\nend\nimage.destroy()',
@@ -1083,8 +1166,10 @@ for (const entry of data.entries) {
 // ABI calls, and compiler/renderer plumbing remain searchable in the separate
 // Backend tab instead of appearing beside normal LSX, LSHTML, and LSCSS usage.
 const BACKEND_MODULES = new Set([
-  'OpenGL', 'OpenAL', 'Platform/Win32', 'Math/GLMRaw', 'Network/WinSockRaw',
-  'Text/FreeTypeRaw', 'UI/ShaderSources', 'Graphics/STBImage'
+  'OpenGL', 'OpenAL', 'GLFW', 'Platform/Win32', 'Math/GLMRaw', 'Math/OpenGL',
+  'Network/WinSockRaw', 'Text/FreeTypeRaw', 'UI/ShaderSources',
+  'Graphics/STBImage', 'OpenGL/TextureUpload', 'System/Parallel',
+  'System/KernelRuntime', 'Vulkan/Vulkan', 'Vulkan/VulkanRaw'
 ]);
 
 // Element factories are normal front-end LSX, but they are shown in their own
@@ -1148,7 +1233,38 @@ function isPublicUiMethod(entry) {
   return false;
 }
 
+const LEGACY_LSG_ALIASES = new Set([
+  'Window|show_fps','Window|rename','Window|key_down','Window|mouse_down','Window|cursor',
+  'Window|present','Window|make_current','Window|vsync',
+  'Mesh|update','Mesh|ray_visible','Mesh|ray_transform','Mesh|ray_material','Mesh|ray_material_rgba','Mesh|draw_many',
+  'Storage|read','PixelImage|set','PixelImage|set_rgba','Framebuffer|show','Timer|finish',
+  '|enable_ray_tracing','|disable_ray_tracing','|ray_tracing_enabled','|hardware_ray_tracing_supported',
+  '|backend','|context','|render_width','|render_height','|vulkan_device_name','|enable_vulkan_trace','|vulkan_trace',
+  '|ray_query_supported','|ray_pipeline_supported','|ray_sun','|ray_point_light','|ray_triangle_count',
+  '|open_hidden','|open_shared','|time','|poll','|depth','|culling','|blending','|scissor','|scissor_box',
+  '|viewport','|clear','|screen','|integer_limit','|graphics_name','|graphics_vendor','|graphics_version',
+  '|monitor_list','|gamepad','|gamepad_connected'
+]);
+
+function isLegacyLsgAlias(entry) {
+  return entry.module === 'LSG' && LEGACY_LSG_ALIASES.has(`${entry.owner || ''}|${entry.name}`);
+}
+
 function isBackendEntry(entry) {
+  if (isLegacyLsgAlias(entry)) return true;
+  if (entry.module === 'LSSL' && entry.kind === 'field') return true;
+  if (entry.module === 'LSG' && entry.kind === 'field') {
+    const publicFields = new Set([
+      'Window|width','Window|height','Window|title',
+      'WindowSize|width','WindowSize|height','Cursor|x','Cursor|y',
+      'Texture|width','Texture|height','Mesh|count','Storage|bytes',
+      'Framebuffer|width','Framebuffer|height','ContentScale|x','ContentScale|y'
+    ]);
+    return !publicFields.has(`${entry.owner || ''}|${entry.name}`);
+  }
+  if (entry.module === 'LSG' && (entry.name === 'Runtime' || entry.owner === 'Runtime')) return true;
+  if (entry.module === 'LSG' && ['bind_texture','draw_arrays','draw_elements'].includes(entry.name)) return true;
+  if (entry.module === 'LSSL' && ['location','create','create_graphics','create_compute'].includes(entry.name)) return true;
   if (entry.module === 'Language/Collection') return true;
   if (entry.module.startsWith('Language/') || entry.module.startsWith('LazyUI/')) return false;
   if (BACKEND_MODULES.has(entry.module) || entry.module.includes('Raw')) return true;
@@ -1399,6 +1515,236 @@ end`;
   }
 }
 
+const SIMPLE_GRAPHICS_API = {
+  'LSG||use_vulkan': {
+    description: 'Selects the Vulkan backend before a window is opened.',
+    when: 'Call it once before LSG.open() when the project should use Vulkan instead of the default OpenGL backend.',
+    example: `use "@LazyScript/LSG.lsx" as LSG
+
+LSG.use_vulkan()
+local window = LSG.open("My Vulkan Game",960,540)
+if not window.ready() then return LSG.show_error(window.error()) end`
+  },
+  'LSG||use_opengl': {
+    description: 'Selects the OpenGL backend before a window is opened.',
+    when: 'Call it before LSG.open() only when explicitly returning to OpenGL; OpenGL is already the default.',
+    example: 'LSG.use_opengl()'
+  },
+  'LSG||open': {
+    description: 'Creates a visible game window and prepares the selected graphics backend automatically.',
+    when: 'Choose the backend first when needed, call it once during startup, check window.ready(), then use the returned Window in the game loop.',
+    example: `use "@LazyScript/LSG.lsx" as LSG
+
+local window = LSG.open("My Game",960,540)
+if not window.ready() then return LSG.show_error(window.error()) end`
+  },
+  'LSG|Window|running': {
+    description: 'Returns true while the window should keep running and refreshes its current framebuffer size.',
+    when: 'Use it as the condition for the main game loop.',
+    example: `while window.running() do
+    window.begin(0.05,0.08,0.12)
+    window.end()
+end`
+  },
+  'LSG|Window|begin': {
+    description: 'Starts a 2D frame by resizing the viewport to the window and clearing it to one color.',
+    when: 'Call it at the start of each 2D frame before drawing.',
+    example: 'window.begin(0.05,0.08,0.12)'
+  },
+  'LSG|Window|begin_3d': {
+    description: 'Starts a 3D frame and clears both the color and depth buffers.',
+    when: 'Call it at the start of each 3D frame after enabling depth testing.',
+    example: `LSG.depth_test(true)
+window.begin_3d(0.05,0.08,0.12)`
+  },
+  'LSG|Window|end': {
+    description: 'Shows the finished frame and processes window, keyboard, and mouse events.',
+    when: 'Call it once at the end of every frame.',
+    example: 'window.end()'
+  },
+  'LSG|Window|is_key_down': {
+    description: 'Checks whether one named keyboard key is currently held down.',
+    when: 'Use it inside the game loop for simple real-time input.',
+    example: 'if window.is_key_down(LSG.Key.Escape) then window.close() end'
+  },
+  'LSG|Window|activate': {
+    description: 'Selects this window as the target for the drawing calls that follow.',
+    when: 'Use it before drawing to a different window in a multiple-window application.',
+    example: 'window.activate()'
+  },
+  'LSG|Window|set_title': {
+    description: 'Changes the window title.',
+    when: 'Use it for scene names, status messages, debug views, or changing application state.',
+    example: 'window.set_title("My Game - Playing")'
+  },
+  'LSG|Window|set_vsync': {
+    description: 'Turns display synchronization on or off for this window.',
+    when: 'Disable it for uncapped performance measurements or enable it for normal tear-free presentation.',
+    example: 'window.set_vsync(false)'
+  },
+  'LSG|Window|is_mouse_down': {
+    description: 'Checks whether one named mouse button is currently held down.',
+    when: 'Use it inside the game loop for direct mouse input.',
+    example: 'if window.is_mouse_down(LSG.Mouse.Left) then console.write_line("Click") end'
+  },
+  'LSG||set_ray_tracing': {
+    description: 'Turns the shared Vulkan ray scene on or off before ray-enabled shaders are created.',
+    when: 'Enable it before creating an LSSL shader that declares raytracing features.',
+    example: 'LSG.set_ray_tracing(true)'
+  },
+  'LSG||set_ray_sun': {
+    description: 'Sets the shared directional light used by ray-enabled materials.',
+    when: 'Use it when the ray scene needs one sun or moon light.',
+    example: 'LSG.set_ray_sun(-0.4,-0.8,-0.3,1.0,0.95,0.86,2.0,0.10)'
+  },
+  'LSG||add_ray_point_light': {
+    description: 'Adds one shared point light to the current ray scene.',
+    when: 'Clear old point lights first, then add the lights that should affect this frame or scene.',
+    example: 'LSG.add_ray_point_light(0.0,4.0,2.0,0.4,0.6,1.0,12.0,10.0)'
+  },
+  'LSG||poll_events': {
+    description: 'Processes pending window, keyboard, mouse, and controller events.',
+    when: 'Call it manually only when a loop is not ending frames through window.end(), which already polls events.',
+    example: 'LSG.poll_events()'
+  },
+  'LSG||time_seconds': {
+    description: 'Returns the graphics runtime clock in seconds.',
+    when: 'Use it for animation, elapsed-time measurements, and simple frame timing.',
+    example: 'local now = LSG.time_seconds()'
+  },
+  'LSG||face_culling': {
+    description: 'Turns back-face culling on or off.',
+    when: 'Enable it for closed 3D meshes when hidden back faces do not need to be drawn.',
+    example: 'LSG.face_culling(true)'
+  },
+  'LSG||mesh': {
+    description: 'Uploads a flat vertex table and returns a drawable mesh.',
+    when: 'Use it for non-indexed triangles, lines, points, or full-screen geometry.',
+    example: `local vertices = {
+    -0.7,-0.6, 1.0,0.2,0.2,
+     0.7,-0.6, 0.2,1.0,0.2,
+     0.0, 0.7, 0.2,0.4,1.0
+}
+local triangle = LSG.mesh(vertices,Triangle.vertex_layout)`
+  },
+  'LSG||indexed_mesh': {
+    description: 'Uploads vertices and indices and returns a mesh that reuses vertices efficiently.',
+    when: 'Use it for cubes and normal game meshes whose triangles share vertices.',
+    example: 'local cube = LSG.indexed_mesh(vertices,indices,Cube.vertex_layout)'
+  },
+  'LSG|Mesh|draw': {
+    description: 'Draws this mesh once with the currently bound shader and resources.',
+    when: 'Bind the shader and textures first, then call draw() inside the frame.',
+    example: `shader.bind()
+mesh.draw()`
+  },
+  'LSG|Mesh|draw_instances': {
+    description: 'Draws many instances of the same mesh in one command.',
+    when: 'Use it when the vertex shader reads instance.id to position or customize each copy.',
+    example: 'mesh.draw_instances(100)'
+  },
+  'LSG||load_texture': {
+    description: 'Loads an image file and uploads it into an owned GPU texture.',
+    when: 'Use it for sprites, materials, UI images, and other image assets.',
+    example: `local texture = LSG.load_texture("Assets/image.png")
+if not texture.ready() then return LSG.show_error(texture.error()) end`
+  },
+  'LSG|Texture|bind': {
+    description: 'Makes this texture available on one simple numbered texture slot.',
+    when: 'Bind the same slot number that was assigned to the shader texture uniform.',
+    example: `shader.texture("albedo",0)
+texture.bind(0)`
+  },
+  'LSG||framebuffer': {
+    description: 'Creates an off-screen color target that can be rendered into and shown later.',
+    when: 'Use it for post-processing, mirrors, editor previews, and multi-pass rendering.',
+    example: `local frame = LSG.framebuffer(960,540)
+frame.begin(0.0,0.0,0.0)
+-- draw the off-screen scene here
+frame.display(window,LSG.LINEAR)`
+  },
+  'LSG||storage': {
+    description: 'Uploads a normal flat LSX table into a shader storage buffer.',
+    when: 'Use it when a compute, vertex, or fragment shader needs a large readable or writable array.',
+    example: `local values = {0.0,0.0,0.0,0.0}
+local buffer = LSG.storage(values,0)
+buffer.bind()`
+  },
+  'LSG||depth_test': {
+    description: 'Turns depth testing on or off.',
+    when: 'Enable it for normal 3D rendering so nearer surfaces hide farther surfaces.',
+    example: 'LSG.depth_test(true)'
+  },
+  'LSG||alpha_blending': {
+    description: 'Turns normal alpha blending on or off.',
+    when: 'Enable it for transparent UI, sprites, particles, and text.',
+    example: 'LSG.alpha_blending(true)'
+  },
+  'LSSL||create': {
+    description: 'Internal runtime bridge used by generated .lssl modules to create a graphics shader for the active backend.',
+    when: 'Normal game code should call Basic.create() on the imported .lssl module instead.',
+    example: `use "shaders/basic.lssl" as Basic
+
+local shader = Basic.create()
+if not shader.ready() then return LSG.show_error(shader.error()) end`
+  },
+  'LSSL||create_compute': {
+    description: 'Builds one compute shader program from an imported .lssl compute stage.',
+    when: 'Create it after the LSG window is ready when GPU workers will process buffers or images.',
+    example: `use "shaders/work.lssl" as Work
+local shader = LSSL.create_compute(Work.compute)`
+  },
+  'LSSL|Shader|bind': {
+    description: 'Makes this graphics shader active for the draw calls that follow.',
+    when: 'Call it before setting shader values and drawing meshes.',
+    example: `shader.bind()
+mesh.draw()`
+  },
+  'LSSL|Shader|number': {
+    description: 'Sends one decimal number into a named LSSL uniform.',
+    when: 'Use it for time, intensity, roughness, exposure, and other single-number shader settings.',
+    example: 'shader.number("time",LSG.time_seconds())'
+  },
+  'LSSL|Shader|vector2': {
+    description: 'Sends two decimal numbers into a named Vector2 uniform.',
+    when: 'Use it for screen size, UV scale, offsets, and 2D positions.',
+    example: 'shader.vector2("screenSize",window.width,window.height)'
+  },
+  'LSSL|Shader|matrix4': {
+    description: 'Sends one GLM 4×4 matrix into a named Matrix4 uniform.',
+    when: 'Use it for model, view, projection, and combined camera matrices.',
+    example: 'shader.matrix4("viewProjection",viewProjection)'
+  },
+  'LSSL|Shader|run': {
+    description: 'Starts the requested number of compute workgroups.',
+    when: 'Bind required buffers and images first, then run enough groups to cover the work.',
+    example: 'shader.run(groupsX,groupsY,1)'
+  },
+  'LSSL|Shader|wait_for_storage': {
+    description: 'Waits until compute writes to storage buffers are safe for later GPU or CPU work to read.',
+    when: 'Call it after a compute dispatch that changed an LSG storage buffer.',
+    example: `shader.run(groupsX,1,1)
+shader.wait_for_storage()`
+  },
+  'LSSL|Shader|wait_for_images': {
+    description: 'Waits until compute image writes are safe for later shader texture reads.',
+    when: 'Call it after a compute dispatch that wrote a texture or image.',
+    example: `shader.run(groupsX,groupsY,1)
+shader.wait_for_images()`
+  }
+};
+
+function applySimpleGraphicsApi(entry) {
+  const key = `${entry.module}|${entry.owner || ''}|${entry.name}`;
+  const info = SIMPLE_GRAPHICS_API[key];
+  if (!info) return;
+  entry.friendlyDescription = info.description;
+  entry.whatItIs = info.description;
+  entry.whenToUse = info.when;
+  entry.example = info.example;
+  entry.exampleNote = 'Copy-ready beginner-facing LSG/LSSL usage. Native OpenGL and GLFW details remain inside the backend.';
+}
+
 function lowerObjectName(name) {
   return String(name || 'object')
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
@@ -1408,7 +1754,14 @@ function lowerObjectName(name) {
 
 for (const entry of data.entries) {
   entry.audience = isBackendEntry(entry) ? 'backend' : 'frontend';
+  if (isLegacyLsgAlias(entry)) {
+    entry.level = 'compatibility';
+    entry.friendlyDescription = `Compatibility alias for older LSG code: ${entry.owner ? `${entry.owner}.` : ''}${entry.name}.`;
+    entry.whatItIs = 'An older public name kept so existing projects continue to compile.';
+    entry.whenToUse = 'Do not use it in new code. Use the matching front-end name shown in the LSG guide and autocomplete.';
+  }
   entry.publicSignature = publicSignatureFor(entry);
+  applySimpleGraphicsApi(entry);
 
   if (entry.kind === 'field' && entry.audience === 'frontend') {
     const receiver = lowerObjectName(entry.owner || 'object');
@@ -1500,7 +1853,8 @@ data.stats.kinds = data.entries.reduce((kinds, entry) => {
 }, {});
 
 data.moduleGuides = MODULE_GUIDES;
-data.generated = { ...(data.generated || {}), beginnerMetadata: '0.18.18', audienceSplit: true };
+data.version = API_VERSION;
+data.generated = { ...(data.generated || {}), beginnerMetadata: API_VERSION, audienceSplit: true, sourceGenerated: true };
 
 fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2) + '\n');
 fs.writeFileSync(jsPath, `window.LSX_API_DATA=${JSON.stringify(data)};\n`);

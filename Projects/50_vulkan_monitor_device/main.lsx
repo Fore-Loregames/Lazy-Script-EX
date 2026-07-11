@@ -1,0 +1,25 @@
+use "@LazyScript/LSG.lsx" as LSG
+
+fn main()
+    local monitor = LSG.primary_monitor()
+    local modes = LSG.video_modes(monitor)
+    local mode = LSG.video_mode()
+    local scale = LSG.monitor_scale(monitor)
+    if modes.count > 0 then mode.read(modes.items,modes.count - 1) end
+
+    LSG.use_vulkan()
+    local window = LSG.open("50 - Vulkan monitor and device information",900,600)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+    local device = LSG.vulkan_device_name()
+    window.set_title(device)
+    while window.running() do
+        window.begin(scale.x * 0.06,scale.y * 0.06,0.15)
+        window.end()
+    end
+    scale.destroy()
+    mode.destroy()
+    modes.destroy()
+    window.destroy()
+    return 0
+end

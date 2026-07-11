@@ -1,0 +1,26 @@
+use "@LazyScript/LSG.lsx" as LSG
+fn main()
+    LSG.use_vulkan()
+    local window = LSG.open("42 - Vulkan generated window icon",800,500)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+    local icon = LSG.pixel_image(32,32)
+    local y = 0
+    while y < 32 do
+        local x = 0
+        while x < 32 do
+            local edge = x < 3 or y < 3 or x > 28 or y > 28
+            if edge then icon.set_rgba(x,y,20,35,70,255) else icon.set_rgba(x,y,40+x*5,210-y*3,150,255) end
+            x += 1
+        end
+        y += 1
+    end
+    window.set_icon(icon)
+    while window.running() do
+        window.begin(0.025,0.04,0.075)
+        window.end()
+    end
+    icon.destroy()
+    window.destroy()
+    return 0
+end

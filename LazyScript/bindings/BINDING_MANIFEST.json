@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-07T00:00:00.000Z",
+  "generatedAt": "2026-07-11T00:00:00.000Z",
   "glfwFunctions": 124,
   "glfwConstants": 328,
   "openGLFunctions": 2541,
@@ -17,6 +17,8 @@
   "nativeGLM": "GLM 1.0.2 wrapped behind LSXMath.dll with LSX-first Vec2/Vec3/Vec4, Mat2/Mat3/Mat4, quaternion, dual-quaternion, transform, projection, decomposition, camera, and OpenGL uniform APIs",
   "nativeCameraMath": "Typed perspective/orthographic camera wrapper with RH/LH and NO/ZO projection choices; native pointers remain confined to GLMRaw.lsx",
   "nativeLazyUI": "Inline LSHTML/LSCSS declarations lower to retained LSX element functions; LSCSS supports direct {var} expressions. LazyUI includes real UTF-8 text inputs and multiline textareas, caret/selection/clipboard editing, password masking, checkboxes, radios, switches, ranges, color values, mouse-wheel and draggable scrollbars, editor/game controls, events, flex/grid/absolute layout, and declarative canvas elements. Future LSHTMLRunner/ECS attachment metadata is present without exposing pointers in user LSX.",
-  "lazyUIRenderer": "OpenGL 4.6 retained UI renderer using ordinary flat LSX instance tables. Panels, control parts, visible scrollbars, SDF glyphs, and images remain batched; boxes and glyphs use four-corner GL_TRIANGLE_STRIP instancing, images use texture-grouped base-instance draws, and grow-only GPU buffers update through glBufferSubData. Analytical rounded corners, borders, outlines, shadows, CSS gradients, clipping, and transparent retained submission remain supported.",
-  "lazyUICanvas": "Declarative LSHTML canvas elements for rectangles, circles, ellipses, lines, triangles, polygons, polylines, paths, text, and images. Fill, stroke, borders, radii, shadows, opacity, transforms, and gradients come from LSCSS; the low-level retained CanvasContext remains a compatibility backend."
+  "lazyUIRenderer": "Backend-neutral LSG retained UI renderer for OpenGL 4.6 and Vulkan. Panels, controls, scrollbars, SDF glyphs, canvas shapes, clipping, and images use retained GPU buffers. Vulkan now lowers painter-ordered simple shapes, SDF glyphs, and images into compact four-float command headers consumed by one analytic multi-texture shader. That fast path carries 48 output components instead of the 62-component compatibility payload, keeps storage reads in the vertex stage, and isolates only shadows, outlines, and line geometry in a separate effect shader. Static retained pages reuse the same command and source buffers, and child images, glyphs, boxes, and canvas shapes receive anti-aliased four-corner overflow clips. The older unified batch remains an automatic fallback.",
+  "lazyUICanvas": "Declarative LSHTML canvas elements for rectangles, circles, ellipses, lines, triangles, polygons, polylines, paths, text, and images. Fill, stroke, borders, radii, shadows, opacity, transforms, and gradients come from LSCSS; the low-level retained CanvasContext remains a compatibility backend.",
+  "nativeParallelKernels": "Persistent KERNEL32 worker pool with atomic dynamic chunk scheduling, caller participation, serialized dispatch, and clean worker shutdown",
+  "kernelRuntime": "Scalar/SIMD/worker/compute strategy policy plus compiler-generated LSSL kernel manifests and explicit backend dispatch integration"
 }

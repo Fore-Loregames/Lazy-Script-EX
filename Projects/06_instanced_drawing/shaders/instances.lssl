@@ -1,0 +1,21 @@
+shader Instances
+vertex
+    input position = Vector2
+    output color = Color3
+
+    main = fn()
+        local x = instance.id % 16
+        local y = instance.id / 16
+        local offset = Vector2(Number(x) - 7.5,Number(y) - 4.0) * Vector2(0.12,0.2)
+        screen.position = Vector4(position + offset,0.0,1.0)
+        color = Color3(Number(x) / 15.0,Number(y) / 8.0,0.8)
+    end
+end
+fragment
+    input color = Color3
+    output finalColor = Color4
+    main = fn()
+        finalColor = Color4(color,1.0)
+    end
+end
+end

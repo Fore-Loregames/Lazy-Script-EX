@@ -1,874 +1,291 @@
-# LazyScriptEX (LSX)
+# LazyScriptEX Native GameKit
 
-LazyScriptEX is an open-source, statically compiled scripting language for native Windows applications, games, tools, and user interfaces. LSX is designed to keep everyday code small and readable while compiling directly to native x64 machine code.
+LazyScriptEX is a statically compiled language and native game/application framework for Windows x64. It keeps ordinary LSX code small and inference-first while compiling directly to native executables.
 
-Normal LSX code relies on inference instead of explicit type annotations. Low-level ABI details remain inside bindings, so application code can work with ordinary functions, objects, tables, strings, and modules.
+The current repository includes the complete **0.21.5** toolchain with OpenGL 4.6, Vulkan, LSG, LSSL, modular ray effects, native LSHTML/LSCSS/LazyUI, audio, image loading, SDF text, math, networking, threading, file I/O, JSON, the offline API, and the Visual Studio Code extension.
 
-## Open source
+## Platform and requirements
 
-LazyScriptEX is open source under the [MIT License](LICENSE). You may use, modify, distribute, and build commercial or non-commercial software with it under the terms of that license.
+- Windows 10 or Windows 11, x64
+- Node.js 18 or newer
+- A current OpenGL 4.6 or Vulkan-capable graphics driver
+- Visual Studio Code is recommended but not required
 
-Third-party libraries retain their own licenses. Their notices are included under [`LazyScript/licenses`](LazyScript/licenses).
+## Main features
 
-## Current platform
-
-The current toolchain targets:
-
-- Windows 10 or Windows 11
-- x64 processors
-- Native PE executables
-- OpenGL 4.6 through GLFW
-- OpenAL Soft for audio
-- Visual Studio Code as the recommended editor
-
-Node.js 18 or newer is required to run the compiler. The runtime setup script downloads or prepares the native libraries used by the examples.
-
-## What LSX includes
-
-- Native x64 compilation with optimization levels O0 through O6
-- Inferred variables, returns, object fields, and tables
-- Project-wide parameter and loop-variable inference that widens related derived objects to their nearest common base
-- Closed objects with inferred constructors, cloning, ownership, compile-time inheritance, and compact `GetTypeName()` / `IsType(...)` runtime checks
-- Growable tables and packed numeric buffers using ordinary `{}` syntax
-- Modules through `use "path" as Name`
-- Direct Windows x64 foreign-function bindings
-- GLFW windowing, input, monitors, cursors, gamepads, and timing
-- OpenGL 4.6 rendering and compute APIs
-- OpenAL audio, WAV loading, and EFX
-- GLM-backed vectors, matrices, quaternions, transforms, and cameras
-- File I/O, JSON, persistent logging, threads, synchronization, sockets, and HTTP
-- stb_image image loading and FreeType SDF text
-- Native LSHTML, LSCSS, and retained LazyUI
-- Compiler diagnostics with error codes, source ranges, underlines, and hints
-- A VS Code extension with diagnostics, hovers, completions, navigation, build, and run commands
-- A beginner-first offline API with separate Front-end and Backend/native tabs, inheritance documentation, LazyUI start workflows, and copy-ready examples
+- Native x64 compilation with optimization levels O0–O6
+- Inferred variables, function parameters, returns, object fields, and tables
+- Closed objects, compile-time inheritance, constructors, ownership, `GetTypeName()`, and `IsType(...)`
+- Growable tables plus compiler-packed numeric buffers using ordinary `{ ... }` syntax
+- LSG front-end graphics API shared by OpenGL and Vulkan
+- LSSL vertex, fragment, compute, overlay, storage, image, and modular ray shader support
+- Vulkan shared-scene ray-traced shadows, AO, GI, and reflections
+- Native retained LSHTML, LSCSS, and LazyUI on OpenGL or Vulkan
+- GLFW windowing/input, OpenAL audio, stb_image loading, FreeType SDF text, and GLM math
+- Native files, JSON, logging, threads, synchronization, TCP/UDP, HTTP/HTTPS, and Win32 integration
+- VS Code diagnostics, completion, hovers, signatures, navigation, formatting, build/run commands, and offline API access
+- 66 bundled projects covering language, runtime, OpenGL, Vulkan, LazyUI, ray effects, compute, and procedural generation
 
 ## Quick start
 
 ### 1. Prepare the runtime
 
-From the repository root, run:
+From the repository root:
 
 ```bat
 setup-runtime.bat
 ```
 
-This prepares the native libraries required by the bundled projects.
-
 ### 2. Install the VS Code extension
-
-Run:
 
 ```bat
 INSTALL_VSCODE_EXTENSION.bat
 ```
 
-Restart Visual Studio Code. Projects may be opened anywhere on disk. When a project is not beside this repository, open the Command Palette and run:
+Restart or reload Visual Studio Code afterward.
 
-```text
-LazyScriptEX: Select LazyScript/API Folder
-```
-
-Select the `LazyScript` folder, `LazyScript/api`, or this toolkit root. The extension then uses that location for `@LazyScript` imports, compiler diagnostics, recursive IntelliSense, path autocomplete, and the offline API.
-
-This step is strongly recommended but not required to compile from the command line.
-
-### 3. Optionally rebuild every example
+### 3. Create a project
 
 ```bat
-build-all.bat
+new-project.bat MyGame
 ```
 
-Rebuilding locally is useful when Windows warns about downloaded prebuilt executables. It also confirms that the compiler and runtime are installed correctly on your machine.
-
-### 4. Open the beginner guide and API
-
-Run either:
+Build it with:
 
 ```bat
-START_HERE.bat
+Projects\MyGame\build.bat
 ```
 
-or:
+### 4. Open the offline API
 
 ```bat
 open-api.bat
 ```
 
-The offline guide covers setup, language basics, object inheritance, windows, tables, and LazyUI. The Front-end API contains normal LSX usage; raw native declarations and internal layouts are isolated in the Backend tab.
+The API separates normal front-end LSX usage from raw backend/native declarations. LSG, LSSL, inheritance, LazyUI, LSHTML, LSCSS, events, and programmatic elements are documented with copy-ready examples.
 
-## Create your first project
-
-From the repository root:
-
-```bat
-new-project.bat MyFirstProject
-```
-
-The project is created at:
-
-```text
-Projects/MyFirstProject/
-├─ main.lsx
-├─ lazyscriptex.json
-├─ build.bat
-└─ build/
-```
-
-Edit `Projects\MyFirstProject\main.lsx`, then build it:
-
-```bat
-Projects\MyFirstProject\build.bat
-```
-
-The executable is written to the project’s `build` folder.
-
-## A complete first window
-
-This is a complete LSX program. It loads the native libraries, creates an OpenGL window, clears the screen each frame, handles resizing, and cleans up correctly.
+## First window
 
 ```lsx
-use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
-
-fn fail(message)
-    Win32.MessageBoxA(0, message, "LazyScriptEX", Win32.MB_OK + Win32.MB_ICONERROR)
-    return 1
-end
+use "@LazyScript/LSG.lsx" as LSG
 
 fn main()
-    if GLFW.lsxLoadLibraries() < 1 then
-        return fail("Could not load glfw3.dll. Run setup-runtime.bat first.")
+    local window = LSG.open("My LSX window",1280,720)
+    if not window.ready() then
+        return LSG.show_error(window.error())
     end
 
-    if GLFW.glfwInit() == 0 then
-        return fail("glfwInit failed.")
+    while window.running() do
+        window.begin(0.03,0.04,0.07)
+        window.end()
     end
 
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR, 4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR, 6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE, GLFW.GLFW_OPENGL_CORE_PROFILE)
-    GLFW.glfwWindowHint(GLFW.GLFW_RESIZABLE, GLFW.GLFW_TRUE)
-
-    local window = GLFW.glfwCreateWindow(1280, 720, "My first LSX window", 0, 0)
-
-    if window == 0 then
-        GLFW.glfwTerminate()
-        return fail("Window creation failed. OpenGL 4.6 may not be available.")
-    end
-
-    GLFW.glfwMakeContextCurrent(window)
-    GLFW.glfwSwapInterval(1)
-
-    if GL.lsxLoadOpenGL() < 1 then
-        GLFW.glfwDestroyWindow(window)
-        GLFW.glfwTerminate()
-        return fail("OpenGL function loading failed.")
-    end
-
-    local framebuffer = GLFW.FramebufferSize.new()
-
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window)
-
-        GL.glViewport(0, 0, framebuffer.width, framebuffer.height)
-        GL.glClearColor(0.055, 0.075, 0.11, 1.0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
-    end
-
-    framebuffer.destroy()
-    GLFW.glfwDestroyWindow(window)
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
+    window.destroy()
     return 0
 end
 ```
 
-The same program is available in [`Projects/00_glfw_window`](Projects/00_glfw_window).
-
-## Language overview
-
-### Static managers and services
-
-Use `static const` when a system must have one shared state and be called without creating an instance:
+OpenGL is the default. Select Vulkan before opening the first window:
 
 ```lsx
-export static const AppState = {
-    running = true
-
-    Stop = fn()
-        self.running = false
-    end
-}
+LSG.use_vulkan()
+local window = LSG.open("My Vulkan window",1280,720)
 ```
 
-The compiler initializes the object once before `main()`. Imported code calls `Module.AppState.Stop()` directly.
+The same window, input, mesh, texture, framebuffer, storage, shader, camera, and frame-loop APIs are then used on either backend.
 
+## Clear LSG front-end names
 
-### Variables and inferred values
-
-```lsx
-local name = "Jessie"
-local health = 100
-local speed = 4.0
-local enabled = true
-```
-
-The compiler infers how each value is stored. Ordinary application code does not need `name:string`, `health:i32`, or return annotations.
-
-Use `const` for reusable object definitions and fixed module-level values:
+Normal application code uses clear operation names:
 
 ```lsx
-const Player = {
-    name = "Player"
-    health = 100
-    speed = 4.0
-}
-```
+window.activate()
+window.set_vsync(false)
+window.set_title("Scene Editor")
 
-### Functions
-
-```lsx
-fn add(left, right)
-    return left + right
+if window.is_key_down(LSG.Key.Escape) then
+    window.close()
 end
 
-fn main()
-    local total = add(20, 22)
-    return 0
-end
+window.begin(0.02,0.03,0.05)
+-- Draw here.
+window.end()
 ```
 
-Parameters and returns are inferred from how the function is called and how its values are used.
+Older names remain compatibility aliases so existing projects continue to compile, but they are kept out of the beginner-facing API.
 
-### Conditions
+## LSSL shaders
 
-```lsx
-if health <= 0 then
-    state = "dead"
-elseif health < 25 then
-    state = "hurt"
-else
-    state = "ready"
-end
-```
+A `.lssl` file is compiled to embedded GLSL for OpenGL and embedded SPIR-V for Vulkan.
 
-Conditions can be kept on one line for small checks:
+```lssl
+shader Basic
+vulkan
+vertex
+    input position = Vector2
+    input tint = Color3
+    output color = Color3
 
-```lsx
-if window == 0 then return 1 end
-```
-
-### While loops
-
-```lsx
-local index = 0
-
-while index < 10 do
-    console.write_line(index)
-    index = index + 1
-end
-```
-
-### For loops over growable tables
-
-```lsx
-local names = {}
-names.push("Luna")
-names.push("Tami")
-names.push("Janet")
-
-for name in names do
-    console.write_line(name)
-end
-
-names.destroy()
-```
-
-Use `break` to leave a loop early:
-
-```lsx
-for value in values do
-    if value == target then
-        found = true
-        break
+    main = fn()
+        color = tint
+        screen.position = Vector4(position,0.0,1.0)
     end
 end
-```
 
-## Tables
+fragment
+    input color = Color3
+    output finalColor = Color4
 
-LSX uses table syntax for several practical jobs. The compiler determines the storage and behavior from the table’s shape and how it is used.
-
-### Object tables
-
-Named fields create an object definition:
-
-```lsx
-const Enemy = {
-    name = "Slime"
-    health = 20
-
-    damage = fn(amount)
-        self.health = self.health - amount
+    main = fn()
+        finalColor = Color4(color,1.0)
     end
-}
-
-local enemy = Enemy.new()
-enemy.damage(5)
-console.write_line(enemy.health)
-enemy.destroy()
-```
-
-Object fields use fixed native offsets. Method calls use dot syntax.
-
-### Growable tables
-
-An empty table can become a growable collection. Its element representation is inferred from every value pushed into it; related derived objects widen to their nearest common base, and `for` loop variables receive that base type:
-
-```lsx
-local scores = {}
-
-scores.push(10)
-scores.push(25)
-scores.push(40)
-
-local first = scores.get(0)
-local count = scores.length()
-
-scores.remove(1)
-scores.clear()
-scores.destroy()
-```
-
-Common operations include:
-
-| Operation | Purpose |
-|---|---|
-| `push(value)` | Add a value to the end |
-| `get(index)` | Read a value by index |
-| `length()` | Return the number of stored values |
-| `capacity()` | Return the current reserved capacity |
-| `remove(index)` | Remove an item while preserving order |
-| `remove_fast(index)` | Remove an item without preserving order |
-| `pop()` | Remove and return the final item |
-| `last()` | Read the final item |
-| `clear()` | Remove all items while keeping allocated capacity |
-| `destroy()` | Release owned storage |
-
-### Fixed positional tables
-
-A non-empty positional table can represent a small fixed value:
-
-```lsx
-local position = {10.0, 20.0, 30.0}
-
-position.x = position.x + 1.0
-position.y = position.y + 2.0
-position.z = position.z + 3.0
-
-local count = position.length()
-local bytes = position.byte_length()
-
-position.destroy()
-```
-
-The first positions can also be accessed as `r`, `g`, `b`, and `a` when the value represents a color.
-
-### Flat numeric buffers
-
-The same syntax is used for native vertex, index, pixel, audio, and compute data:
-
-```lsx
-local vertices = {
-    -0.75, -0.65, 1.0, 0.2, 0.15,
-     0.75, -0.65, 0.15, 0.8, 0.25,
-     0.0,   0.75, 0.2, 0.35, 1.0
-}
-
-local indices = {0, 1, 2}
-
-GL.glBufferData(GL.GL_ARRAY_BUFFER, vertices.byte_length(), vertices, GL.GL_STATIC_DRAW)
-GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, indices.byte_length(), indices, GL.GL_STATIC_DRAW)
-
-vertices.destroy()
-indices.destroy()
-```
-
-The compiler keeps the packed native representation hidden from normal LSX code.
-
-## Objects and ownership
-
-Create an object with `.new()`:
-
-```lsx
-local player = Player.new()
-```
-
-Copy one with `.clone()`:
-
-```lsx
-local copy = player.clone()
-```
-
-Release owned objects and growable data with `.destroy()` when they are no longer needed:
-
-```lsx
-copy.destroy()
-player.destroy()
-```
-
-LSX does not use a garbage collector. Ownership is explicit so native applications can control allocation and cleanup. Object fields created with `.new()`, `.clone()`, or an object literal are compiler-owned by that field. Existing object values passed through parameters or assigned from another field are borrowed aliases. Borrowed fields keep direct native pointer access, but automatic clone and destruction copy or skip the alias instead of recursively cloning or freeing it. This allows fast circular engine graphs such as `GameObject -> Transform -> GameObject` without reference counting, scene-wide ID lookups, or reverse source imports.
-
-### Constructors
-
-An object can declare an inferred constructor. `.new(...)` applies the object defaults and then calls the constructor with the supplied values:
-
-```lsx
-const Transform = {
-    position = null
-    rotation = null
-    scale = null
-
-    constructor = fn(position, rotation, scale)
-        self.position = position
-        self.rotation = rotation
-        self.scale = scale
-    end
-}
-
-local transform = Transform.new(
-    {0, 0, 0},
-    {0, 0, 0},
-    {1, 1, 1}
-)
-```
-
-Constructor parameters and stored fields use normal LSX inference. Constructors do not return a value and are invoked through `.new(...)`, not by calling `constructor(...)` manually.
-
-## Compile-time inheritance
-
-A closed object can inherit fields and methods from one base object:
-
-```lsx
-const Actor = {
-    name = "Actor"
-    active = true
-
-    update = fn(delta)
-        return 0
-    end
-}
-
-const Player : base(Actor) = {
-    health = 100
-
-    update = fn(delta)
-        base.update(delta)
-        return 0
-    end
-}
-```
-
-Inheritance is resolved during compilation. It does not introduce a runtime prototype chain or reflection system.
-
-A derived constructor can initialize inherited state. A parameterless base constructor runs automatically; when the base constructor needs arguments, call it first:
-
-```lsx
-const Transform : base(LazyBehavior) = {
-    constructor = fn(parent, position, rotation, scale)
-        base.constructor(parent)
-        self.lazyVars = {
-            position = position
-            rotation = rotation
-            scale = scale
-        }
-    end
-}
-```
-
-## Modules and imports
-
-Relative imports begin at the file containing the `use` statement:
-
-```lsx
-use "./CameraController.lsx" as CameraController
-use "../Shared/MathHelpers.lsx" as MathHelpers
-```
-
-Named roots work from any folder depth:
-
-```lsx
-use "@LazyScript/bindings/Math/GLM.lsx" as GLM
-use "@Engine/Window/WindowManager.lsx" as WindowManager
-```
-
-`@LazyScript` comes from the selected LazyScript/API folder. Additional roots are configured in `lazyscriptex.json`:
-
-```json
-{
-  "entry": "main.lsx",
-  "output": "build/Game.exe",
-  "moduleRoots": {
-    "Engine": "../Engine",
-    "Shared": "../Shared"
-  }
-}
-```
-
-Paths in `moduleRoots` are relative to that JSON file. The key omits `@`, so `"Engine"` creates the `@Engine/...` import root.
-
-While typing inside a `use` path, the VS Code extension lists real folders and `.lsx` files. Choosing a folder continues completion at the next level, and Go to Definition on the quoted path opens the imported file.
-
-Only exported declarations are visible through a module alias:
-
-```lsx
-export const Settings = {
-    width = 1280
-    height = 720
-}
-
-export fn create_window(title)
-    return 0
+end
 end
 ```
 
-Use imported members through the alias:
+Import it from LSX and use the generated module:
 
 ```lsx
-local result = MathHelpers.lerp(0.0, 10.0, 0.5)
-```
+use "shaders/basic.lssl" as Basic
 
-Shared source folders do not need their own executable project. Editor and Game projects can both map the same `../Engine` folder and import it through `@Engine`.
-
-## Strings and raw strings
-
-Normal strings support escapes:
-
-```lsx
-local message = "Line one\nLine two"
-```
-
-Backtick strings preserve quotes and line breaks, which is useful for embedded shaders and JSON:
-
-```lsx
-local json_text = `{"name":"LazyScriptEX","enabled":true}`
-
-local shader = `#version 460 core
-void main() {
-}`
-```
-
-## Files and JSON
-
-```lsx
-use "@LazyScript/bindings/System/File.lsx" as File
-use "@LazyScript/bindings/Data/Json.lsx" as Json
-
-fn main()
-    File.write_text("settings.json", `{"volume":0.8}`)
-
-    local document = Json.load("settings.json")
-    local value = document.get(document.root, "volume")
-    local volume = document.as_f32(value)
-
-    document.destroy()
-    return 0
+local shader = Basic.create()
+if not shader.ready() then
+    return LSG.show_error(shader.error())
 end
 ```
 
-See [`Projects/21_file_io`](Projects/21_file_io) and [`Projects/22_json`](Projects/22_json) for complete programs.
+LSSL also supports compute stages, storage buffers, images, flat stage values, overlay pipelines, and modular Vulkan ray effects. See [`LazyScript/docs/LSSL.md`](LazyScript/docs/LSSL.md).
 
-## Native threads
+## Modular Vulkan ray effects
 
-LSX can run named functions on real operating-system threads:
+A normal material can opt into any combination of shared-scene effects:
 
-```lsx
-use "@LazyScript/bindings/System/Threading.lsx" as Threading
-
-const Work = {
-    value = 0
-}
-
-fn run_worker(work)
-    work.value = work.value + 1
-    return 0
-end
-
-fn main()
-    local work = Work.new()
-    local worker = Threading.Thread.start(run_worker, work)
-
-    worker.join()
-    worker.close()
-    work.destroy()
-    return 0
-end
+```lssl
+raytracing shadows ao gi reflections
 ```
 
-Shared writable data still requires locks, atomics, events, or another synchronization primitive.
+or:
 
-## GLM math
-
-The public GLM wrapper keeps C++ types and pointers out of normal LSX code:
-
-```lsx
-use "@LazyScript/bindings/Math/GLM.lsx" as GLM
-use "@LazyScript/bindings/Math/Camera.lsx" as Camera
-
-local position = GLM.vec3(4.0, 3.0, 6.0)
-local direction = GLM.vec3(0.0, 0.0, -1.0)
-local normalized = direction.normalized()
-
-local camera = Camera.create()
-camera.set_position(position.x, position.y, position.z)
-camera.set_perspective(60.0, 16.0 / 9.0, 0.1, 1000.0)
-
-local view_projection = camera.view_projection()
+```lssl
+raytracing all
 ```
 
-The offline API documents vectors, matrices, quaternions, transforms, projection, interpolation, decomposition, and cameras with runnable examples.
+Enable the shared scene before creating the shader:
 
-## Native LSHTML, LSCSS, and LazyUI
+```lsx
+LSG.use_vulkan()
+LSG.set_ray_tracing(true)
+```
 
-LSHTML and LSCSS are declared inside ordinary `.lsx` files. They compile to retained native UI objects and do not require a browser or JavaScript runtime.
+Triangle-list meshes created through normal LSG mesh functions participate automatically when their first vertex attribute is `Vector3 position`. Transforms and material values stay on the normal mesh object:
+
+```lsx
+mesh.set_ray_transform(model)
+mesh.set_ray_material(0.8,0.25,0.12,0.35,0.0,0.0)
+```
+
+## LazyUI, LSHTML, and LSCSS
+
+LSHTML and LSCSS are compiler-native retained UI declarations. No browser, DOM runtime, or JavaScript framework is involved.
 
 ```lsx
 use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
 
-const WelcomeProps = {
-    title = "Welcome"
-    message = "This interface is written in LSHTML and LSCSS."
+const ToolbarProps = {
+    status = "Ready"
 }
 
-lscss .welcome-card = {
-    width = "420px"
-    padding = "24px"
-    gap = "12px"
-    background = "#111a29"
-    border = "1px solid #2d4668"
-    border_radius = "12px"
-}
-
-lscss .primary-button = {
-    padding = "10px 16px"
+lscss .primary = {
+    padding = "8px 14px"
     background = "#3478f6"
     border_radius = "8px"
 }
 
-lshtml welcome_view(props) = {(
-    <panel class="welcome-card">
-        <h1>{props.title}</h1>
-        <paragraph>{props.message}</paragraph>
-        <button class="primary-button" onclick={continue_clicked} context={props}>
-            Continue
-        </button>
-    </panel>
+lshtml toolbar_view(props) = {(
+    <row class="toolbar">
+        <button id="save" class="primary">Save</button>
+        <span>{props.status}</span>
+    </row>
 )}
 
-fn continue_clicked(element, event, props)
-    props.message = "The button was pressed."
+fn main()
+    local props = ToolbarProps.new()
+    local root = toolbar_view(props)
+    local document = UI.document(root)
+    document.destroy()
+    props.destroy()
     return 0
 end
 ```
 
-Complete window, document, input, renderer, frame-loop, scrolling, controls, and HUD examples are available in projects 28 through 32 and in the offline API.
+The same retained UI works on OpenGL and Vulkan. Projects 28–32 and 57–62 cover controls, scrolling, editor layouts, node graphs, HUDs, SDF text, images, and clipping.
 
-## Compiler commands
+## Multiple windows
 
-Show compiler help:
+LSG can render different editor systems into separate windows while sharing the same front-end API:
 
-```bat
-node LazyScript\compiler\lazyscriptex.js
+```lsx
+local first = LSG.open("Window A",640,400)
+local second = LSG.open("Window B",640,400)
+
+while first.running() and second.running() do
+    first.activate()
+    first.begin(0.20,0.04,0.06)
+    first.end()
+
+    second.activate()
+    second.begin(0.03,0.08,0.22)
+    second.end()
+end
 ```
 
-Check one source file:
+## Repository commands
 
-```bat
-node LazyScript\compiler\lazyscriptex.js check path\to\main.lsx
-```
-
-Check a complete project:
-
-```bat
-node LazyScript\compiler\lazyscriptex.js check-project Projects\00_glfw_window
-```
-
-Build a project:
-
-```bat
-node LazyScript\compiler\lazyscriptex.js build Projects\00_glfw_window
-```
-
-Request structured diagnostics:
-
-```bat
-node LazyScript\compiler\lazyscriptex.js check-project Projects\00_glfw_window --diagnostics=json
-```
-
-Select optimization and CPU targets:
-
-```bat
-node LazyScript\compiler\lazyscriptex.js build Projects\02_opengl_triangle --opt 6 --cpu avx2-fma
-```
-
-Supported CPU targets are `baseline`, `avx2`, and `avx2-fma`.
-
-## Diagnostics
-
-Compiler errors include a stable error code, source location, offending line, underline, and a practical hint when one is available:
-
-```text
-LazyScriptEX error [LSX1200]: Game/main.lsx:18:21: unknown field 'positon'
-
-18 | player.positon.x = 10.0
-   |        ^^^^^^^^
-
-Hint: Did you mean 'position'?
-```
-
-The VS Code extension displays the same diagnostics in the editor and Problems panel while typing and on save.
-
-## VS Code commands
-
-Open the Command Palette and search for `LazyScriptEX`:
-
-- `LazyScriptEX: Build Project`
-- `LazyScriptEX: Build and Run Project`
-- `LazyScriptEX: Check Current File`
-- `LazyScriptEX: Refresh Recursive Index`
-- `LazyScriptEX: Open Offline API`
-- `LazyScriptEX: Create Project from Template`
-- `LazyScriptEX: Explain Symbol Under Cursor`
-
-Default shortcuts:
-
-| Shortcut | Action |
+| Command | Purpose |
 |---|---|
-| `F6` | Build the current project |
-| `Ctrl+F6` | Build and run |
-| `Ctrl+Shift+F6` | Check the current file/project |
-| `Ctrl+Alt+R` | Refresh the workspace index |
+| `setup-runtime.bat` | Prepare required runtime libraries |
+| `INSTALL_VSCODE_EXTENSION.bat` | Install the bundled VS Code extension |
+| `new-project.bat Name` | Create a project from `ProjectTemplate` |
+| `build-all.bat` | Build every bundled project |
+| `check-all.bat` | Check every project and validate the API |
+| `test-all.bat` | Run compiler, API, extension, and project validation |
+| `update-api.bat` | Regenerate and synchronize the offline API |
+| `package-extension.bat` | Rebuild the installable VS Code VSIX |
+| `clean.bat` | Remove generated project/test build directories |
+| `open-api.bat` | Open the offline API in the default browser |
 
 ## Repository layout
 
 ```text
 LazyScriptEX/
 ├─ LazyScript/
-│  ├─ compiler/          LSX compiler and tests
-│  ├─ bindings/          LSX-facing native APIs
-│  ├─ native/            native bridge source and libraries
-│  ├─ runtime/           runtime files prepared by setup-runtime
-│  ├─ extension/         Visual Studio Code extension
-│  ├─ api/               offline beginner guide and API reference
-│  ├─ docs/              language, ABI, optimizer, and performance docs
-│  └─ licenses/          third-party notices and licenses
-├─ Projects/             runnable examples and project template
-├─ CompilerTests/        compiler and runtime regression projects
-├─ Benchmarks/           reproducible performance benchmarks
-├─ setup-runtime.bat
-├─ INSTALL_VSCODE_EXTENSION.bat
-├─ build-all.bat
-├─ check-all.bat
-├─ new-project.bat
-└─ open-api.bat
+│  ├─ compiler/       LSX and LSSL compiler
+│  ├─ bindings/       LSX-facing native APIs
+│  ├─ native/         required native Windows libraries
+│  ├─ runtime/        GLFW and OpenAL runtime libraries
+│  ├─ api/            generated offline API
+│  ├─ docs/           language, LSG, LSSL, optimizer, and ABI documentation
+│  ├─ extension/      Visual Studio Code extension source
+│  ├─ LSG.lsx         beginner graphics front end
+│  └─ LSSL.lsx        shader runtime front end
+├─ Projects/          runnable examples and project template
+├─ CompilerTests/     compiler regression projects
+├─ Benchmarks/        reproducible performance workloads
+└─ .github/workflows/ repository validation
 ```
-
-## Examples
-
-The numbered projects progress from a blank window to rendering, audio, threads, networking, files, JSON, images, text, math, and UI.
-
-Start with:
-
-- [`00_glfw_window`](Projects/00_glfw_window): complete window and frame loop
-- [`01_input_polling`](Projects/01_input_polling): keyboard and mouse input
-- [`02_opengl_triangle`](Projects/02_opengl_triangle): first OpenGL draw call
-- [`03_indexed_cube_depth`](Projects/03_indexed_cube_depth): indexed 3D geometry
-- [`14_full_game_loop`](Projects/14_full_game_loop): rendering, input, and audio together
-- [`18_native_threads`](Projects/18_native_threads): real OS threads and atomics
-- [`21_file_io`](Projects/21_file_io): text and binary files
-- [`22_json`](Projects/22_json): parsing and writing JSON
-- [`24_image_loading`](Projects/24_image_loading): image decoding and texture upload
-- [`25_sdf_text`](Projects/25_sdf_text): FreeType SDF text
-- [`27_glm_camera`](Projects/27_glm_camera): vectors, matrices, transforms, and cameras
-- [`28_lazyui_inline`](Projects/28_lazyui_inline): retained UI and scrolling
-- [`29_lazyui_controls_gallery`](Projects/29_lazyui_controls_gallery): editable controls
-- [`32_lazyui_runtime_hud`](Projects/32_lazyui_runtime_hud): runtime HUD layout
-
-See [`Projects/README.md`](Projects/README.md) for the complete list.
 
 ## Documentation
 
-- [Language reference](LazyScript/docs/LANGUAGE.md)
-- [Foreign ABI](LazyScript/docs/C_ABI.md)
-- [Optimizer](LazyScript/docs/OPTIMIZER.md)
-- [Performance and benchmarks](LazyScript/docs/PERFORMANCE.md)
-- [Example projects](Projects/README.md)
-- [GLFW binding](LazyScript/bindings/GLFW/README.md)
-- [OpenGL binding](LazyScript/bindings/OpenGL/README.md)
-- [OpenAL binding](LazyScript/bindings/OpenAL/README.md)
-- [GLM math](LazyScript/bindings/Math/README.md)
-- [Files, logs, and threading](LazyScript/bindings/System/README.md)
-- [Networking](LazyScript/bindings/Network/README.md)
-- [Images and textures](LazyScript/bindings/Graphics/README.md)
-- [FreeType and fonts](LazyScript/bindings/Text/README.md)
-- [LazyUI, LSHTML, and LSCSS](LazyScript/bindings/UI/README.md)
-
-## Tests
-
-Check every example project:
-
-```bat
-check-all.bat
-```
-
-Run compiler tests:
-
-```bat
-cd LazyScript\compiler
-npm test
-```
-
-Run the benchmark suite from PowerShell:
-
-```powershell
-cd Benchmarks\near_c
-.\run.ps1
-```
-
-Performance results describe specific measured workloads, not a promise that every program will outperform every native compiler. See [PERFORMANCE.md](LazyScript/docs/PERFORMANCE.md) for methodology and limitations.
-
-## Contributing
-
-Contributions are welcome. Keep public LSX examples inference-first:
-
-- Use `fn name(args)` without ordinary parameter or return annotations.
-- Use `name = value` for locals and object fields.
-- Use dot access and dot method calls.
-- Keep pointers and exact ABI types inside bindings or other low-level interop code.
-- Add or update a regression test for compiler changes.
-- Run `check-all.bat` and the compiler test suite before submitting changes.
-- Document public behavior with a practical example.
+- [Language guide](LazyScript/docs/LANGUAGE.md)
+- [LSG graphics guide](LazyScript/docs/LSG.md)
+- [LSSL shader guide](LazyScript/docs/LSSL.md)
+- [Optimizer guide](LazyScript/docs/OPTIMIZER.md)
+- [Performance guide](LazyScript/docs/PERFORMANCE.md)
+- [Native C ABI notes](LazyScript/docs/C_ABI.md)
+- [Project index](Projects/README.md)
+- [Vulkan example coverage](Projects/VULKAN_EXAMPLES.md)
+- [Changelog](CHANGELOG.md)
 
 ## License
 
-LazyScriptEX is released under the [MIT License](LICENSE).
-
-Bundled third-party components are covered by their own licenses and notices under [`LazyScript/licenses`](LazyScript/licenses) and [`LazyScript/runtime`](LazyScript/runtime).
-
-
-## 0.18.18 beginner-first API split
-
-The offline documentation now separates the normal Front-end API from backend/native implementation details. Object inheritance has its own complete section covering `: base(...)`, inherited fields and methods, derived constructors, `base.constructor(...)`, overrides, common-base inference, `GetTypeName()`, and `IsType(...)`. LazyUI now starts with copy-ready workflows for LSHTML/LSCSS, `document.find()`, runtime listeners, element state changes, IDs, classes, and a separate programmatic-element section for `UI.button()`, `UI.panel()`, and the rest of the retained controls. Internal records such as `Binding.property_hash`, raw functions, native constants, fixed layouts, ABI types, and renderer/compiler plumbing appear only in the Backend tab.
-
-## 0.18.17 circular object reference fix
-
-LSX now keeps cross-module inferred object identities internally, so a constructor can receive and store an object from another module without adding a reverse `use` import. Direct assignments from existing objects are classified as borrowed aliases at compile time, while `.new()`, `.clone()`, and nested object literals remain owned. Automatic clone/destruction copies or skips borrowed back-references, preventing recursive `GameObject -> Transform -> GameObject` cleanup while adding no runtime ownership flag, reference count, branch, or extra object storage.
-
-## 0.18.16 autocomplete replacement fix
-
-LSX completion items now use the same explicit replacement range for both VS Code insert and replace modes. Partial names and highlighted text are replaced instead of appended, reverse-direction selections are supported, and completing a method before an existing `(` no longer inserts duplicate call parentheses.
+LazyScriptEX is released under the [MIT License](LICENSE). Third-party notices remain under [`LazyScript/licenses`](LazyScript/licenses).

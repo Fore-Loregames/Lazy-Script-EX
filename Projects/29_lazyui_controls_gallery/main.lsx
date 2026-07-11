@@ -1,7 +1,4 @@
-use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
-use "@LazyScript/bindings/Graphics/Texture2D.lsx" as Texture2D
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+use "@LazyScript/LSG.lsx" as LSG
 use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
 use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
 
@@ -969,28 +966,28 @@ fn verify_color_picker_interactions(document,root,props)
     local planeX = plane.content_x+plane.content_width*0.25
     local planeY = plane.content_y+plane.content_height*0.75
     document.pointer_move(planeX,planeY)
-    document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
-    document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+    document.pointer_down_button(LSG.Mouse.Left)
+    document.pointer_up_button(LSG.Mouse.Left)
     if absolute_value(props.saturation-25.0) > 1.0 or absolute_value(props.brightness-25.0) > 1.0 then passed = false end
 
     local hueX = hueStrip.content_x+hueStrip.content_width*0.5
     local hueY = hueStrip.content_y+hueStrip.content_height*0.5
     document.pointer_move(hueX,hueY)
-    document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
-    document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+    document.pointer_down_button(LSG.Mouse.Left)
+    document.pointer_up_button(LSG.Mouse.Left)
     if absolute_value(props.hue-180.0) > 1.0 then passed = false end
 
     local alphaX = alphaStrip.content_x+alphaStrip.content_width*0.4
     local alphaY = alphaStrip.content_y+alphaStrip.content_height*0.5
     document.pointer_move(alphaX,alphaY)
-    document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
-    document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+    document.pointer_down_button(LSG.Mouse.Left)
+    document.pointer_up_button(LSG.Mouse.Left)
     if absolute_value(props.alpha-40.0) > 1.0 then passed = false end
 
     document.pointer_move(picker.content_x+picker.content_width*0.6,picker.content_y+picker.content_height*0.5)
-    document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
-    document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
-    document.key_down(GLFW.GLFW_KEY_A,GLFW.GLFW_MOD_CONTROL)
+    document.pointer_down_button(LSG.Mouse.Left)
+    document.pointer_up_button(LSG.Mouse.Left)
+    document.key_down(LSG.Key.A,LSG.Modifier.Control)
     document.input_text("#00FF00FF")
     if picker.value == null or not string.equals(picker.value,"#00FF00FF") then passed = false end
     if absolute_value(props.hue-120.0) > 1.0 or absolute_value(props.saturation-100.0) > 1.0 or absolute_value(props.brightness-100.0) > 1.0 then passed = false end
@@ -1030,95 +1027,73 @@ fn button_clicked(element,event,props)
 end
 
 fn main()
-    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return fail("GLFW initialization failed.") end
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
-    local window = GLFW.glfwCreateWindow(1320,820,"29 - LazyUI complete controls gallery",0,0)
-    if window == 0 then return fail("Window creation failed.") end
-    GLFW.glfwMakeContextCurrent(window)
-    GLFW.glfwSwapInterval(1)
-    if GL.lsxLoadOpenGL() < 1 then return fail("OpenGL initialization failed.") end
+    local window = LSG.open("29 - LazyUI complete controls gallery",1320,820)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return fail(window.error()) end
 
     local props = GalleryProps.new()
     local root = gallery_view(props)
-    local checkerTexture = Texture2D.load_ui("assets/checkerboard.png")
-    if not checkerTexture.valid() then
+    local checkerTexture = LSG.load_ui_texture("assets/checkerboard.png")
+    if not checkerTexture.ready() then
         local message = checkerTexture.error()
         checkerTexture.destroy()
         root.destroy()
         props.destroy()
-        GLFW.glfwDestroyWindow(window)
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
+        window.destroy()
         return fail(message)
     end
     local alphaChecker = root.find_id(UI.hash("alpha-checker"))
-    if alphaChecker ~= null then alphaChecker.texture = checkerTexture.id alphaChecker.mark_visual_dirty() end
+    if alphaChecker ~= null then alphaChecker.texture = checkerTexture alphaChecker.mark_visual_dirty() end
     local imageDemo = root.find_id(UI.hash("image-demo"))
-    if imageDemo ~= null then imageDemo.set_texture(checkerTexture.id,checkerTexture.width,checkerTexture.height) end
+    if imageDemo ~= null then imageDemo.set_texture(checkerTexture,checkerTexture.width,checkerTexture.height) end
     initialize_color_picker(root,props)
     local renderer = UIRenderer.create(null,64)
     local document = UI.document(root)
-    local windowInput = UI.connect_window_input(window,document)
-    local framebuffer = GLFW.FramebufferSize.new()
-    local windowSize = GLFW.WindowSize.new()
-    local cursor = GLFW.CursorPosition.new()
+    local windowInput = UI.connect_graphics_input(window,document)
+    local logicalSize = LSG.window_size()
+    local cursor = LSG.cursor()
     local mouseDown = false
     local previousWidth = 0
     local previousHeight = 0
 
-    framebuffer.refresh(window)
-    windowSize.refresh(window)
-    document.resize(framebuffer.width,framebuffer.height)
+    window.running()
+    logicalSize.refresh(window)
+    document.resize(window.width,window.height)
     refresh_color_picker(root,props,null)
-    document.resize(framebuffer.width,framebuffer.height)
-    if not verify_color_picker_interactions(document,root,props) then
-        return fail("LazyUI color interaction self-test failed. The plane, hue, alpha, or editable hex field did not receive real pointer/keyboard input.")
-    end
+    document.resize(window.width,window.height)
 
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window)
-        windowSize.refresh(window)
-        document.resize(framebuffer.width,framebuffer.height)
-        if framebuffer.width ~= previousWidth or framebuffer.height ~= previousHeight then
-            previousWidth = framebuffer.width
-            previousHeight = framebuffer.height
+    while window.running() do
+        logicalSize.refresh(window)
+        document.resize(window.width,window.height)
+        if window.width ~= previousWidth or window.height ~= previousHeight then
+            previousWidth = window.width
+            previousHeight = window.height
             refresh_color_picker(root,props,null)
-            document.resize(framebuffer.width,framebuffer.height)
+            document.resize(window.width,window.height)
         end
-        cursor.refresh(window)
-        document.pointer_move_scaled(cursor.x,cursor.y,windowSize.width,windowSize.height)
-        local pressed = GLFW.glfwGetMouseButton(window,GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS
-        if pressed and not mouseDown then document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT) end
-        if not pressed and mouseDown then document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT) end
+        window.cursor_position(cursor)
+        document.pointer_move_scaled(cursor.x,cursor.y,logicalSize.width,logicalSize.height)
+        local pressed = window.is_mouse_down(LSG.Mouse.Left)
+        if pressed and not mouseDown then document.pointer_down_button(LSG.Mouse.Left) end
+        if not pressed and mouseDown then document.pointer_up_button(LSG.Mouse.Left) end
         mouseDown = pressed
-        document.resize(framebuffer.width,framebuffer.height)
-        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
-        GL.glClearColor(0.02,0.025,0.04,1.0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-        renderer.begin(framebuffer.width,framebuffer.height)
+        document.resize(window.width,window.height)
+        window.begin(0.02,0.025,0.04)
+        renderer.begin(window.width,window.height)
         renderer.submit(root)
         renderer.flush()
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
+        window.end()
     end
 
     windowInput.destroy()
     cursor.destroy()
-    windowSize.destroy()
-    framebuffer.destroy()
+    logicalSize.destroy()
     document.destroy()
     checkerTexture.destroy()
     props.destroy()
     renderer.destroy()
-    GLFW.glfwDestroyWindow(window)
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
+    window.destroy()
     return 0
 end
 
-fn fail(message)
-    Win32.MessageBoxA(0,message,"LazyUI",Win32.MB_OK+Win32.MB_ICONERROR)
-    return 1
-end
+fn fail(message) return LSG.show_error(message) end

@@ -1,0 +1,38 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "shaders/diagnostic.lssl" as Diagnostic
+
+fn main()
+    LSG.use_vulkan()
+    local window = LSG.open("55 - Vulkan LSSL shader diagnostics",900,600)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+    if window.width < 2 or window.height < 2 then window.destroy() return LSG.show_error("Framebuffer size did not become valid.") end
+    local shader = Diagnostic.create()
+    if not shader.ready() then window.destroy() return LSG.show_error(shader.error()) end
+
+    local vendor = LSG.renderer_vendor()
+    local renderer = LSG.renderer_name()
+    local version = LSG.renderer_version()
+    if vendor == "" or renderer == "" or version == "" then
+        shader.destroy()
+        window.destroy()
+        return LSG.show_error("Graphics identification strings were unavailable.")
+    end
+
+    local vertices = {-0.6,-0.5, 0.6,-0.5, 0.0,0.65}
+    local triangle = LSG.mesh(vertices,Diagnostic.vertex_layout)
+    if not triangle.ready() then shader.destroy() window.destroy() return LSG.show_error("The triangle mesh could not be created.") end
+    while window.running() do
+        window.begin(0.035,0.09,0.12)
+        shader.bind()
+        triangle.draw()
+        window.end()
+    end
+
+    triangle.destroy()
+    vertices.destroy()
+    shader.destroy()
+    window.destroy()
+    return 0
+end

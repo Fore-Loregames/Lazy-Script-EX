@@ -1,0 +1,300 @@
+shader LazyUIVectorFast
+vulkan
+overlay
+strip
+vertex
+    storage commandData = Vector4 at 0
+    storage boxData = Vector4 at 1
+    storage textData = Vector4 at 2
+    storage imageData = Vector4 at 3
+    uniform viewport = Vector2
+    flat output meta = Vector4
+    flat output payload0 = Vector4
+    flat output payload1 = Vector4
+    flat output payload2 = Vector4
+    flat output payload3 = Vector4
+    flat output payload4 = Vector4
+    flat output payload5 = Vector4
+    flat output payload6 = Vector4
+    flat output payload7 = Vector4
+    flat output payload8 = Vector4
+    flat output payload9 = Vector4
+    output uv = Vector2
+    output pixelPosition = Vector2
+
+    main = fn()
+        local corner = Vector2(0.0,0.0)
+        if vertex.id == 1 then
+            corner = Vector2(1.0,0.0)
+        end
+        if vertex.id == 2 then
+            corner = Vector2(0.0,1.0)
+        end
+        if vertex.id == 3 then
+            corner = Vector2(1.0,1.0)
+        end
+
+        local command = commandData[instance.id]
+        local kind = command.x
+        local item = Whole(command.y + 0.5)
+        meta = Vector4(kind,command.z,1.0,0.0)
+        payload0 = Vector4(0.0,0.0,0.0,0.0)
+        payload1 = Vector4(0.0,0.0,0.0,0.0)
+        payload2 = Vector4(0.0,0.0,0.0,0.0)
+        payload3 = Vector4(0.0,0.0,0.0,0.0)
+        payload4 = Vector4(0.0,0.0,0.0,0.0)
+        payload5 = Vector4(0.0,0.0,0.0,0.0)
+        payload6 = Vector4(0.0,0.0,0.0,0.0)
+        payload7 = Vector4(0.0,0.0,0.0,0.0)
+        payload8 = Vector4(0.0,0.0,0.0,0.0)
+        payload9 = Vector4(0.0,0.0,0.0,0.0)
+        uv = corner
+
+        if kind < 1.5 then
+            local offset = item * 15
+            payload0 = boxData[offset]
+            payload1 = boxData[offset + 1]
+            payload2 = boxData[offset + 2]
+            payload3 = boxData[offset + 3]
+            payload4 = boxData[offset + 4]
+            payload5 = boxData[offset + 6]
+            payload6 = boxData[offset + 7]
+            payload7 = boxData[offset + 9]
+            payload8 = boxData[offset + 10]
+            local misc = boxData[offset + 11]
+            local extra2 = boxData[offset + 13]
+            meta.z = misc.x
+            meta.w = misc.y
+            payload9 = Vector4(misc.z,extra2.y,extra2.z,0.0)
+            local minimum = Vector2(payload0.xy - Vector2(2.0,2.0))
+            local maximum = Vector2(payload0.xy + payload0.zw + Vector2(2.0,2.0))
+            pixelPosition = mix(minimum,maximum,corner)
+        else if kind < 2.5 then
+            local offset = item * 5
+            payload0 = textData[offset]
+            payload1 = textData[offset + 2]
+            payload2 = textData[offset + 1]
+            payload3 = textData[offset + 3]
+            payload4 = textData[offset + 4]
+            pixelPosition = payload0.xy + corner * payload0.zw
+            uv = mix(payload2.xy,payload2.zw,corner)
+        else
+            local offset = item * 4
+            payload0 = imageData[offset]
+            payload1 = imageData[offset + 1]
+            payload2 = Vector4(0.0,0.0,1.0,1.0)
+            payload3 = imageData[offset + 2]
+            payload4 = imageData[offset + 3]
+            pixelPosition = payload0.xy + corner * payload0.zw
+        end
+
+        local ndc = (pixelPosition / viewport) * Vector2(2.0,-2.0) + Vector2(-1.0,1.0)
+        screen.position = Vector4(ndc,0.0,1.0)
+    end
+end
+fragment
+    flat input meta = Vector4
+    flat input payload0 = Vector4
+    flat input payload1 = Vector4
+    flat input payload2 = Vector4
+    flat input payload3 = Vector4
+    flat input payload4 = Vector4
+    flat input payload5 = Vector4
+    flat input payload6 = Vector4
+    flat input payload7 = Vector4
+    flat input payload8 = Vector4
+    flat input payload9 = Vector4
+    input uv = Vector2
+    input pixelPosition = Vector2
+    texture fontAtlas at 0
+    texture image1 at 1
+    texture image2 at 2
+    texture image3 at 3
+    texture image4 at 4
+    texture image5 at 5
+    texture image6 at 6
+    texture image7 at 7
+    output finalColor = Color4
+
+    main = fn()
+        local kind = meta.x
+        local clipRect = payload3
+        local clipRadii = payload4
+        if kind < 1.5 then
+            clipRect = payload7
+            clipRadii = payload8
+        end
+
+        local clipCoverage = Number(1.0)
+        if clipRect.z > 0.0 and clipRect.w > 0.0 then
+            local clipCenter = Vector2(clipRect.xy + clipRect.zw * 0.5)
+            local clipHalf = Vector2(max(clipRect.zw * 0.5,Vector2(0.0,0.0)))
+            local clipPoint = Vector2(pixelPosition - clipCenter)
+            local clipRadius = clipRadii.x
+            if clipPoint.x >= 0.0 and clipPoint.y < 0.0 then
+                clipRadius = clipRadii.y
+            end
+            if clipPoint.x >= 0.0 and clipPoint.y >= 0.0 then
+                clipRadius = clipRadii.z
+            end
+            if clipPoint.x < 0.0 and clipPoint.y >= 0.0 then
+                clipRadius = clipRadii.w
+            end
+            clipRadius = max(clipRadius,0.0)
+            local clipQ = Vector2(abs(clipPoint) - clipHalf + Vector2(clipRadius,clipRadius))
+            local clipDistance = Number(min(max(clipQ.x,clipQ.y),0.0) + length(max(clipQ,Vector2(0.0,0.0))) - clipRadius)
+            local clipAA = Number(max(fwidth(clipDistance),0.75))
+            clipCoverage = 1.0 - smoothstep(-clipAA,clipAA,clipDistance)
+            if clipCoverage <= 0.001 then
+                discard
+            end
+        end
+
+        finalColor = Color4(0.0,0.0,0.0,0.0)
+        if kind < 1.5 then
+            local rect = payload0
+            local backgroundA = payload1
+            local backgroundB = payload2
+            local borderTopRight = payload3
+            local borderBottomLeft = payload4
+            local cornerRadii = payload5
+            local borderWidths = payload6
+            local opacity = meta.z
+            local gradientMode = meta.w
+            local gradientAngle = payload9.x
+            local shapeMode = payload9.y
+
+            local center = Vector2(rect.xy + rect.zw * 0.5)
+            local halfSize = Vector2(max(rect.zw * 0.5,Vector2(0.0,0.0)))
+            local point = Vector2(pixelPosition - center)
+            local radius = cornerRadii.x
+            if point.x >= 0.0 and point.y < 0.0 then
+                radius = cornerRadii.y
+            end
+            if point.x >= 0.0 and point.y >= 0.0 then
+                radius = cornerRadii.z
+            end
+            if point.x < 0.0 and point.y >= 0.0 then
+                radius = cornerRadii.w
+            end
+            radius = max(radius,0.0)
+            local q = Vector2(abs(point) - halfSize + Vector2(radius,radius))
+            local distanceValue = Number(min(max(q.x,q.y),0.0) + length(max(q,Vector2(0.0,0.0))) - radius)
+            if shapeMode > 0.5 and shapeMode < 1.5 then
+                distanceValue = length(point) - min(halfSize.x,halfSize.y)
+            else if shapeMode > 2.5 and shapeMode < 3.5 then
+                local safeHalf = Vector2(max(halfSize,Vector2(0.001,0.001)))
+                distanceValue = (length(point / safeHalf) - 1.0) * min(safeHalf.x,safeHalf.y)
+            end
+
+            local aa = Number(max(fwidth(distanceValue),0.75))
+            local bodyAlpha = Number(1.0 - smoothstep(-aa,aa,distanceValue))
+            if bodyAlpha <= 0.001 then
+                discard
+            end
+
+            local normalized = Vector2((pixelPosition - rect.xy) / max(rect.zw,Vector2(1.0,1.0)))
+            local gradient = Number(normalized.y)
+            if gradientMode > 0.5 and gradientMode < 1.5 then
+                local angle = Number(radians(gradientAngle))
+                local direction = Vector2(cos(angle),sin(angle))
+                gradient = clamp(dot(normalized - Vector2(0.5,0.5),direction) + 0.5,0.0,1.0)
+            else if gradientMode > 1.5 then
+                gradient = clamp(length((normalized - Vector2(0.5,0.5)) * 2.0),0.0,1.0)
+            end
+            local fill = mix(backgroundA,backgroundB,gradient)
+
+            local borderWidth = Number(max(max(borderWidths.x,borderWidths.y),max(borderWidths.z,borderWidths.w)))
+            local innerAlpha = bodyAlpha
+            if borderWidth > 0.0001 then
+                local innerMinimum = Vector2(rect.xy + Vector2(borderWidths.w,borderWidths.x))
+                local innerMaximum = Vector2(rect.xy + rect.zw - Vector2(borderWidths.y,borderWidths.z))
+                local innerHalfSize = Vector2(max((innerMaximum - innerMinimum) * 0.5,Vector2(0.0,0.0)))
+                local innerCenter = Vector2((innerMinimum + innerMaximum) * 0.5)
+                local innerRadii = Vector4(max(cornerRadii - Vector4(max(borderWidths.w,borderWidths.x),max(borderWidths.y,borderWidths.x),max(borderWidths.y,borderWidths.z),max(borderWidths.w,borderWidths.z)),Vector4(0.0,0.0,0.0,0.0)))
+                local innerPoint = Vector2(pixelPosition - innerCenter)
+                local innerRadius = innerRadii.x
+                if innerPoint.x >= 0.0 and innerPoint.y < 0.0 then
+                    innerRadius = innerRadii.y
+                end
+                if innerPoint.x >= 0.0 and innerPoint.y >= 0.0 then
+                    innerRadius = innerRadii.z
+                end
+                if innerPoint.x < 0.0 and innerPoint.y >= 0.0 then
+                    innerRadius = innerRadii.w
+                end
+                local innerQ = Vector2(abs(innerPoint) - innerHalfSize + Vector2(innerRadius,innerRadius))
+                local innerDistance = Number(min(max(innerQ.x,innerQ.y),0.0) + length(max(innerQ,Vector2(0.0,0.0))) - innerRadius)
+                if shapeMode > 0.5 and shapeMode < 1.5 then
+                    innerDistance = length(point) - max(min(halfSize.x,halfSize.y) - borderWidth,0.0)
+                else if shapeMode > 2.5 and shapeMode < 3.5 then
+                    local ellipseHalf = Vector2(max(halfSize - Vector2(borderWidth,borderWidth),Vector2(0.001,0.001)))
+                    innerDistance = (length(point / ellipseHalf) - 1.0) * min(ellipseHalf.x,ellipseHalf.y)
+                end
+                innerAlpha = 1.0 - smoothstep(-aa,aa,innerDistance)
+            end
+            local borderAlpha = Number(max(0.0,bodyAlpha - innerAlpha))
+            local result = Vector4(fill.rgb,fill.a * innerAlpha)
+            if borderAlpha > 0.0001 then
+                local topEdge = Number(pixelPosition.y - rect.y)
+                local rightEdge = Number(rect.x + rect.z - pixelPosition.x)
+                local bottomEdge = Number(rect.y + rect.w - pixelPosition.y)
+                local leftEdge = Number(pixelPosition.x - rect.x)
+                local packedPairs = borderTopRight.xy
+                local nearest = topEdge
+                if rightEdge < nearest then
+                    nearest = rightEdge
+                    packedPairs = borderTopRight.zw
+                end
+                if bottomEdge < nearest then
+                    nearest = bottomEdge
+                    packedPairs = borderBottomLeft.xy
+                end
+                if leftEdge < nearest then
+                    packedPairs = borderBottomLeft.zw
+                end
+                local packedRG = Number(floor(packedPairs.x + 0.5))
+                local packedBA = Number(floor(packedPairs.y + 0.5))
+                local borderColor = Vector4(mod(packedRG,256.0),floor(packedRG / 256.0),mod(packedBA,256.0),floor(packedBA / 256.0)) / 255.0
+                local border = Vector4(borderColor.rgb,borderColor.a * borderAlpha)
+                local combinedAlpha = Number(border.a + result.a * (1.0 - border.a))
+                if combinedAlpha > 0.00001 then
+                    local combinedRgb = Vector3((border.rgb * border.a + result.rgb * result.a * (1.0 - border.a)) / combinedAlpha)
+                    result = Vector4(combinedRgb,combinedAlpha)
+                end
+            end
+            result.a = result.a * opacity * clipCoverage
+            finalColor = result
+        else if kind < 2.5 then
+            local distanceValue = fontAtlas.sample(uv).r
+            local edge = Number(max(fwidth(distanceValue),0.002))
+            local alpha = Number(smoothstep(0.5 - edge,0.5 + edge,distanceValue))
+            finalColor = Color4(payload1.rgb,payload1.a * alpha * clipCoverage)
+        else
+            local textureSlot = meta.y
+            local sampled = Vector4(0.0,0.0,0.0,0.0)
+            if textureSlot < 1.5 then
+                sampled = image1.sample(uv)
+            else if textureSlot < 2.5 then
+                sampled = image2.sample(uv)
+            else if textureSlot < 3.5 then
+                sampled = image3.sample(uv)
+            else if textureSlot < 4.5 then
+                sampled = image4.sample(uv)
+            else if textureSlot < 5.5 then
+                sampled = image5.sample(uv)
+            else if textureSlot < 6.5 then
+                sampled = image6.sample(uv)
+            else
+                sampled = image7.sample(uv)
+            end
+            finalColor = sampled * payload1
+            finalColor.a = finalColor.a * clipCoverage
+        end
+
+        if finalColor.a <= 0.001 then
+            discard
+        end
+    end
+end
+end

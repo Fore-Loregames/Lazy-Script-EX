@@ -348,7 +348,12 @@ assert(rendererSource.includes('text_data = {}') && rendererSource.includes('tex
 assert(!rendererSource.includes('Font.build_text_instances'), 'renderer still allocates a temporary text instance table for every label');
 assert(rendererSource.includes('Font.append_text_instances') && rendererSource.includes('record_render_run(renderer,RENDER_RUN_TEXT') && rendererSource.includes('GL.glDrawArraysInstancedBaseInstance(GL.GL_TRIANGLE_STRIP,0,4,count,start)'), 'SDF text is not rendered as allocation-free painter-ordered instanced atlas quads');
 assert(rendererSource.includes('image_textures = {}') && rendererSource.includes('image_data = {}') && rendererSource.includes('image_batch_counts = {}'), 'image instance batching is missing');
+assert(rendererSource.includes('active_clip_top_left') && rendererSource.includes('innerTopLeft') && rendererSource.includes('childTopLeft'), 'rounded overflow clip radii are not propagated through the retained tree');
+assert(rendererSource.includes('vulkan_batch_texture7') && rendererSource.includes('build_vulkan_analytic_plan') && rendererSource.includes('append_vulkan_command(renderer,currentPlan,batchKind,start + itemOffset,textureSlot)'), 'Vulkan UI is not collapsing painter-order shapes/text/images into compact multi-texture analytic batches');
 assert(rendererSource.includes('GL.glDrawArraysInstancedBaseInstance('), 'image batches are not drawing instanced quads with a base instance');
+assert(rendererSource.includes('LSG.draw_vertices_from(4,count,0,start)'), 'Vulkan UI quads are not using four-vertex instanced triangle strips');
+assert(rendererSource.includes('renderer.vulkan_command_storage.bind()') && rendererSource.includes('renderer.vulkan_box_storage.bind()'), 'Vulkan UI analytic command/effect storage binding is missing');
+assert(rendererSource.includes('build_vulkan_analytic_plan') && rendererSource.includes('build_vulkan_fallback_plan') && rendererSource.includes('vulkan_plan_types'), 'Vulkan UI painter runs are not lowered into compact analytic plans with a compatibility fallback');
 assert(rendererSource.includes('next_buffer_capacity') && rendererSource.includes('GL.glBufferSubData'), 'dynamic UI buffers still reallocate for every draw');
 assert(!/style\.opacity\s*<=\s*0\.0/.test(rendererSource), 'transparent retained elements are still removed from box submission');
 assert(rendererSource.includes('Every retained element gets geometry even when its current alpha is zero'), 'transparent-retention contract is undocumented');
@@ -368,6 +373,13 @@ assert(rendererSource.includes('Popups are submitted after the regular tree'), '
 assert(rendererSource.includes('if element.focused then') && rendererSource.includes('A focused empty field still owns a caret'), 'empty focused input fields do not render a caret');
 assert(rendererSource.includes('submit_checkbox_visual') && rendererSource.includes('submit_radio_visual') && rendererSource.includes('submit_switch_visual'), 'checkbox/radio/toggle visuals are incomplete');
 assert(rendererSource.includes('submit_range_visual') && rendererSource.includes('submit_color_visual'), 'range and color picker visuals are incomplete');
+assert(rendererSource.includes('VulkanVectorFast.create()') && rendererSource.includes('VulkanVectorEffect.create()') && rendererSource.includes('VulkanBatch.create()') && rendererSource.includes('_flush_vulkan = fn()'), 'LazyUI is not wired to the analytic Vulkan renderer and validated batch fallback');
+assert(rendererSource.includes('LSG.draw_vertices_from(4,count,0,start)') && rendererSource.includes('vulkan_command_storage') && rendererSource.includes('append_vulkan_command'), 'Vulkan LazyUI compact command strip batches are missing');
+assert(rendererSource.includes('texture1.bind(1)') && rendererSource.includes('texture:LSG.Texture'), 'LazyUI images are not backend-neutral bindless-style batch textures');
+const analyticFastShader = fs.readFileSync(path.join(toolkit, 'LazyScript/bindings/UI/shaders/vector_fast.lssl'), 'utf8');
+assert(analyticFastShader.includes('local command = commandData[instance.id]') && analyticFastShader.includes('texture image7 at 7'), 'Vulkan analytic shader is not using compact retained command headers with seven image slots');
+assert(analyticFastShader.includes('clipRadius = clipRadii.y') && analyticFastShader.includes('clipRadius = clipRadii.z') && analyticFastShader.includes('clipRadius = clipRadii.w'), 'Vulkan analytic shader does not clip all four corners');
+
 assert(rendererSource.includes('submit_scrollbars') && rendererSource.includes('UI.effective_scroll_max_y(element)'), 'visible panel/textarea scrollbar submission is missing');
 assert(rendererSource.includes('element.password_display_value()'), 'password glyph masking is not wired into the text renderer');
 assert(rendererSource.includes('fn submit_declarative_canvas'), 'declarative canvas renderer is missing');
@@ -392,7 +404,7 @@ assert(lazyUiRuntime.includes('absoluteTargetX = element.content_x - absoluteScr
 assert(lazyUiRuntime.includes('scrollable_at(self.root,self.pointer_x,self.pointer_y)'), 'wheel routing does not resolve the scrollable pane under the pointer');
 assert(lazyUiRuntime.includes('if self.active ~= null and self.active._on_pointer_move ~= null then moveTarget = self.active end'), 'pointer movement is not captured by the pressed element for continuous drags');
 assert(lazyUiRuntime.includes('pointer_move_scaled = fn') && lazyUiRuntime.includes('x * self.width / window_width'), 'LazyUI does not convert GLFW window-space pointers into framebuffer-space coordinates');
-assert(lazyUiRuntime.includes('set_texture = fn(texture_id:u32,intrinsic_width:f32,intrinsic_height:f32)') && lazyUiRuntime.includes('self.style.aspect_ratio = intrinsic_width / intrinsic_height'), 'image elements cannot preserve intrinsic aspect ratio from loaded texture dimensions');
+assert(lazyUiRuntime.includes('set_texture = fn(texture:LSG.Texture,intrinsic_width:f32,intrinsic_height:f32)') && lazyUiRuntime.includes('self.style.aspect_ratio = intrinsic_width / intrinsic_height'), 'image elements cannot preserve intrinsic aspect ratio from loaded texture dimensions');
 const elementAddBody = lazyUiRuntime.match(/add = fn\(child:Element\)[\s\S]*?\n    end,/)?.[0] || '';
 assert(elementAddBody.includes('self.children.push(child)') && !elementAddBody.includes('memory.release_object(child)')
   && elementAddBody.includes('return self.children.at(self.children.length()-1)'),
@@ -410,7 +422,7 @@ assert(lazyUiExample.includes('<rect class="canvas-card"') && lazyUiExample.incl
 assert(lazyUiExample.includes('width = {props.inspector_width}') && lazyUiExample.includes('background = {props.accent}'), 'example is missing LSCSS {var} expressions');
 assert(lazyUiExample.includes('populate_hierarchy(root,500)') && lazyUiExample.includes('while index < count'), 'example is not creating the requested 500-row retained hierarchy stress list');
 assert(lazyUiExample.includes('UI.counter_text("FPS: ",32)') && lazyUiExample.includes('fps_text.set_i64(frame_count)'), 'example is missing the persistent allocation-free FPS counter');
-assert(lazyUiExample.includes('GLFW.glfwSwapInterval(0)'), 'stress example is still capped to display refresh');
+assert(lazyUiExample.includes('window.set_vsync(false)'), 'stress example is still capped to display refresh');
 assert(lazyUiExample.includes('id="stress-foldout"') && lazyUiExample.includes('toggle_hierarchy'), 'stress hierarchy is not contained in a working foldout');
 assert(lazyUiExample.includes('row.text = hierarchy_label(index)') && lazyUiExample.includes('list.add(row)'), 'runtime hierarchy rows are not retaining text before attachment');
 assert(lazyUiExample.includes('overflow_y = "auto"'), 'hierarchy stress list is missing its visible vertical scrollbar');
@@ -423,10 +435,10 @@ assert(controlsLowered.includes('color_picker()') && controlsLowered.includes('_
 assert(controlsExample.includes('<textarea') && controlsExample.includes('<checkbox') && controlsExample.includes('<toggle checked'), 'controls gallery is missing textarea, checkbox, or toggle coverage');
 assert(controlsExample.includes('<colorpicker') && controlsExample.includes('id="color-plane"') && controlsExample.includes('color_plane_down') && controlsExample.includes('hue_strip_down') && controlsExample.includes('alpha_strip_down') && controlsExample.includes('preset_clicked'), 'controls gallery is missing the continuous editor-style HSV color picker');
 assert(controlsExample.includes('<range') && controlsExample.includes('<slider'), 'controls gallery is missing range/slider coverage');
-assert(controlsExample.includes('UI.connect_window_input(window,document)'), 'controls gallery is not connected to real keyboard and wheel input');
-assert(controlsExample.includes('<img id="image-demo"') && controlsExample.includes('</img>') && controlsExample.includes('Texture2D.load_ui("assets/checkerboard.png")'), 'controls gallery is missing the real explicitly closed img-element checkerboard test');
-assert(controlsExample.includes('imageDemo.set_texture(checkerTexture.id,checkerTexture.width,checkerTexture.height)') && controlsExample.includes('width = "200px"'), 'img example does not preserve intrinsic aspect ratio from a width-only layout');
-assert(controlsExample.includes('pointer_move_scaled(cursor.x,cursor.y,windowSize.width,windowSize.height)'), 'controls gallery still feeds unscaled GLFW cursor coordinates into framebuffer-space LazyUI');
+assert(controlsExample.includes('UI.connect_graphics_input(window,document)'), 'controls gallery is not connected to real keyboard and wheel input');
+assert(controlsExample.includes('<img id="image-demo"') && controlsExample.includes('</img>') && controlsExample.includes('LSG.load_ui_texture("assets/checkerboard.png")'), 'controls gallery is missing the real explicitly closed img-element checkerboard test');
+assert(controlsExample.includes('imageDemo.set_texture(checkerTexture,checkerTexture.width,checkerTexture.height)') && controlsExample.includes('width = "200px"'), 'img example does not preserve intrinsic aspect ratio from a width-only layout');
+assert(controlsExample.includes('pointer_move_scaled(cursor.x,cursor.y,logicalSize.width,logicalSize.height)'), 'controls gallery still feeds unscaled GLFW cursor coordinates into framebuffer-space LazyUI');
 assert(controlsExample.includes('color_channel_input') && controlsExample.includes('hex_color_input'), 'editor color picker channels and hex field are not wired back into HSV state');
 assert(controlsExample.includes('maxlength=9') && controlsExample.includes('value="#BF9C9CFF"'), 'editable color picker does not expose a complete #RRGGBBAA text value');
 assert(controlsExample.includes('verify_color_picker_interactions') && controlsExample.includes('document.input_text("#00FF00FF")'), 'color picker example lacks a startup interaction test through the real Document pointer/keyboard path');
@@ -449,7 +461,7 @@ assert(nodeExample.includes('<select value="Less Than"><option'), 'node graph co
 assert(nodeExample.includes('onpointermove={node_drag_move}') && nodeExample.includes('onpointerdown={port_drag_start}') && nodeExample.includes('UI.hit_test(props.root,event.x,event.y)'), 'node graph is missing continuous node dragging or pin drag-and-drop connection logic');
 assert(nodeExample.includes('props.drag_offset_x = event.x') && nodeExample.includes('props.drag_world_x = node.world_x') && nodeExample.includes('props.dragging_node.world_x = props.drag_world_x+deltaX/zoom') && /if absoluteX < [23]\.0 and absoluteY < [23]\.0 then return/.test(nodeExample), 'node dragging does not use a stable pointer-delta origin with click-jitter protection');
 assert(nodeExample.includes('const GraphNode = {') && nodeExample.includes('element = null') && nodeExample.includes('mini = null') && nodeExample.includes('find_graph_node(props,nodeElement)') && !nodeExample.includes('element:UI.Element'), 'node graph retained-element fields are not using inference-only syntax');
-assert(nodeExample.includes('pointer_move_scaled(cursor.x,cursor.y,windowSize.width,windowSize.height)') && nodeExample.includes('props.pointer_x = document.pointer_x'), 'node graph pointer and wire preview coordinates are not DPI-correct');
+assert(nodeExample.includes('pointer_move_scaled(cursor.x,cursor.y,logicalSize.width,logicalSize.height)') && nodeExample.includes('props.pointer_x = document.pointer_x'), 'node graph pointer and wire preview coordinates are not DPI-correct');
 assert(nodeExample.includes('class="graph-shell"') && nodeExample.includes('id="minimap"') && nodeExample.includes('props.pan_x') && nodeExample.includes('event.prevent_default()'), 'node graph is missing floating minimap or unbounded custom panning');
 assert(nodeExample.includes('onpointerdown={minimap_pan_start}') && (nodeExample.includes('minimap_pan_to_pointer') || nodeExample.includes('minimap_pan_to_xy')), 'floating graph minimap cannot recenter or drag the camera');
 assert(nodeExample.includes('verify_graph_interactions') && /document\.scroll\(0\.0,[+-]?1\.0\)/.test(nodeExample) && nodeExample.includes('find_connection_to(props,input)'), 'node graph lacks a Document-path interaction test for drag, pan, wheel, minimap, and pin connections');
@@ -476,10 +488,12 @@ assert(rendererSource.includes('GL.glDrawArraysInstancedBaseInstance(GL.GL_TRIAN
 assert(boxFragment.includes('unpackColorPairs'), 'fragment shader does not unpack float-safe border color pairs');
 assert(boxFragment.includes('selectedBorderColor'), 'fragment shader does not select independent side colors');
 assert(boxFragment.includes('innerMinimum') && boxFragment.includes('innerMaximum'), 'fragment shader does not compute asymmetric inner border bounds');
+assert(boxFragment.includes('clipRadii') && boxFragment.includes('clipCoverage'), 'box shader does not apply rounded parent clipping');
 const textVertex = fs.readFileSync(path.join(shaderRoot, 'lazyui_text.vert'), 'utf8');
 const imageVertex = fs.readFileSync(path.join(shaderRoot, 'lazyui_image.vert'), 'utf8');
 assert(textVertex.includes('layout(std430,binding=0) readonly buffer LazyUITextBuffer') && textVertex.includes('glyphs[gl_BaseInstance + gl_InstanceID]'), 'text shader is not reading one glyph record per base-instance-aware glyph');
 assert(imageVertex.includes('layout(std430,binding=0) readonly buffer LazyUIImageBuffer') && imageVertex.includes('gl_BaseInstance + gl_InstanceID'), 'image shader is not reading batched image instances');
+assert(imageVertex.includes('clipRadii'), 'image instances do not carry rounded clipping radii');
 const embedded = fs.readFileSync(path.join(toolkit, 'LazyScript/bindings/UI/ShaderSources.lsx'), 'utf8');
 for (const [name, file] of [
   ['BOX_VERTEX', 'lazyui.vert'], ['BOX_FRAGMENT', 'lazyui.frag'],

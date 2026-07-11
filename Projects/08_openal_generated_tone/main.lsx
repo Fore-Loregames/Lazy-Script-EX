@@ -1,57 +1,67 @@
-use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/LSG.lsx" as LSG
 use "@LazyScript/bindings/OpenAL/OpenAL.lsx" as AL
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
-
-fn fail(message)
-    Win32.MessageBoxA(0,message,"LazyScriptEX Native GameKit",Win32.MB_OK+Win32.MB_ICONERROR)
-    return 1
-end
+use "@LazyScript/bindings/OpenAL/Samples.lsx" as Samples
 
 fn main()
-    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return fail("Runtime load failed.") end
-    if AL.lsxHasOpenAL() == 0 then GLFW.glfwTerminate() GLFW.lsxUnloadLibraries() return fail("OpenAL32.dll was not loaded. Run setup-runtime.bat again.") end
+    local window = LSG.open("08 - OpenAL generated tone",800,500)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+    if AL.lsxHasOpenAL() == 0 then window.destroy() return LSG.show_error("OpenAL32.dll was not loaded.") end
 
     local device = AL.alcOpenDevice(0)
-    if device == 0 then GLFW.glfwTerminate() GLFW.lsxUnloadLibraries() return fail("OpenAL Soft could not open the default playback device.") end
+    if device == 0 then window.destroy() return LSG.show_error("OpenAL could not open the playback device.") end
     local context = AL.alcCreateContext(device,0)
-    if context == 0 then AL.alcCloseDevice(device) GLFW.glfwTerminate() GLFW.lsxUnloadLibraries() return fail("OpenAL Soft could not create an audio context.") end
-    if AL.alcMakeContextCurrent(context) == 0 then AL.alcDestroyContext(context) AL.alcCloseDevice(device) GLFW.glfwTerminate() GLFW.lsxUnloadLibraries() return fail("OpenAL Soft could not activate the audio context.") end
+    if context == 0 or AL.alcMakeContextCurrent(context) == 0 then
+        if context ~= 0 then AL.alcDestroyContext(context) end
+        AL.alcCloseDevice(device)
+        window.destroy()
+        return LSG.show_error("OpenAL could not create an audio context.")
+    end
 
     local buffer = AL.createBuffer()
     local source = AL.createSource()
-    local samples = 22050
-    local pcm = {}
-    pcm.resize(samples)
-    local i = 0
-    while i < samples do
-        local sample = 12000
-        if (i % 100) < 50 then sample = 53536 end
-        pcm[i] = sample
-        i = i + 1
+    if buffer == 0 or source == 0 then
+        if source ~= 0 then AL.deleteSource(source) end
+        if buffer ~= 0 then AL.deleteBuffer(buffer) end
+        AL.alcMakeContextCurrent(0)
+        AL.alcDestroyContext(context)
+        AL.alcCloseDevice(device)
+        window.destroy()
+        return LSG.show_error("OpenAL could not create the tone buffer or source.")
     end
-    AL.alBufferData(buffer,AL.AL_FORMAT_MONO16,pcm,pcm.byte_length(),44100)
+
+    local pcm = Samples.triangle(220.0,1.0,0.15)
+    if not pcm.ready() then
+        AL.deleteSource(source)
+        AL.deleteBuffer(buffer)
+        AL.alcMakeContextCurrent(0)
+        AL.alcDestroyContext(context)
+        AL.alcCloseDevice(device)
+        window.destroy()
+        return LSG.show_error(pcm.error())
+    end
+    if not pcm.upload(buffer) then
+        local message = pcm.error()
+        pcm.destroy()
+        AL.deleteSource(source)
+        AL.deleteBuffer(buffer)
+        AL.alcMakeContextCurrent(0)
+        AL.alcDestroyContext(context)
+        AL.alcCloseDevice(device)
+        window.destroy()
+        return LSG.show_error(message)
+    end
+
     AL.alSourcei(source,AL.AL_BUFFER,buffer)
     AL.alSourcei(source,AL.AL_LOOPING,AL.AL_TRUE)
+    AL.alSourcef(source,AL.AL_GAIN,0.65)
     AL.alSourcePlay(source)
 
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
-    local window = GLFW.glfwCreateWindow(800,500,"08 - OpenAL generated tone",0,0)
-    if window ~= 0 then GLFW.glfwMakeContextCurrent(window) GL.lsxLoadOpenGL() end
-    local framebuffer = GLFW.FramebufferSize.new()
-
-    while window ~= 0 and GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window)
-        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
-        GL.glClearColor(0.06,0.08,0.13,1)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
+    while window.running() do
+        window.begin(0.06,0.08,0.13)
+        window.end()
     end
 
-    framebuffer.destroy()
     AL.alSourceStop(source)
     AL.deleteSource(source)
     AL.deleteBuffer(buffer)
@@ -59,8 +69,6 @@ fn main()
     AL.alcMakeContextCurrent(0)
     AL.alcDestroyContext(context)
     AL.alcCloseDevice(device)
-    if window ~= 0 then GLFW.glfwDestroyWindow(window) end
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
+    window.destroy()
     return 0
 end

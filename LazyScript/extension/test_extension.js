@@ -91,7 +91,24 @@ assert(!`${bundledBehaviorCheck.stdout}
 ${bundledBehaviorCheck.stderr}`.includes("unknown module or API namespace 'behavior'"), 'bundled extension compiler still treats local behavior values as namespaces');
 const bundledVersion = cp.spawnSync(process.execPath, [bundledCompilerPath, '--version'], { encoding: 'utf8' });
 assert.strictEqual(bundledVersion.status, 0, bundledVersion.stderr);
-assert.strictEqual(bundledVersion.stdout.trim(), '0.18.16', 'extension did not bundle compiler 0.18.16');
+assert.strictEqual(bundledVersion.stdout.trim(), '0.21.5', 'extension did not bundle compiler 0.21.5');
+extension._test.loadApiMetadata();
+const lsgRecord = extension._test.loadRecordSync(path.join(toolkit, 'LazyScript', 'LSG.lsx'));
+const lsgWindow = lsgRecord.exports.find(symbol => symbol.name === 'Window');
+assert(lsgWindow, 'LSG Window object is missing from extension indexing');
+for (const name of ['begin', 'end', 'activate', 'set_vsync', 'set_title', 'is_key_down', 'is_mouse_down']) {
+  assert(lsgWindow.members.some(member => member.name === name), `LSG Window.${name} is missing from autocomplete`);
+}
+const endApi = lsgWindow.members.find(member => member.name === 'end')?.apiMetadata;
+assert(endApi?.audience === 'frontend' && endApi?.level === 'beginner', 'Window.end() is not exposed as the beginner front-end frame terminator');
+const presentApi = lsgWindow.members.find(member => member.name === 'present')?.apiMetadata;
+assert(presentApi?.level === 'compatibility', 'Window.present() is not classified as a compatibility alias');
+assert(fs.existsSync(path.join(__dirname, 'compiler', 'vendor', 'glslang', 'glslang.js')), 'extension is missing vendored glslang JavaScript');
+assert(fs.existsSync(path.join(__dirname, 'compiler', 'vendor', 'glslang', 'glslang.wasm')), 'extension is missing vendored glslang WASM');
+assert(fs.existsSync(path.join(__dirname, 'compiler', 'vendor', 'glslang', 'LICENSE.txt')), 'extension is missing the glslang license');
+assert(grammarText.includes('vulkan'), 'syntax grammar does not highlight the LSSL Vulkan target marker');
+for (const operator of ['\+=','-=','\*=','/=','%=']) assert(grammarText.includes(operator), `syntax grammar does not include ${operator}`);
+
 
 const runtimeTypeDir = path.join(sourceDir, 'RuntimeTypes');
 fs.mkdirSync(runtimeTypeDir, { recursive: true });
@@ -202,6 +219,15 @@ function mockDocument(text) {
   };
 }
 
+
+const lsslKeywordDoc = {
+  ...mockDocument('fl'),
+  uri: { fsPath: path.join(sourceDir, 'KeywordCompletion.lssl') }
+};
+const lsslKeywordItems = new extension._test.CompletionProvider().provideCompletionItems(lsslKeywordDoc, new Position(0, 2));
+for (const expected of ['flat', 'shader', 'vertex', 'fragment', 'compute', 'storage', 'raytracing']) {
+  assert(lsslKeywordItems.some(item => (item.label.label || item.label) === expected), `LSSL keyword completion is missing ${expected}`);
+}
 
 const importCompletionText = 'use "@LazyScript/bindings/Math/';
 const importCompletionDoc = {
@@ -453,6 +479,35 @@ assert(formatted.includes('            self.windowHandle = GLFW.glfwCreateWindow
 assert(formatted.includes('                width,'), 'formatter did not indent multiline arguments');
 assert(formatted.includes('            )\n        end\n    end\n}'), 'formatter did not align closing delimiters and end statements');
 
+// LSX allows clear front-end member names that overlap a block keyword. The
+// formatter must keep `end = fn()` as an object method and `window.end()` as a
+// normal call instead of treating either one as a block terminator.
+const keywordMemberFormatted = extension._test.formatLsxText(`const Frame = {
+end = fn()
+return true
+end
+}
+fn main()
+local frame = Frame.new()
+frame.begin()
+frame.end()
+return 0
+end
+`, { insertSpaces: true, tabSize: 4 });
+assert(keywordMemberFormatted.includes(`const Frame = {
+    end = fn()
+        return true
+    end
+}`), `formatter damaged an end-named member:
+${keywordMemberFormatted}`);
+assert(keywordMemberFormatted.includes(`fn main()
+    local frame = Frame.new()
+    frame.begin()
+    frame.end()
+    return 0
+end`), `formatter treated frame.end() as a block terminator:
+${keywordMemberFormatted}`);
+
 const braceConstructorFormatted = extension._test.formatLsxText(`const Transform : base(Engine.LazyBehavior) = {
 constructor = fn(){
 self.lazyVars = {
@@ -642,6 +697,9 @@ const canvasSnippet = snippets['Declarative LazyUI canvas'];
 assert(canvasSnippet && canvasSnippet.body.some(line => line.includes('<rect class="${2:preview-shape}"')), 'declarative canvas snippet is missing');
 assert(!snippetsText.includes('context.fill_rounded_rect'), 'extension still advertises imperative canvas drawing');
 assert(canvasSnippet.body.some(line => line.includes('background = {${3:props.accent}}')), 'LSCSS {var} snippet is missing');
+assert(snippets['LSG game window']?.body.some(line => line.includes('window.end()')), 'LSG window snippet does not use the begin()/end() front-end pair');
+assert(snippets['LSG game window']?.body.some(line => line.includes('window.set_vsync(')), 'LSG window snippet does not use set_vsync()');
+assert(snippets['LSG multiple windows']?.body.some(line => line.includes('first.activate()')), 'LSG multiple-window snippet does not use activate()');
 assert(snippets['Object type name']?.body.some(line => line.includes('.GetTypeName()')), 'GetTypeName snippet is missing');
 assert(snippets['Inherited object type check']?.body.some(line => line.includes('.IsType(')), 'IsType snippet is missing');
 assert(snippets['Find LazyBehavior by type']?.body.some(line => line.includes('behavior.IsType(typeName)')), 'behavior lookup snippet is missing');
@@ -676,6 +734,8 @@ assert(staticMethod.parent?.staticObject, 'static method parent lost its static-
 const staticFormatted = extension._test.formatLsxText(`export static const App = {\nrunning = true\nStop = fn()\nself.running = false\nend\n}\n`, { insertSpaces: true, tabSize: 4 });
 assert(staticFormatted.includes('export static const App = {'), 'formatter damaged static const declaration');
 assert(grammarText.includes('export|static|local|const'), 'syntax grammar does not highlight static');
+assert(grammarText.includes('(?<!\\\\.)'), 'syntax grammar does not protect keyword-named members such as .end()');
+assert(grammarText.includes('end(?!\\\\s*=)'), 'syntax grammar highlights end = fn() as a block keyword');
 
 const staticMethodHover = extension._test.markdownForSymbol(staticServiceRecord, staticMethod.symbol, staticMethod.parent);
 assert(staticMethodHover.value.includes('Static object'), 'static method hover does not explain direct singleton calls');

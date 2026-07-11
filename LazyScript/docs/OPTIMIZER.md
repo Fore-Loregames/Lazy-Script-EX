@@ -73,6 +73,26 @@ LSX modules
 - remains conservative around pointer aliasing, external calls, owned objects, collection lifetime, and side-effect ordering
 - is the default project optimization level
 
+## O6 workload and loop accelerator
+
+O6 also treats canonical counted loops as candidate accelerated workloads. The plan records table reads and writes, loop-local values, loop-carried scalar dependencies, index regularity, calls, branches, element types, and whether each iteration can execute independently.
+
+When proof succeeds, the optimizer may:
+
+- weight internal calls for hot-loop inlining;
+- fuse adjacent zero-based pointwise loops with the same limit;
+- emit several vector operations in one SSE/AVX2/FMA iteration;
+- lower a proven whole-table zero fill to native `memset`;
+- mark large independent loops for the persistent worker pool;
+- mark float pointwise loops for generated LSSL compute output;
+- retain scalar, SIMD, worker, and compute strategy metadata in a workload manifest.
+
+`System/Parallel.lsx` supplies a reusable native worker pool with dynamic atomic chunking. The compatibility module `System/KernelRuntime.lsx` provides job-size thresholds and explicit CPU dispatch for projects that already use it. The calling thread joins the work, and threads are created once rather than once per loop.
+
+For compatibility, `emitKernels` in a project or `--emit-kernels` generates optional `build/kernels/*.lssl`, OpenGL compute GLSL, LSX wrapper metadata, and `kernel-manifest.json`. These are internal compute-workload artifacts, not a requirement for ordinary LSX code. The generated compute module is never silently substituted for a CPU loop: an engine decides when data ownership and transfer costs make GPU dispatch appropriate.
+
+Loops with irregular indexing, unknown calls, loop-carried state, unsupported values, or unproven range semantics keep the normal native scalar path.
+
 ## Table specialization
 
 - closed-table field names become compile-time byte offsets
@@ -106,6 +126,8 @@ This split preserves compact contiguous data for engine hot loops without allowi
 
 ## Current limits
 
-O6 automatically vectorizes canonical contiguous f32 loops: four-wide SSE for `baseline`, eight-wide AVX2 for `avx2`, and AVX2 FMA for recognized `a*b+c` forms under `avx2-fma`. PGO generation/use can reorder and prioritize hot functions. General alias analysis across arbitrary pointers, vectorization of irregular control flow, and cross-module link-time SIMD transformation remain outside the current pass.
+O6 automatically vectorizes canonical contiguous f32 loops: four-wide SSE for `baseline`, eight-wide AVX2 for `avx2`, and AVX2 FMA for recognized `a*b+c` forms under `avx2-fma`. Compatible adjacent pointwise loops may share that vector pass. PGO generation/use can reorder and prioritize hot functions.
 
-Closed tables intentionally optimize known shapes. Fully dynamic runtime string keys are not implemented in 0.17.0; adding them later will use a separate slower path rather than weakening the fixed-shape engine path.
+Automatic native worker execution is exposed through `Parallel` and the compatibility `KernelRuntime` module rather than rewriting arbitrary user loops behind their backs. Generated LSSL compute workloads are opt-in build artifacts because implicit CPU/GPU copies can be slower and can change ownership timing. General alias analysis across arbitrary pointers, vectorization of irregular control flow, automatic GPU residency, and cross-module link-time SIMD transformation remain outside the current pass.
+
+Closed tables intentionally optimize known shapes. Fully dynamic runtime string keys use a separate future slower path rather than weakening the fixed-shape engine path.

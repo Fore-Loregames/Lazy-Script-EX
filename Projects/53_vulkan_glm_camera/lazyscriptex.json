@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/53_vulkan_glm_camera.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

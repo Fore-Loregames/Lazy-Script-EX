@@ -1,0 +1,8 @@
+{
+  "name": "47_vulkan_image_loading",
+  "entry": "main.lsx",
+  "output": "build/47_vulkan_image_loading.exe",
+  "subsystem": "windows",
+  "optimize": 6,
+  "copy": ["assets"]
+}

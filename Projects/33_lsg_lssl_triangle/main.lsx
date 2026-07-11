@@ -1,0 +1,38 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "shaders/basic.lssl" as Basic
+
+fn main()
+    local window = LSG.open("33 - LSG + LSSL triangle",1000,700)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+    if window.width < 2 or window.height < 2 then window.destroy() return LSG.show_error("Framebuffer size did not become valid.") end
+
+    local shader = Basic.create()
+    if not shader.ready() then
+        local message = shader.error()
+        window.destroy()
+        return LSG.show_error(message)
+    end
+
+    local vertices = {
+        -0.75,-0.65, 1.0,0.2,0.15,
+         0.75,-0.65, 0.15,0.8,0.25,
+         0.0, 0.75, 0.2,0.35,1.0
+    }
+    local triangle = LSG.mesh(vertices,Basic.vertex_layout)
+    if not triangle.ready() then shader.destroy() window.destroy() return LSG.show_error(triangle.error()) end
+
+    while window.running() do
+        window.begin(0.035,0.045,0.07)
+        shader.bind()
+        triangle.draw()
+        window.end()
+    end
+
+    triangle.destroy()
+    vertices.destroy()
+    shader.destroy()
+    window.destroy()
+    return 0
+end

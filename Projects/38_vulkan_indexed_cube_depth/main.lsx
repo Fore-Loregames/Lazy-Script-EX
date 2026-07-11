@@ -1,0 +1,27 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "shaders/cube.lssl" as Cube
+fn main()
+    LSG.use_vulkan()
+    local window = LSG.open("38 - Vulkan indexed cube + depth",1000,700)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+    local shader = Cube.create()
+    if not shader.ready() then return LSG.show_error(shader.error()) end
+    local vertices = {-1.0,-1.0,-1.0, 1.0,-1.0,-1.0, 1.0,1.0,-1.0, -1.0,1.0,-1.0, -1.0,-1.0,1.0, 1.0,-1.0,1.0, 1.0,1.0,1.0, -1.0,1.0,1.0}
+    local indices = {0,1,2,2,3,0, 4,6,5,6,4,7, 0,4,5,5,1,0, 3,2,6,6,7,3, 1,5,6,6,2,1, 0,3,7,7,4,0}
+    local cube = LSG.indexed_mesh(vertices,indices,Cube.vertex_layout)
+    if not cube.ready() then return LSG.show_error(cube.error()) end
+    while window.running() do
+        window.begin_3d(0.018,0.025,0.045)
+        shader.bind()
+        cube.draw()
+        window.end()
+    end
+    cube.destroy()
+    indices.destroy()
+    vertices.destroy()
+    shader.destroy()
+    window.destroy()
+    return 0
+end

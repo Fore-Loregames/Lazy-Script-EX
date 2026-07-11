@@ -56,7 +56,38 @@ assert(!apiApp.includes('find_id(UI.hash'), 'Beginner LazyUI lessons still use i
 assert(!apiApp.includes('id_hash'), 'Beginner LazyUI lessons still read internal element hash fields');
 assert(!apiApp.includes('mark_visual_dirty') && !apiApp.includes('mark_layout_dirty'), 'Beginner LazyUI lessons still call internal dirty-state methods');
 
+
+const packageInfo = JSON.parse(fs.readFileSync(path.join(root, 'compiler', 'package.json'), 'utf8'));
+assert.strictEqual(data.version, packageInfo.version, 'API version does not match the compiler package version');
+assert.strictEqual(data.generated?.beginnerMetadata, packageInfo.version, 'API metadata version is stale');
+
+const frontendKeys = new Set(frontendEntries.map(entry => `${entry.module}|${entry.owner || ''}|${entry.name}`));
+for (const key of [
+  'LSG||use_vulkan', 'LSG||use_opengl', 'LSG||open', 'LSG||open_shared_window',
+  'LSG|Window|begin', 'LSG|Window|end', 'LSG|Window|activate', 'LSG|Window|set_vsync',
+  'LSG|Window|set_title', 'LSG|Window|is_key_down', 'LSG|Window|is_mouse_down',
+  'LSG|Mesh|draw_instances', 'LSG|Mesh|update_vertices', 'LSG|Mesh|set_ray_transform',
+  'LSG|Framebuffer|display', 'LSG||set_ray_tracing', 'LSG||set_ray_sun',
+  'LSSL||shader declaration', 'LSSL||vertex stage', 'LSSL||fragment stage',
+  'LSSL||compute stage', 'LSSL||uniform resource', 'LSSL||texture resource',
+  'LSSL||storage resource', 'LSSL||image resource', 'LSSL||raytracing features'
+]) assert(frontendKeys.has(key), `Front-end API is missing ${key}`);
+
+const backendKeys = new Set(backendEntries.map(entry => `${entry.module}|${entry.owner || ''}|${entry.name}`));
+for (const key of [
+  'LSG|Window|present', 'LSG|Window|make_current', 'LSG|Window|vsync',
+  'LSG|Mesh|draw_many', 'LSG|Framebuffer|show', 'LSG||enable_ray_tracing',
+  'LSG||backend', 'LSG||poll', 'LSG||clear'
+]) assert(backendKeys.has(key), `Compatibility/backend API is missing ${key}`);
+
 const modules = new Set(data.entries.map(entry => entry.module));
+assert(modules.has('Vulkan/Vulkan') && modules.has('Vulkan/VulkanRaw'), 'Vulkan backend modules are missing from the API');
+assert(data.entries.some(entry => entry.module === 'Vulkan/Vulkan' && entry.audience === 'backend'), 'Vulkan backend declarations are not isolated in the Backend tab');
+for (const moduleName of ['GLFW', 'OpenGL', 'Math/OpenGL', 'OpenGL/TextureUpload', 'System/Parallel', 'System/KernelRuntime']) {
+  const entries = data.entries.filter(entry => entry.module === moduleName);
+  assert(entries.length > 0, `${moduleName} is missing from the API`);
+  assert(entries.every(entry => entry.audience === 'backend'), `${moduleName} must stay in the Backend tab`);
+}
 assert.strictEqual(Object.keys(data.stats?.modules || {}).length, modules.size, 'API module statistics are stale');
 for (const module of modules) assert(data.moduleGuides?.[module], `Missing module guide for ${module}`);
 assert.strictEqual(Object.keys(data.moduleGuides || {}).length, modules.size, 'Module guide count does not match the API module count');

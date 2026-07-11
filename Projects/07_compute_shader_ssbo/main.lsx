@@ -1,52 +1,29 @@
-use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
-
-fn fail(message)
-    Win32.MessageBoxA(0, message, "LazyScriptEX Native GameKit", Win32.MB_OK + Win32.MB_ICONERROR)
-    return 1
-end
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "shaders/numbers.lssl" as Numbers
 
 fn main()
-    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return fail("GLFW failed.") end
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
-    local window = GLFW.glfwCreateWindow(900,600,"07 - Compute shader + SSBO",0,0)
-    if window == 0 then return fail("Window failed.") end
-    GLFW.glfwMakeContextCurrent(window)
-    if GL.lsxLoadOpenGL() < 1 then return fail("OpenGL loading failed.") end
+    local window = LSG.open("07 - LSSL compute shader + storage",900,600)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+    local shader = LSSL.create_compute(Numbers.compute)
+    if not shader.ready() then return LSG.show_error(shader.error()) end
 
-    local cs = "#version 460 core\nlayout(local_size_x=64)in;layout(std430,binding=0)buffer Data{float v[];};void main(){uint i=gl_GlobalInvocationID.x;v[i]=float(i)*2.0+1.0;}"
-    local program = GL.lsxCreateComputeProgram(cs)
-    local buffer = GL.createBuffer()
-    GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,buffer)
-    GL.glBufferData(GL.GL_SHADER_STORAGE_BUFFER,256*4,0,GL.GL_DYNAMIC_COPY)
-    GL.glBindBufferBase(GL.GL_SHADER_STORAGE_BUFFER,0,buffer)
-    GL.glUseProgram(program)
-    GL.glDispatchCompute(4,1,1)
-    GL.glMemoryBarrier(GL.GL_SHADER_STORAGE_BARRIER_BIT+GL.GL_BUFFER_UPDATE_BARRIER_BIT)
-
+    local buffer = LSG.empty_storage(256 * 4,0)
+    shader.run(4,1,1)
+    shader.wait_for_storage()
     local result = {0.0}
-    GL.glGetBufferSubData(GL.GL_SHADER_STORAGE_BUFFER,0,result.byte_length(),result)
+    buffer.read_into(result)
     local valid = result[0] > 0.5
 
-    local framebuffer = GLFW.FramebufferSize.new()
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window)
-        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
-        if valid then GL.glClearColor(0.04,0.35,0.16,1) else GL.glClearColor(0.55,0.05,0.08,1) end
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
+    while window.running() do
+        if valid then window.begin(0.04,0.35,0.16) else window.begin(0.55,0.05,0.08) end
+        window.end()
     end
 
-    framebuffer.destroy()
     result.destroy()
-    GL.deleteBuffer(buffer)
-    GL.glDeleteProgram(program)
-    GLFW.glfwDestroyWindow(window)
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
+    buffer.destroy()
+    shader.destroy()
+    window.destroy()
     return 0
 end

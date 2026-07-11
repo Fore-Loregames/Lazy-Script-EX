@@ -1,6 +1,4 @@
-use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+use "@LazyScript/LSG.lsx" as LSG
 use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
 use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
 
@@ -143,19 +141,25 @@ lshtml hud_view = {(
 
 fn main()
     local root = hud_view()
-    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return fail("GLFW initialization failed.") end
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4) GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6) GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
-    local window = GLFW.glfwCreateWindow(1280,760,"32 - LazyUI runtime HUD",0,0)
-    if window == 0 then return fail("Window creation failed.") end
-    GLFW.glfwMakeContextCurrent(window) GLFW.glfwSwapInterval(1)
-    if GL.lsxLoadOpenGL() < 1 then return fail("OpenGL initialization failed.") end
-    local renderer = UIRenderer.create(null,64) local document = UI.document(root) local framebuffer = GLFW.FramebufferSize.new()
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window) document.resize(framebuffer.width,framebuffer.height)
-        GL.glViewport(0,0,framebuffer.width,framebuffer.height) GL.glClearColor(0.02,0.03,0.05,1.0) GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-        renderer.begin(framebuffer.width,framebuffer.height) renderer.submit(root) renderer.flush()
-        GLFW.glfwSwapBuffers(window) GLFW.glfwPollEvents()
+    local window = LSG.open("32 - LazyUI runtime HUD",1280,760)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return fail(window.error()) end
+    local renderer = UIRenderer.create(null,64)
+    local document = UI.document(root)
+
+    while window.running() do
+        document.resize(window.width,window.height)
+        window.begin(0.02,0.03,0.05)
+        renderer.begin(window.width,window.height)
+        renderer.submit(root)
+        renderer.flush()
+        window.end()
     end
-    framebuffer.destroy() document.destroy() renderer.destroy() GLFW.glfwDestroyWindow(window) GLFW.glfwTerminate() GLFW.lsxUnloadLibraries() return 0
+
+    document.destroy()
+    renderer.destroy()
+    window.destroy()
+    return 0
 end
-fn fail(message) Win32.MessageBoxA(0,message,"LazyUI",Win32.MB_OK+Win32.MB_ICONERROR) return 1 end
+
+fn fail(message) return LSG.show_error(message) end

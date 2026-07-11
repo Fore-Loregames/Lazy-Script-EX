@@ -1,0 +1,41 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "shaders/triangle.lssl" as Triangle
+
+fn main()
+    LSG.use_vulkan()
+
+    local window = LSG.open("36 - Vulkan animated frame",960,540)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+
+    local shader = Triangle.create()
+    if not shader.ready() then return LSG.show_error(shader.error()) end
+
+    local vertices = {
+        -0.65,-0.60, 1.0,0.16,0.12,
+         0.65,-0.60, 0.10,1.0,0.38,
+         0.0, 0.68, 0.12,0.40,1.0
+    }
+    local triangle = LSG.mesh(vertices,Triangle.vertex_layout)
+    if not triangle.ready() then return LSG.show_error(triangle.error()) end
+    local red = 0.02
+    local direction = 1.0
+
+    while window.running() do
+        red += direction * 0.0025
+        if red >= 0.24 then direction = -1.0 end
+        if red <= 0.02 then direction = 1.0 end
+
+        window.begin(red,0.025,0.055)
+        shader.bind()
+        triangle.draw()
+        window.end()
+    end
+
+    triangle.destroy()
+    vertices.destroy()
+    shader.destroy()
+    window.destroy()
+    return 0
+end

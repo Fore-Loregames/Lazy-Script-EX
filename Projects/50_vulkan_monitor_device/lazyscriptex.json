@@ -1,0 +1,7 @@
+{
+  "name": "50_vulkan_monitor_device",
+  "entry": "main.lsx",
+  "output": "build/50_vulkan_monitor_device.exe",
+  "subsystem": "windows",
+  "optimize": 6
+}

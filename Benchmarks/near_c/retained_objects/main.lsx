@@ -26,6 +26,6 @@ fn main() -> i32
         items.clear()
         round = round + 1
     end
-    if checksum == 0 then return 1 end
+    if checksum != 16008288000000 then return 1 end
     return 0
 end

@@ -75,12 +75,12 @@
   "wordPattern": "(-?\\d*\\.\\d\\w*)|([^`~!@#%^&*()=+[{]}\\\\|;:'\\\",.<>/?\\s]+)",
   "indentationRules": {
     "increaseIndentPattern": "^.*\\b(fn|if|elseif|else|while|for)\\b.*(?:then|do)?\\s*$|^.*(?:=\\s*\\{|lshtml\\b.*=\\s*\\{\\s*\\(|lscss\\b.*=\\s*\\{)\\s*$|^\\s*<[A-Za-z][^/>]*>\\s*$",
-    "decreaseIndentPattern": "^\\s*(end|elseif|else|\\}|\\)\\}|</[A-Za-z][^>]*>)\\b?"
+    "decreaseIndentPattern": "^\\s*(end\\b(?!\\s*=)|elseif\\b|else\\b|\\}|\\)\\}|</[A-Za-z][^>]*>)"
   },
   "folding": {
     "markers": {
       "start": "^\\s*(?:(?:export\\s+)?(?:fn\\b|const\\s+[A-Za-z_][A-Za-z0-9_]*\\s*=\\s*\\{|lshtml\\b|lscss\\b|if\\b|while\\b|for\\b)|[A-Za-z_][A-Za-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*\\s*=\\s*fn\\b|--\\[\\[)",
-      "end": "^\\s*(?:end\\b|\\}|\\]\\])"
+      "end": "^\\s*(?:end\\b(?!\\s*=)|\\}|\\]\\])"
     }
   }
 }

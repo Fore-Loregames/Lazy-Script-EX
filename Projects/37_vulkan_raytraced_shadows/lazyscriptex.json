@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/37_vulkan_raytraced_shadows.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

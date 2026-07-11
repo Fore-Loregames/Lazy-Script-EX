@@ -1,6 +1,6 @@
 {
   "entry": "main.lsx",
   "output": "build/18_native_threads.exe",
-  "subsystem": "console",
+  "subsystem": "windows",
   "optimization": 6
 }

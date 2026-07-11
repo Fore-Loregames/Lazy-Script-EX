@@ -22,7 +22,8 @@ let suggestionTimer;
 
 const KEYWORDS = [
   'use','as','export','extern','fn','const','static','lshtml','lscss','local','return','if','then','else','elseif','end','while','do','for','in','break','continue',
-  'true','false','null','and','or','not','self','struct','i8','u8','i16','u16','i32','u32','i64','u64','f32','ptr','handle','fnptr','string','void','bool','table'
+  'true','false','null','and','or','not','self','struct','i8','u8','i16','u16','i32','u32','i64','u64','f32','ptr','handle','fnptr','string','void','bool','table',
+  'shader','vertex','fragment','compute','input','output','flat','uniform','texture','image','storage','workers','vulkan','overlay','strip','raytracing'
 ];
 
 const BUILTIN_DOCS = {
@@ -393,6 +394,8 @@ function defaultDescription(moduleName, symbol) {
 
 function moduleNameFromFile(file) {
   const normalized = file.replace(/\\/g, '/');
+  const topLevel = normalized.match(/\/LazyScript\/(LSG|LSSL)\.lsx$/i);
+  if (topLevel) return topLevel[1].toUpperCase();
   const match = normalized.match(/\/bindings\/(.+)\.lsx$/i);
   if (!match) return '';
   const rel = match[1];
@@ -815,7 +818,7 @@ function importCompletionItems(document, position) {
   let entries = [];
   try {
     entries = fs.readdirSync(browseDirectory, { withFileTypes: true })
-      .filter(entry => (entry.isDirectory() && !ignored.has(entry.name.toLowerCase())) || (entry.isFile() && entry.name.toLowerCase().endsWith('.lsx')))
+      .filter(entry => (entry.isDirectory() && !ignored.has(entry.name.toLowerCase())) || (entry.isFile() && (/\.(?:lsx|lssl)$/i.test(entry.name))))
       .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
   } catch { return []; }
 
@@ -897,7 +900,7 @@ function walkLsxFiles(root, outputFiles, maxFiles = 20000) {
     for (const entry of entries) {
       if (entry.isDirectory()) {
         if (!ignored.has(entry.name.toLowerCase())) stack.push(path.join(current, entry.name));
-      } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.lsx')) outputFiles.push(path.join(current, entry.name));
+      } else if (entry.isFile() && (/\.(?:lsx|lssl)$/i.test(entry.name))) outputFiles.push(path.join(current, entry.name));
     }
   }
 }
@@ -908,7 +911,7 @@ function refreshExternalWatchers(roots) {
   if (!vscode.workspace.createFileSystemWatcher || !vscode.RelativePattern) return;
   for (const root of roots) {
     if (!directoryExists(root)) continue;
-    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '**/*.lsx'));
+    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '**/*.{lsx,lssl}'));
     watcher.onDidCreate(indexUri);
     watcher.onDidChange(indexUri);
     watcher.onDidDelete(uri => index.delete(keyForFile(uri.fsPath)));
@@ -920,7 +923,7 @@ async function refreshIndex() {
   if (!vscode.workspace.workspaceFolders) return;
   status.text = '$(sync~spin) LSX indexing';
   const exclude = vscode.workspace.getConfiguration('lazyscriptex').get('exclude', '**/{build,node_modules,.git,.cache}/**');
-  const uris = await vscode.workspace.findFiles('**/*.lsx', exclude);
+  const uris = await vscode.workspace.findFiles('**/*.{lsx,lssl}', exclude);
   const configUris = await vscode.workspace.findFiles('**/lazyscriptex.json', exclude);
   projectConfigs = configUris.map(uri => readProjectConfig(uri.fsPath)).filter(Boolean);
   index.clear();
@@ -2012,6 +2015,19 @@ function keywordPositionsOutsideLiterals(raw, keyword) {
   return positions;
 }
 
+function blockKeywordPositionsOutsideLiterals(raw, keyword) {
+  return keywordPositionsOutsideLiterals(raw, keyword).filter((index) => {
+    const before = index > 0 ? raw[index - 1] : '';
+    const suffix = raw.slice(index + keyword.length);
+    // Keyword-like member names are valid in LSX front-end APIs. A member
+    // such as `window.end()` or a table entry such as `end = fn()` must not
+    // be treated as the block-closing `end` keyword by the formatter.
+    if (before === '.') return false;
+    if (/^\s*(?:=|\()/.test(suffix)) return false;
+    return true;
+  });
+}
+
 function trailingLineComment(raw) {
   let quote = '';
   let escaped = false;
@@ -2052,7 +2068,7 @@ function expandCompactLsxLine(raw) {
   const ifMatch = code.match(/^(if|elseif)\b/);
   if (ifMatch) {
     const thenPositions = keywordPositionsOutsideLiterals(code, 'then');
-    const endPositions = keywordPositionsOutsideLiterals(code, 'end');
+    const endPositions = blockKeywordPositionsOutsideLiterals(code, 'end');
     const thenAt = thenPositions[0];
     const endAt = endPositions.length ? endPositions[endPositions.length - 1] : -1;
     if (thenAt >= 0 && endAt > thenAt && !code.slice(endAt + 3).trim()) {
@@ -2067,7 +2083,7 @@ function expandCompactLsxLine(raw) {
   }
 
   const fnAt = keywordPositionsOutsideLiterals(code, 'fn')[0];
-  const endPositions = keywordPositionsOutsideLiterals(code, 'end');
+  const endPositions = blockKeywordPositionsOutsideLiterals(code, 'end');
   const endAt = endPositions.length ? endPositions[endPositions.length - 1] : -1;
   if (fnAt >= 0 && endAt > fnAt && !code.slice(endAt + 3).trim()) {
     const openParen = code.indexOf('(', fnAt + 2);
@@ -2163,7 +2179,7 @@ function formatLsxText(text, options = {}) {
     const lshtmlEnd = /^\)\}\s*$/.test(code);
     const normalized = code.replace(/\{\(/g, '{').replace(/\)\}/g, '}');
 
-    const startsEnd = /^end\b/.test(code);
+    const startsEnd = /^end\b(?!\s*(?:=|\())/.test(code);
     const startsBranch = /^(?:else\b|elseif\b)/.test(code);
     let leadingDelimiterClosers = 0;
     const leading = normalized.match(/^[\s]*[\}\]\)]+/);
@@ -2176,7 +2192,7 @@ function formatLsxText(text, options = {}) {
 
     const openDelimiters = countMatches(normalized, /[\{\[\(]/g);
     const closeDelimiters = countMatches(normalized, /[\}\]\)]/g);
-    const endCount = countMatches(code, /\bend\b/g);
+    const endCount = blockKeywordPositionsOutsideLiterals(code, 'end').length;
     let keywordOpens = 0;
     const compact = endCount > 0;
     const braceDelimitedFunction = /(?:^|=\s*)fn(?:\s+[A-Za-z_]\w*)?\s*\([^)]*\)\s*(?:->\s*[A-Za-z_][A-Za-z0-9_.<>]*)?\s*\{\s*$/.test(code);
@@ -2663,7 +2679,7 @@ function parseCompilerDiagnostics(text) {
   if (items.length) return items;
 
   // Backward compatibility with older compilers that only print a location.
-  const regex = /(?:LazyScriptEX error(?:\s*\[[^\]]+\])?:\s*)?(.+?\.lsx):(\d+):(\d+):\s*([^\r\n]+)/g;
+  const regex = /(?:LazyScriptEX error(?:\s*\[[^\]]+\])?:\s*)?(.+?\.(?:lsx|lssl)):(\d+):(\d+):\s*([^\r\n]+)/g;
   let match;
   while ((match = regex.exec(String(text || '')))) {
     items.push({
@@ -2780,7 +2796,7 @@ function scheduleCheck(document) {
 
 async function buildProject(runAfter = false) {
   const editor = vscode.window.activeTextEditor;
-  if (!editor) return vscode.window.showErrorMessage('Open an LSX file first.');
+  if (!editor) return vscode.window.showErrorMessage('Open an LSX or LSSL file first.');
   const project = await selectProjectForFile(editor.document.uri.fsPath);
   if (!project) return vscode.window.showErrorMessage('No lazyscriptex.json is associated with this file. Open the workspace containing the executable project, or add the shared folder through moduleRoots.');
   await editor.document.save();
@@ -2960,7 +2976,7 @@ async function activate(context) {
   context.subscriptions.push(vscode.languages.registerOnTypeFormattingEditProvider(selector, new OnTypeFormattingProvider(), '\n', '}'));
   context.subscriptions.push(vscode.languages.registerCodeActionsProvider(selector, new ImportCodeActionProvider(), { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }));
 
-  watcher = vscode.workspace.createFileSystemWatcher('**/*.lsx');
+  watcher = vscode.workspace.createFileSystemWatcher('**/*.{lsx,lssl}');
   watcher.onDidCreate(indexUri);
   watcher.onDidChange(indexUri);
   watcher.onDidDelete(uri => index.delete(keyForFile(uri.fsPath)));

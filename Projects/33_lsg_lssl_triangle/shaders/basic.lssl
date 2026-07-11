@@ -1,0 +1,21 @@
+shader Basic
+vertex
+    input position = Vector2
+    input tint = Color3
+    output color = Color3
+
+    main = fn()
+        color = tint
+        screen.position = Vector4(position, 0.0, 1.0)
+    end
+end
+
+fragment
+    input color = Color3
+    output finalColor = Color4
+
+    main = fn()
+        finalColor = Color4(color, 1.0)
+    end
+end
+end

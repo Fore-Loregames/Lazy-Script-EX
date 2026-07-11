@@ -1,0 +1,14 @@
+shader Diagnostic
+vertex
+    input position = Vector2
+    main = fn()
+        screen.position = Vector4(position,0.0,1.0)
+    end
+end
+fragment
+    output finalColor = Color4
+    main = fn()
+        finalColor = Color4(0.2,0.75,1.0,1.0)
+    end
+end
+end

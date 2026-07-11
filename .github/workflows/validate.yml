@@ -1,0 +1,36 @@
+name: Validate LazyScriptEX
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Regenerate API and package extension
+        shell: cmd
+        run: |
+          update-api.bat
+          package-extension.bat
+
+      - name: Run compiler and extension tests
+        shell: powershell
+        run: |
+          Get-ChildItem LazyScript/compiler/test*.js | ForEach-Object {
+            node $_.FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          node LazyScript/extension/test_extension.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Check all projects
+        shell: cmd
+        run: check-all.bat

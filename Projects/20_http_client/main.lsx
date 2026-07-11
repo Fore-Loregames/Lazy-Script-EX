@@ -1,11 +1,11 @@
-use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
 use "@LazyScript/bindings/Text/FreeType.lsx" as FreeType
 use "@LazyScript/bindings/Text/Font.lsx" as Font
 use "@LazyScript/bindings/System/Threading.lsx" as Threading
 use "@LazyScript/bindings/Network/Sockets.lsx" as Sockets
 use "@LazyScript/bindings/Network/Http.lsx" as Http
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+use "shaders/text.lssl" as TextShader
 
 const HttpServerState = {
     ready = null,
@@ -63,8 +63,7 @@ fn local_http_server(state)
 end
 
 fn fatal(message)
-    Win32.MessageBoxA(0,message,"LazyScriptEX HTTP client",Win32.MB_OK + Win32.MB_ICONERROR)
-    return 1
+    return LSG.show_error(message)
 end
 
 fn main()
@@ -106,15 +105,9 @@ fn main()
     serverThread.join()
     serverThread.close()
 
-    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return fatal("GLFW initialization failed.") end
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
-    local window = GLFW.glfwCreateWindow(1080,560,"20 - Local HTTP client and server",0,0)
-    if window == 0 then return fatal("The HTTP client window could not be created.") end
-    GLFW.glfwMakeContextCurrent(window)
-    GLFW.glfwSwapInterval(1)
-    if GL.lsxLoadOpenGL() < 1 then return fatal("OpenGL initialization failed.") end
+    local window = LSG.open("20 - Local HTTP client and server",1080,560)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return fatal(window.error()) end
     if not FreeType.ready() then return fatal("FreeType initialization failed.") end
 
     local face = FreeType.load("C:/Windows/Fonts/segoeui.ttf",36)
@@ -125,61 +118,29 @@ fn main()
         return fatal("The HTTP client text view could not be created.")
     end
 
-    local vertexShader = `#version 460 core
-layout(location=0) in vec2 position;
-layout(location=1) in vec2 inputUV;
-uniform vec2 viewport;
-out vec2 uv;
-void main(){uv=inputUV;vec2 ndc=(position/viewport)*vec2(2.0,-2.0)+vec2(-1.0,1.0);gl_Position=vec4(ndc,0.0,1.0);}`
-    local fragmentShader = `#version 460 core
-in vec2 uv;
-out vec4 color;
-uniform sampler2D fontAtlas;
-void main(){float d=texture(fontAtlas,uv).r;float w=max(fwidth(d),0.002);float a=smoothstep(0.5-w,0.5+w,d);color=vec4(0.90,0.95,1.0,a);}`
-    local program = GL.lsxCreateProgram(vertexShader,fragmentShader)
-    if program == 0 then return fatal("The HTTP client text shader failed.") end
+    local shader = TextShader.create()
+    if not shader.ready() then return fatal(shader.error()) end
+    local textMesh = LSG.mesh(text.vertices,TextShader.vertex_layout)
+    LSG.alpha_blending(true)
 
-    local vao = GL.createVertexArray()
-    local vbo = GL.createBuffer()
-    GL.glBindVertexArray(vao)
-    GL.glBindBuffer(GL.GL_ARRAY_BUFFER,vbo)
-    GL.glBufferData(GL.GL_ARRAY_BUFFER,text.vertices.byte_length(),text.vertices,GL.GL_STATIC_DRAW)
-    GL.glVertexAttribPointer(0,2,GL.GL_FLOAT,0,16,0)
-    GL.glEnableVertexAttribArray(0)
-    GL.glVertexAttribPointer(1,2,GL.GL_FLOAT,0,16,8)
-    GL.glEnableVertexAttribArray(1)
-    GL.glEnable(GL.GL_BLEND)
-    GL.glBlendFunc(GL.GL_SRC_ALPHA,GL.GL_ONE_MINUS_SRC_ALPHA)
-    local viewportLocation = GL.glGetUniformLocation(program,"viewport")
-    local atlasLocation = GL.glGetUniformLocation(program,"fontAtlas")
-    local framebuffer = GLFW.FramebufferSize.new()
-
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window)
-        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
-        GL.glClearColor(0.025,0.03,0.05,1)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-        GL.glUseProgram(program)
-        GL.glUniform2f(viewportLocation,framebuffer.width,framebuffer.height)
-        GL.glUniform1i(atlasLocation,0)
+    while window.running() do
+        window.begin(0.025,0.03,0.05)
+        shader.bind()
+        shader.vector2("viewport",window.width,window.height)
+        shader.texture("fontAtlas",0)
         atlasTexture.bind(0)
-        GL.glBindVertexArray(vao)
-        GL.glDrawArrays(GL.GL_TRIANGLES,0,text.vertices.length() / 4)
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
+        textMesh.draw()
+        window.end()
     end
 
-    framebuffer.destroy()
+    LSG.alpha_blending(false)
+    textMesh.destroy()
+    shader.destroy()
     atlasTexture.destroy()
     text.destroy()
     atlas.destroy()
     face.destroy()
-    GL.deleteBuffer(vbo)
-    GL.deleteVertexArray(vao)
-    GL.glDeleteProgram(program)
-    GLFW.glfwDestroyWindow(window)
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
+    window.destroy()
     response.close()
     response.destroy()
     http.close()

@@ -159,6 +159,18 @@ Arithmetic operators include:
 +  -  *  /  %
 ```
 
+Compound assignment keeps movement, counters, and object-field updates short:
+
+```lsx
+position.x += speed
+health -= damage
+scale *= 2.0
+remaining /= 2
+index %= count
+```
+
+`+=`, `-=`, `*=`, `/=`, and `%=` work on ordinary variables, object fields, and table indexes. The compiler lowers them through the same inferred arithmetic and assignment path as the longer form.
+
 ## While loops
 
 ```lsx
@@ -166,7 +178,7 @@ local index = 0
 
 while index < 10 do
     console.write_line(index)
-    index = index + 1
+    index += 1
 end
 ```
 
@@ -524,7 +536,24 @@ void main() {
 }`
 ```
 
-Raw strings do not process backslash escapes.
+Raw strings do not process backslash escapes. They may inject a string value through an exact `{name}` or `{object.field}` placeholder. Ordinary shader braces remain unchanged:
+
+```lsx
+const Shader = {
+    source = ``
+
+    constructor = fn(helperCode)
+        self.source = `#version 460 core
+
+{helperCode}
+
+void main() {
+}`
+    end
+}
+```
+
+Interpolated strings own their generated UTF-8 storage. When stored in an owned object field, that storage is cloned and destroyed with the object.
 
 String helpers include length, byte access, comparison, and UTF-8 conversion through the built-in `string` namespace.
 

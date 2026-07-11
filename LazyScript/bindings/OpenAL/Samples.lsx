@@ -1,0 +1,100 @@
+use "OpenAL.lsx" as AL
+
+-- Beginner-safe generated PCM audio. Native sample packing stays inside this
+-- binding so game code only chooses a frequency, duration, and volume.
+export const PCM16 = {
+    bytes = {}
+    sample_rate:i32 = 44100
+    ok:bool = false
+    error_message:string = null
+
+    ready = fn()
+        return self.ok and self.bytes.byte_length() > 0
+    end
+
+    error = fn()
+        if self.error_message ~= null then return self.error_message end
+        if self.ready() then return "No generated audio error" end
+        return "The generated audio could not be created"
+    end
+
+    upload = fn(buffer)
+        if not self.ready() then
+            self.error_message = "The generated audio has no samples to upload"
+            return false
+        end
+        if buffer == 0 then
+            self.error_message = "OpenAL did not create an audio buffer"
+            return false
+        end
+
+        -- Clear an older OpenAL error before checking this upload.
+        AL.alGetError()
+        AL.alBufferData(buffer,AL.AL_FORMAT_MONO16,self.bytes.byte_data(),self.bytes.byte_length(),self.sample_rate)
+        if AL.alGetError() ~= AL.AL_NO_ERROR then
+            self.error_message = "OpenAL rejected the generated PCM16 audio"
+            return false
+        end
+        return true
+    end
+
+    destroy = fn()
+        self.bytes.destroy()
+        self.ok = false
+        self.error_message = null
+    end
+}
+
+-- This internal helper uses explicit GPU/native-style numeric storage because
+-- it owns PCM packing. The public functions below remain inference-only.
+fn make_triangle(frequency:f32,seconds:f32,volume:f32,fade:bool) -> PCM16
+    local result = PCM16.new()
+    if frequency <= 0.0 or seconds <= 0.0 then
+        result.error_message = "Generated audio needs a positive frequency and duration"
+        return result
+    end
+    if volume < 0.0 then volume = 0.0 end
+    if volume > 1.0 then volume = 1.0 end
+
+    local sample_count:i64 = result.sample_rate * seconds
+    local period:i64 = result.sample_rate / frequency
+    local amplitude:i64 = 32767.0 * volume
+    if sample_count < 1 then sample_count = 1 end
+    if period < 4 then period = 4 end
+    if not result.bytes.resize_bytes(sample_count * 2) then
+        result.error_message = "Could not allocate the generated audio samples"
+        return result
+    end
+
+    local half_period:i64 = period / 2
+    local index:i64 = 0
+    while index < sample_count do
+        local phase:i64 = index % period
+        local sample:i64 = 0
+        if phase < half_period then
+            sample = -amplitude + phase * amplitude * 4 / period
+        else
+            sample = amplitude - (phase - half_period) * amplitude * 4 / period
+        end
+        if fade then sample = sample * (sample_count - index) / sample_count end
+
+        -- PCM16 stores signed samples as their 16-bit bit pattern.
+        if sample < 0 then sample = sample + 65536 end
+        memory.write_u16(result.bytes.byte_data(),index * 2,sample)
+        index = index + 1
+    end
+
+    result.ok = true
+    return result
+end
+
+-- Makes a soft triangle wave. frequency is hertz, seconds is duration, and
+-- volume uses the simple 0.0 to 1.0 range.
+export fn triangle(frequency,seconds,volume)
+    return make_triangle(frequency,seconds,volume,false)
+end
+
+-- Makes the same soft tone with a fade-out envelope for short game sounds.
+export fn fading_triangle(frequency,seconds,volume)
+    return make_triangle(frequency,seconds,volume,true)
+end

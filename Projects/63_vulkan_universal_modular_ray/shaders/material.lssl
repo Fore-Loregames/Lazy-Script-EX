@@ -1,0 +1,30 @@
+shader ModularRayMaterial
+vulkan
+raytracing all
+vertex
+    input position = Vector3
+    input normal = Vector3
+    output worldNormal = Vector3
+    uniform model = Matrix4
+    uniform view = Matrix4
+    uniform projection = Matrix4
+
+    main = fn()
+        worldNormal = normalize((model * Vector4(normal,0.0)).xyz)
+        screen.position = projection * view * model * Vector4(position,1.0)
+    end
+end
+fragment
+    input worldNormal = Vector3
+    output finalColor = Color4
+    uniform objectColor = Color4
+    uniform cameraPosition = Vector3
+
+    main = fn()
+        local lightDirection = normalize(Vector3(0.45,0.85,0.30))
+        local lightAmount = max(dot(normalize(worldNormal),lightDirection),0.0)
+        local diffuse = 0.22 + lightAmount * 0.78
+        finalColor = Color4(objectColor.rgb * diffuse,objectColor.a)
+    end
+end
+end

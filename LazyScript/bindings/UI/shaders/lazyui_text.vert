@@ -5,6 +5,7 @@ struct GlyphData {
     vec4 uvRect;
     vec4 color;
     vec4 clipRect;
+    vec4 clipRadii;
 };
 
 layout(std430,binding=0) readonly buffer LazyUITextBuffer {
@@ -15,6 +16,7 @@ uniform vec2 viewport;
 out vec2 uv;
 flat out vec4 textColor;
 flat out vec4 clipRect;
+flat out vec4 clipRadii;
 out vec2 pixelPosition;
 
 const vec2 corners[4] = vec2[4](
@@ -29,6 +31,7 @@ void main() {
     uv = mix(glyph.uvRect.xy,glyph.uvRect.zw,corner);
     textColor = glyph.color;
     clipRect = glyph.clipRect;
+    clipRadii = glyph.clipRadii;
     vec2 ndc = (pixelPosition / viewport) * vec2(2.0,-2.0) + vec2(-1.0,1.0);
     gl_Position = vec4(ndc,0.0,1.0);
 }

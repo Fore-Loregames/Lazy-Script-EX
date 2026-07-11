@@ -8,5 +8,5 @@ int main(void) {
         if (total > 1000000.0f) total *= 0.000001f;
     }
     sink = total;
-    return total < 0.0f;
+    return total < 991000.0f || total > 992000.0f;
 }

@@ -265,11 +265,11 @@
       "patterns": [
         {
           "name": "storage.modifier.lazyscriptex",
-          "match": "\\b(export|static|local|const|extern|struct|lshtml|lscss)\\b"
+          "match": "\\b(export|static|local|const|extern|struct|lshtml|lscss|shader|vertex|fragment|compute|input|output|flat|uniform|texture|image|storage|workers|vulkan|overlay|strip|raytracing)\\b"
         },
         {
           "name": "keyword.control.lazyscriptex",
-          "match": "\\b(use|as|fn|return|if|then|elseif|else|end|while|for|in|do|break|not|and|or|base)\\b"
+          "match": "(?<!\\.)\\b(use|as|fn|return|if|then|elseif|else|end(?!\\s*=)|while|for|in|do|break|not|and|or|base|read|write)\\b"
         }
       ]
     },
@@ -653,7 +653,7 @@
         },
         {
           "name": "keyword.operator.assignment.lazyscriptex",
-          "match": "="
+          "match": "\\+=|-=|\\*=|/=|%=|="
         }
       ]
     }

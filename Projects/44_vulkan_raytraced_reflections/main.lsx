@@ -1,0 +1,39 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "shaders/scene.lssl" as Scene
+
+fn main()
+    LSG.use_vulkan()
+    LSG.set_ray_tracing(true)
+    local window = LSG.open("44 - Vulkan ray-traced reflections | 1 final, 2 debug",960,540)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+    local shader = Scene.create()
+    if not shader.ready() then return LSG.show_error(shader.error()) end
+    local screen = LSG.empty_mesh(3)
+    if not screen.ready() then return LSG.show_error(screen.error()) end
+    local rayTarget = LSG.framebuffer(720,405)
+    if not rayTarget.ready() then return LSG.show_error(rayTarget.error()) end
+    local debug_view = false
+    while window.running() do
+        if window.is_key_down(LSG.Key.One) and debug_view then
+            debug_view = false
+            window.set_title("44 - Vulkan ray-traced reflections | FINAL | press 2 for debug")
+        end
+        if window.is_key_down(LSG.Key.Two) and not debug_view then
+            debug_view = true
+            window.set_title("44 - Vulkan ray-traced reflections | DEBUG | press 1 for final")
+        end
+        rayTarget.begin(0.01,0.015,0.025)
+        shader.bind()
+        if debug_view then shader.number("debugView",1.0) else shader.number("debugView",0.0) end
+        screen.draw()
+        rayTarget.display(window,LSG.LINEAR)
+        window.end()
+    end
+    rayTarget.destroy()
+    screen.destroy()
+    shader.destroy()
+    window.destroy()
+    return 0
+end

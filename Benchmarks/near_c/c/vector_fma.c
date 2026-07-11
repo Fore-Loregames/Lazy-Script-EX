@@ -9,5 +9,5 @@ int main(void) {
         if (output[15] > 100000.0f) for (int64_t index = 0; index < 16; ++index) output[index] *= 0.00001f;
     }
     sink = output[0];
-    return output[0] <= 0.0f;
+    return output[0] < 2200.0f || output[0] > 2400.0f || output[15] < 42000.0f || output[15] > 42200.0f;
 }

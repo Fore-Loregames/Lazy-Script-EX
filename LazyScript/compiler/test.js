@@ -158,7 +158,7 @@ const projectPe = parsePe(projectBuffer);
 assert.strictEqual(projectPe.subsystem, 2, 'Native GameKit example must use the Windows subsystem');
 const bridgeImport = projectPe.imports.find((entry) => entry.dll.toLowerCase() === 'lsxgamekit.dll');
 assert(bridgeImport, 'LSXGameKit.dll import missing');
-for (const name of ['lsxLoadLibraries', 'glfwInit', 'glfwCreateWindow', 'glfwMakeContextCurrent', 'lsxLoadOpenGL', 'lsxCreateProgram', '_lsxGlCreateVertexArray', 'glfwSwapBuffers'])
+for (const name of ['lsxLoadLibraries', 'glfwInit', 'glfwCreateWindow', 'glfwMakeContextCurrent', 'lsxLoadOpenGL', 'glCreateShader', 'glShaderSource', 'glCompileShader', '_lsxGlGetShaderInteger', '_lsxGlShaderInfoLog', 'glCreateProgram', 'glAttachShader', 'glLinkProgram', '_lsxGlGetProgramInteger', '_lsxGlProgramInfoLog', '_lsxGlCreateVertexArray', 'glfwSwapBuffers'])
   assert(bridgeImport.functions.includes(name), `${name} binding import missing`);
 for (const [source, filename] of [
   [path.join(root, 'native', 'LSXGameKit.dll'), 'LSXGameKit.dll'],
@@ -1409,8 +1409,8 @@ for (const token of ['LoadLibraryA("libfreetype.dll")', 'load_proc("FT_Init_Free
 for (const forbidden of ['GdipCreateBitmapFromFile', 'GetGlyphOutlineW', 'make_sdf'])
   assert(!freeTypeBridgeSource.includes(forbidden), `${forbidden} must not exist in the FreeType bridge`);
 const exampleFolders = fs.readdirSync(path.join(toolkitRoot, 'Projects'), { withFileTypes: true }).filter((entry) => entry.isDirectory() && fs.existsSync(path.join(toolkitRoot, 'Projects', entry.name, 'lazyscriptex.json')));
-assert.strictEqual(exampleFolders.length, 34, 'project library must contain 33 examples plus ProjectTemplate');
-for (const name of ['00_glfw_window', '07_compute_shader_ssbo', '10_openal_efx_reverb', '14_full_game_loop', '21_file_io', '22_json', '23_text_logging', '24_image_loading', '25_sdf_text', '26_media_self_test', '28_lazyui_inline', '29_lazyui_controls_gallery', '30_lazyui_editor_workspace', '31_lazyui_node_graph', '32_lazyui_runtime_hud'])
+assert.strictEqual(exampleFolders.length, 66, 'project library must contain 65 examples plus ProjectTemplate');
+for (const name of ['00_glfw_window', '07_compute_shader_ssbo', '10_openal_efx_reverb', '14_full_game_loop', '21_file_io', '22_json', '23_text_logging', '24_image_loading', '25_sdf_text', '26_media_self_test', '28_lazyui_inline', '29_lazyui_controls_gallery', '30_lazyui_editor_workspace', '31_lazyui_node_graph', '32_lazyui_runtime_hud', '33_lsg_lssl_triangle', '34_vulkan_window', '35_vulkan_triangle', '36_vulkan_animated_frame', '37_vulkan_raytraced_shadows', '44_vulkan_raytraced_reflections', '45_vulkan_raytraced_gi', '46_vulkan_raytraced_ao', '48_vulkan_rt_gallery', '51_vulkan_compute_storage', '52_vulkan_framebuffer_blit', '53_vulkan_glm_camera', '54_vulkan_sdf_text', '55_vulkan_shader_diagnostics', '56_vulkan_gamepad_polling', '63_vulkan_universal_modular_ray', '64_parallel_procedural_world'])
   assert(exampleFolders.some((entry) => entry.name === name), `${name} example missing`);
 
 // Project builds must copy runtime assets beside the executable.
@@ -1804,8 +1804,8 @@ end
 run(['check', rawString]);
 run(['build', rawString, '-o', path.join(temp, 'raw-string.exe'), '--opt', '4']);
 
-// O6 caches stable typed-table data/count headers across canonical loops,
-// removes the loop bounds check, and uses the compile-time element stride.
+// O6 recognizes canonical typed-table reductions, removes the per-element
+// bounds/addressing overhead, and emits an eight-element direct-memory unroll.
 const cachedTableLoop = write('cached-table-loop/main.lsx', `
 fn main() -> i32
     local values:table<f32> = {1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0}
@@ -1822,7 +1822,7 @@ end
 const cachedTableExe = path.join(temp, 'cached-table-loop.exe');
 const cachedTableResult = run(['build', cachedTableLoop, '-o', cachedTableExe, '--opt', '6']);
 assert(/bounds removed [1-9]/.test(cachedTableResult.stdout), cachedTableResult.stdout);
-assert(/cached table loops [1-9]/.test(cachedTableResult.stdout), cachedTableResult.stdout);
+assert(/unrolled reductions [1-9]/.test(cachedTableResult.stdout), cachedTableResult.stdout);
 
 // The CPU target is explicit: baseline stays SSE-width while AVX2-FMA emits
 // eight-wide vector loops and a fused multiply-add for a*b+c.
@@ -2161,6 +2161,40 @@ assert(sqlStyleNotEqualResult.stderr.includes("expected assignment, call, or con
   || sqlStyleNotEqualResult.stderr.includes("expected expression"),
   `<> unexpectedly compiled or produced the wrong diagnostic: ${sqlStyleNotEqualResult.stderr}`);
 
+
+// Backtick strings interpolate exact {name} or {object.field} string
+// placeholders. GLSL/C-style braces remain raw unless the complete contents
+// are a valid LSX value path.
+const rawStringInterpolation = write('raw-string-interpolation.lsx', `
+const Shader = {
+    source = \`\`
+
+    constructor = fn(helperCode, vertexCode)
+        self.source = \`#version 460 core
+
+{helperCode}
+
+void main() {
+{vertexCode}
+}\`
+    end
+}
+
+fn main()
+    local helper = \`vec3 tint(vec3 value) { return value; }\`
+    local vertex = \`    vec3 color = tint(vec3(1.0));\`
+    local shader = Shader.new(helper, vertex)
+    local length = string.length(shader.source)
+    shader.destroy()
+    if length > 0 then
+        return 0
+    end
+    return 1
+end
+`);
+run(['check', rawStringInterpolation]);
+run(['build', rawStringInterpolation, '-o', path.join(temp, 'raw-string-interpolation.exe'), '--opt', '6']);
+
 // Actual syntax and symbol errors still point to the correct source line.
 const bad = write('bad.lsx', `
 fn main()
@@ -2171,4 +2205,4 @@ const badResult = run(['check', bad], 1);
 assert(badResult.stderr.includes(`${bad}:3:`));
 assert(badResult.stderr.includes("unknown module alias or closed table 'Missing'"));
 
-console.log('LazyScriptEX 0.18.16 compiler, compact runtime object types, raw strings, native objects, persistent logs, file I/O, JSON, direct atomics, threading, automatic runtime crash records, sockets, HTTP, and GameKit tests passed.');
+console.log('LazyScriptEX 0.21.5 compiler with clear LSG front-end naming, compound assignments, OpenGL/Vulkan, and LSSL GLSL/SPIR-V, compact runtime object types, raw strings, native objects, persistent logs, file I/O, JSON, direct atomics, threading, automatic runtime crash records, sockets, HTTP, and GameKit tests passed.');

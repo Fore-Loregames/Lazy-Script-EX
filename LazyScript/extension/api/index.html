@@ -163,85 +163,49 @@
           </div>
         </section>
 
-        <section class="doc-section" id="first-window" data-search="create window glfw opengl main loop frame buffer clear close cleanup complete code first game window">
+        <section class="doc-section" id="first-window" data-search="create window lsg vulkan opengl main loop begin end close cleanup complete code first game window">
           <div class="section-heading">
             <span class="step-number">01</span>
             <div>
               <span class="eyebrow">Create a native window</span>
-              <h2>This is the smallest complete window program.</h2>
-              <p>Nothing is left as a placeholder. It loads the runtime, initializes GLFW, creates an OpenGL 4.6 window, runs a frame loop, handles resizing, and releases every owned resource.</p>
+              <h2>This is the smallest complete LSG window program.</h2>
+              <p>LSG owns the platform and graphics setup. Choose Vulkan or OpenGL, open a window, draw between <code>begin()</code> and <code>end()</code>, and release the window when the loop finishes.</p>
             </div>
           </div>
 
           <div class="window-guide-layout">
             <div class="code-card tall">
               <div class="code-card-head"><span>main.lsx</span><button class="copy-button" data-copy-target="first-window-code">Copy complete file</button></div>
-              <pre id="first-window-code"><code>use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
-
-fn fail(message)
-    Win32.MessageBoxA(0, message, "My First LSX Window", Win32.MB_OK + Win32.MB_ICONERROR)
-    return 1
-end
+              <pre id="first-window-code"><code>use "@LazyScript/LSG.lsx" as LSG
 
 fn main()
-    if GLFW.lsxLoadLibraries() &lt; 1 then
-        return fail("Runtime libraries are missing. Run setup-runtime.bat.")
+    LSG.use_vulkan()
+    local window = LSG.open("My First LSX Window", 1280, 720)
+    if not window.ready() then
+        return LSG.show_error(window.error())
     end
 
-    if GLFW.glfwInit() == 0 then
-        return fail("GLFW could not start.")
+    window.set_vsync(true)
+
+    while window.running() do
+        window.begin(0.03, 0.05, 0.09)
+
+        -- Draw with LSG and LSSL here.
+
+        window.end()
     end
 
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR, 4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR, 6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE, GLFW.GLFW_OPENGL_CORE_PROFILE)
-    GLFW.glfwWindowHint(GLFW.GLFW_RESIZABLE, GLFW.GLFW_TRUE)
-
-    local window = GLFW.glfwCreateWindow(1280, 720, "My First LSX Window", 0, 0)
-    if window == 0 then
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
-        return fail("The window could not be created.")
-    end
-
-    GLFW.glfwMakeContextCurrent(window)
-    GLFW.glfwSwapInterval(1)
-
-    if GL.lsxLoadOpenGL() &lt; 1 then
-        GLFW.glfwDestroyWindow(window)
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
-        return fail("OpenGL functions could not be loaded.")
-    end
-
-    local framebuffer = GLFW.FramebufferSize.new()
-
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window)
-        GL.glViewport(0, 0, framebuffer.width, framebuffer.height)
-        GL.glClearColor(0.03, 0.05, 0.09, 1.0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
-    end
-
-    framebuffer.destroy()
-    GLFW.glfwDestroyWindow(window)
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
+    window.destroy()
     return 0
 end</code></pre>
             </div>
             <div class="window-anatomy">
-              <article><b>1</b><div><h3>Load the libraries</h3><p><code>GLFW.lsxLoadLibraries()</code> loads the DLLs installed by <code>setup-runtime.bat</code>. <code>glfwInit()</code> starts the windowing system.</p></div></article>
-              <article><b>2</b><div><h3>Choose the OpenGL version</h3><p>The window hints request an OpenGL 4.6 core context and allow the window to be resized.</p></div></article>
-              <article><b>3</b><div><h3>Create the window</h3><p><code>glfwCreateWindow(width, height, title, monitor, shared)</code> returns the native window handle. A result of <code>0</code> means creation failed.</p></div></article>
-              <article><b>4</b><div><h3>Make the context current</h3><p>OpenGL calls affect the window whose context is current. <code>glfwSwapInterval(1)</code> enables normal VSync.</p></div></article>
-              <article><b>5</b><div><h3>Run the game loop</h3><p>The loop continues until the user closes the window. Each frame refreshes the framebuffer size, clears the screen, presents the frame, and processes Windows events.</p></div></article>
-              <article><b>6</b><div><h3>Clean up in reverse order</h3><p>Destroy owned helper objects, destroy the window, terminate GLFW, and unload the libraries.</p></div></article>
+              <article><b>1</b><div><h3>Choose the backend</h3><p>Call <code>LSG.use_vulkan()</code> before opening the first window. Use <code>LSG.use_opengl()</code> when the project specifically needs OpenGL.</p></div></article>
+              <article><b>2</b><div><h3>Open the window</h3><p><code>LSG.open(title, width, height)</code> creates the native window and the selected graphics backend together.</p></div></article>
+              <article><b>3</b><div><h3>Check creation once</h3><p><code>window.ready()</code> confirms that both the window and graphics renderer started. <code>window.error()</code> returns a useful failure message.</p></div></article>
+              <article><b>4</b><div><h3>Run the frame loop</h3><p><code>window.running()</code> stays true until the user closes the window. <code>begin()</code> starts and clears the frame.</p></div></article>
+              <article><b>5</b><div><h3>Finish with <code>end()</code></h3><p><code>window.end()</code> completes rendering, submits and presents the frame, processes window events, and updates the optional FPS title.</p></div></article>
+              <article><b>6</b><div><h3>Release the window</h3><p><code>window.destroy()</code> releases the swapchain or OpenGL context and shuts down the shared runtime when the final window closes.</p></div></article>
             </div>
           </div>
 
@@ -363,18 +327,15 @@ position.x = position.x + 1.0
 local component_count = position.length()
 position.destroy()</code></pre><p>Use for compact vectors, colors, and small fixed groups of values. <code>x/y/z/w</code> and <code>r/g/b/a</code> alias the first positions.</p></article>
               <article><span class="table-kind">Flat numeric buffer</span><h4>Contiguous data for native APIs</h4><pre><code>local vertices = {
-    -1.0, -1.0, 0.0,
-     1.0, -1.0, 0.0,
-     0.0,  1.0, 0.0
+    -0.75, -0.65, 1.0, 0.2, 0.15,
+     0.75, -0.65, 0.15, 0.8, 0.25,
+     0.0,   0.75, 0.2, 0.35, 1.0
 }
 
-GL.glBufferData(
-    GL.GL_ARRAY_BUFFER,
-    vertices.byte_length(),
-    vertices,
-    GL.GL_STATIC_DRAW
-)
-vertices.destroy()</code></pre><p>Use for mesh vertices, indices, pixels, audio samples, uniform data, and other native buffers. The compiler passes the contiguous storage directly.</p></article>
+local triangle = LSG.mesh(vertices, Basic.vertex_layout)
+triangle.draw()
+triangle.destroy()
+vertices.destroy()</code></pre><p>Use for mesh vertices, indices, pixels, audio samples, uniform data, and other native buffers. High-level APIs such as <code>LSG.mesh()</code> accept the ordinary flat table and handle the backend upload internally.</p></article>
             </div>
             <div class="method-reference">
               <h4>Everyday growable-table operations</h4>
@@ -439,38 +400,34 @@ export const Transform : base(LazyBehaviorMod.LazyBehavior) = {
 
           <article class="lesson-block" id="static-objects" data-search="static const singleton manager service shared global state self no new shutdown">
             <div class="lesson-copy"><span class="lesson-number">2.8</span><h3>Static managers and services</h3><p>Use <code>static const</code> when the program must have exactly one shared object. The compiler creates it once before <code>main()</code>, and every caller uses the same fields and methods without calling <code>.new()</code>.</p></div>
-            <div class="code-card"><div class="code-card-head"><span>One shared window manager</span><button class="copy-button" data-copy-target="static-object-code">Copy</button></div><pre id="static-object-code"><code>export static const WindowManager = {
-    windowHandle = 0
+            <div class="code-card"><div class="code-card-head"><span>One shared window manager</span><button class="copy-button" data-copy-target="static-object-code">Copy</button></div><pre id="static-object-code"><code>use "@LazyScript/LSG.lsx" as LSG
+
+export static const WindowManager = {
+    window = null
     width = 1280
     height = 720
 
     CreateWindow = fn(width, height, title)
         self.width = width
         self.height = height
-        self.windowHandle = GLFW.glfwCreateWindow(
-            width,
-            height,
-            title,
-            0,
-            0
-        )
-        return self.windowHandle
+        self.window = LSG.open(title, width, height)
+        return self.window
     end
 
     Shutdown = fn()
-        if self.windowHandle ~= 0 then
-            GLFW.glfwDestroyWindow(self.windowHandle)
-            self.windowHandle = 0
+        if self.window ~= null then
+            self.window.destroy()
+            self.window = null
         end
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
     end
 }</code></pre></div>
-            <div class="code-card"><div class="code-card-head"><span>Declare nested constant groups directly</span><button class="copy-button" data-copy-target="static-nested-code">Copy</button></div><pre id="static-nested-code"><code>export static const Input = {
+            <div class="code-card"><div class="code-card-head"><span>Declare nested constant groups directly</span><button class="copy-button" data-copy-target="static-nested-code">Copy</button></div><pre id="static-nested-code"><code>use "@LazyScript/LSG.lsx" as LSG
+
+export static const Input = {
     MouseButton = {
-        Left = GLFW.GLFW_MOUSE_BUTTON_LEFT
-        Right = GLFW.GLFW_MOUSE_BUTTON_RIGHT
-        Middle = GLFW.GLFW_MOUSE_BUTTON_MIDDLE
+        Left = LSG.Mouse.Left
+        Right = LSG.Mouse.Right
+        Middle = LSG.Mouse.Middle
     }
 }
 
@@ -495,17 +452,21 @@ end</code></pre></div>
 
           <article class="lesson-block" id="modules" data-search="module use import alias LazyScript bindings file split code export">
             <div class="lesson-copy"><span class="lesson-number">2.9</span><h3>Modules and imports</h3><p><code>use</code> loads another LSX module and gives it a short alias. <code>@LazyScript</code> starts at the toolkit's <code>LazyScript</code> folder, which is why the whole toolkit root should be opened in VS Code.</p></div>
-            <div class="code-card"><div class="code-card-head"><span>Import wrapped systems</span><button class="copy-button" data-copy-target="module-code">Copy</button></div><pre id="module-code"><code>use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+            <div class="code-card"><div class="code-card-head"><span>Import wrapped systems</span><button class="copy-button" data-copy-target="module-code">Copy</button></div><pre id="module-code"><code>use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "shaders/basic.lssl" as Basic
 use "@LazyScript/bindings/Math/GLM.lsx" as GLM
 
 fn main()
+    LSG.use_vulkan()
     local direction = GLM.vec3(0.0, 0.0, -1.0)
+    local shader = Basic.create()
     local forward_z = direction.z
+    shader.destroy()
     direction.destroy()
     return 0
 end</code></pre></div>
-            <div class="callout good"><strong>Read the alias literally.</strong><p><code>GLFW.glfwInit()</code> means “call <code>glfwInit</code> from the module imported as <code>GLFW</code>.” <code>GLM.vec3()</code> means “create a Vec3 using the GLM wrapper.”</p></div>
+            <div class="callout good"><strong>Read the alias literally.</strong><p><code>LSG.use_vulkan()</code> selects the Vulkan backend. <code>Basic.create()</code> creates the imported LSSL shader, and <code>GLM.vec3()</code> creates a vector using the GLM wrapper.</p></div>
           </article>
         </section>
 
@@ -579,7 +540,7 @@ lshtml welcome_view(props) = {(
           <div id="examples-root"></div>
         </section>
 
-        <section class="doc-section" id="full-app" data-search="complete full app glfw opengl lazyui renderer window main loop input document compile copy">
+        <section class="doc-section" id="full-app" data-search="complete full app lsg vulkan opengl lazyui renderer window main loop input document compile copy">
           <div class="section-heading">
             <span class="step-number">05</span>
             <div>
@@ -591,7 +552,7 @@ lshtml welcome_view(props) = {(
 
           <div class="full-app-layout">
             <div class="full-app-steps">
-              <article><b>1</b><div><h3>Import the systems</h3><p>GLFW creates the window, OpenGL clears it, LazyUI owns the retained tree, and the UI renderer draws it.</p></div></article>
+              <article><b>1</b><div><h3>Import the systems</h3><p>LSG owns the native window and selected Vulkan or OpenGL backend. LazyUI owns the retained tree, and the UI renderer draws it.</p></div></article>
               <article><b>2</b><div><h3>Create props and the UI</h3><p>The state object is ordinary LSX. The LSHTML function builds the tree once.</p></div></article>
               <article><b>3</b><div><h3>Connect input</h3><p>Keyboard, text, wheel, pointer position, and mouse button changes are forwarded to the document.</p></div></article>
               <article><b>4</b><div><h3>Render each frame</h3><p>Resize the document, submit the retained root, flush the renderer, and poll events.</p></div></article>

@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/45_vulkan_raytraced_gi.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

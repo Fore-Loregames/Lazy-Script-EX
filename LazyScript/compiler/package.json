@@ -1,19 +1,22 @@
 {
   "name": "lazyscriptex-compiler",
-  "version": "0.18.16",
+  "version": "0.21.5",
   "private": true,
-  "description": "Direct native x64 LazyScriptEX compiler with inferred object constructors, compact runtime object type metadata, compile-time borrowed back-references for circular object graphs, common-base parameter and growable-table inference, compile-time inheritance, static objects, beginner-readable diagnostics, structured VS Code errors, LSHTML/LSCSS, native bindings, and O0-O6 optimization.",
+  "description": "Direct native x64 LazyScriptEX compiler with clear LSG front-end naming, OpenGL/Vulkan parity, LSSL GLSL/SPIR-V shaders, plug-and-play ray scenes, Vulkan-backed LazyUI, inferred objects and tables, circular module graphs, LSHTML/LSCSS, native bindings, O0-O6 optimization, fused SIMD loops, persistent worker pools, runtime workload selection, and optional generated LSSL compute workloads.",
   "bin": {
     "lsx": "lazyscriptex.js"
   },
   "scripts": {
-    "test": "node test.js",
+    "test": "node test.js && node test_frontend_names.js && node test_optimizer_licm.js && node test_optimizer_near_c.js && node test_kernel_accelerator.js",
     "test:examples": "node test_examples.js",
     "test:bindings": "node test_sync_contract.js",
     "test:glm": "node test_glm_binding.js",
     "test:ui": "node test_inline_ui.js",
     "test:diagnostics": "node test_diagnostics.js",
-    "test:static": "node test_static_objects.js"
+    "test:static": "node test_static_objects.js",
+    "test:lssl": "node test_lssl.js",
+    "test:compound": "node test_compound_assignments.js",
+    "test:vulkan": "node test_vulkan_backend.js"
   },
   "engines": {
     "node": ">=18"

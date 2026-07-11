@@ -1,0 +1,28 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "shaders/numbers.lssl" as Numbers
+
+fn main()
+    LSG.use_vulkan()
+    local window = LSG.open("51 - Vulkan LSSL compute + storage",900,600)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+    local shader = Numbers.create()
+    if not shader.ready() then return LSG.show_error(shader.error()) end
+    local buffer = LSG.empty_storage(256 * 4,0)
+    if not buffer.ready() then return LSG.show_error(buffer.error()) end
+    if not shader.run(4,1,1) then return LSG.show_error("The Vulkan compute dispatch failed") end
+    local result = {0.0}
+    if not buffer.read_into(result) then return LSG.show_error("The Vulkan storage read failed") end
+    local valid = result[0] > 0.5
+
+    while window.running() do
+        if valid then window.begin(0.04,0.35,0.16) else window.begin(0.55,0.05,0.08) end
+        window.end()
+    end
+    result.destroy()
+    buffer.destroy()
+    shader.destroy()
+    window.destroy()
+    return 0
+end

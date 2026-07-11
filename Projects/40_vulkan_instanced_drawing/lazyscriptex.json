@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/40_vulkan_instanced_drawing.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

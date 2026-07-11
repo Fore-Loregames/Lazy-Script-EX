@@ -1,0 +1,273 @@
+use "VulkanRaw.lsx" as Raw
+
+export fn create(window,width,height)
+    return Raw._lsxVKCreate(window,width,height)
+end
+
+export fn ready(context)
+    return context ~= 0 and Raw._lsxVKReady(context) ~= 0
+end
+
+export fn error(context)
+    return Raw._lsxVKError(context)
+end
+
+export fn device_name(context)
+    return Raw._lsxVKDeviceName(context)
+end
+
+export fn set_vsync(context,enabled)
+    if context == 0 then return false end
+    local state = 0
+    if enabled then state = 1 end
+    return Raw._lsxVKSetVsync(context,state) ~= 0
+end
+
+export fn vsync_enabled(context)
+    return context ~= 0 and Raw._lsxVKVsyncEnabled(context) ~= 0
+end
+
+export fn present_mode(context)
+    if context == 0 then return -1 end
+    return Raw._lsxVKPresentMode(context)
+end
+
+export fn ray_query_supported(context)
+    return context ~= 0 and Raw._lsxVKRayQuerySupported(context) ~= 0
+end
+
+export fn ray_pipeline_supported(context)
+    return context ~= 0 and Raw._lsxVKRayPipelineSupported(context) ~= 0
+end
+
+export fn set_ray_sun(context,dx,dy,dz,r,g,b,intensity,ambient)
+    return context ~= 0 and Raw._lsxVKSetRaySun(context,dx,dy,dz,r,g,b,intensity,ambient) ~= 0
+end
+
+export fn clear_ray_point_lights(context)
+    if context ~= 0 then Raw._lsxVKClearRayPointLights(context) end
+end
+
+export fn add_ray_point_light(context,x,y,z,r,g,b,intensity,range)
+    return context ~= 0 and Raw._lsxVKAddRayPointLight(context,x,y,z,r,g,b,intensity,range) ~= 0
+end
+
+export fn ray_triangle_count(context)
+    if context == 0 then return 0 end
+    return Raw._lsxVKRayTriangleCount(context)
+end
+
+export fn enable_trace(context,enabled)
+    if context == 0 then return false end
+    local state = 0
+    if enabled then state = 1 end
+    return Raw._lsxVKEnableTrace(context,state) ~= 0
+end
+
+export fn trace_marker(context,marker)
+    if context ~= 0 then Raw._lsxVKTraceMarker(context,marker) end
+end
+
+export fn begin(context,width,height,red,green,blue,alpha)
+    return Raw._lsxVKBegin(context,width,height,red,green,blue,alpha) ~= 0
+end
+
+export fn present(context)
+    return Raw._lsxVKPresent(context) ~= 0
+end
+
+export fn draw(context,vertices,instances)
+    Raw._lsxVKDraw(context,vertices,instances)
+end
+
+export fn draw_base(context,vertices,instances,firstVertex,firstInstance)
+    Raw._lsxVKDrawBase(context,vertices,instances,firstVertex,firstInstance)
+end
+
+export fn create_mesh(context,data,bytes,stride,vertices,positionComponents)
+    if context == 0 or data == 0 or bytes < 1 or stride < 1 or vertices < 1 then return 0 end
+    return Raw._lsxVKCreateMeshEx(context,data,bytes,stride,vertices,positionComponents)
+end
+
+export fn create_indexed_mesh(context,vertices,vertexBytes,stride,vertexCount,indices,indexBytes,indexCount,positionComponents)
+    if context == 0 or vertices == 0 or indices == 0 or vertexBytes < 1 or indexBytes < 1 then return 0 end
+    return Raw._lsxVKCreateIndexedMeshEx(context,vertices,vertexBytes,stride,vertexCount,indices,indexBytes,indexCount,positionComponents)
+end
+
+export fn mesh_ready(mesh)
+    return mesh ~= 0 and Raw._lsxVKMeshReady(mesh) ~= 0
+end
+
+export fn update_mesh(context,mesh,data,bytes)
+    if context == 0 or mesh == 0 or data == 0 or bytes < 1 then return false end
+    return Raw._lsxVKUpdateMesh(context,mesh,data,bytes) ~= 0
+end
+
+export fn mesh_error(mesh)
+    return Raw._lsxVKMeshError(mesh)
+end
+
+export fn set_mesh_ray_visible(context,mesh,visible)
+    local state = 0
+    if visible then state = 1 end
+    return context ~= 0 and mesh ~= 0 and Raw._lsxVKSetMeshRayVisible(context,mesh,state) ~= 0
+end
+
+export fn set_mesh_ray_transform(context,mesh,matrix)
+    return context ~= 0 and mesh ~= 0 and matrix ~= 0 and Raw._lsxVKSetMeshRayTransform(context,mesh,matrix) ~= 0
+end
+
+export fn set_mesh_ray_material(context,mesh,r,g,b,a,roughness,metallic,emissive)
+    return context ~= 0 and mesh ~= 0 and Raw._lsxVKSetMeshRayMaterial(context,mesh,r,g,b,a,roughness,metallic,emissive) ~= 0
+end
+
+export fn draw_mesh(context,mesh,instances)
+    Raw._lsxVKDrawMesh(context,mesh,instances)
+end
+
+export fn destroy_mesh(context,mesh)
+    if mesh ~= 0 then Raw._lsxVKDestroyMesh(context,mesh) end
+end
+
+export fn create_texture(context,width,height,pixels,bytes,linear)
+    if context == 0 or width < 1 or height < 1 or pixels == 0 or bytes < width * height * 4 then return 0 end
+    local filter = 0
+    if linear then filter = 1 end
+    return Raw._lsxVKCreateTexture(context,width,height,pixels,bytes,filter)
+end
+
+export fn texture_ready(texture)
+    return texture ~= 0 and Raw._lsxVKTextureReady(texture) ~= 0
+end
+
+export fn texture_error(texture)
+    return Raw._lsxVKTextureError(texture)
+end
+
+export fn bind_texture(context,texture,unit)
+    if context ~= 0 and texture ~= 0 then Raw._lsxVKBindTexture(context,texture,unit) end
+end
+
+export fn destroy_texture(context,texture)
+    if texture ~= 0 then Raw._lsxVKDestroyTexture(context,texture) end
+end
+
+export fn create_framebuffer(context,width,height)
+    if context == 0 or width < 1 or height < 1 then return 0 end
+    return Raw._lsxVKCreateFramebuffer(context,width,height)
+end
+
+export fn framebuffer_ready(framebuffer)
+    return framebuffer ~= 0 and Raw._lsxVKFramebufferReady(framebuffer) ~= 0
+end
+
+export fn framebuffer_error(framebuffer)
+    return Raw._lsxVKFramebufferError(framebuffer)
+end
+
+export fn begin_framebuffer(context,framebuffer,windowWidth,windowHeight,red,green,blue,alpha)
+    if context == 0 or framebuffer == 0 then return false end
+    return Raw._lsxVKBeginFramebuffer(context,framebuffer,windowWidth,windowHeight,red,green,blue,alpha) ~= 0
+end
+
+export fn show_framebuffer(context,framebuffer,linear)
+    if context == 0 or framebuffer == 0 then return false end
+    local filter = 0
+    if linear then filter = 1 end
+    return Raw._lsxVKFramebufferShow(context,framebuffer,filter) ~= 0
+end
+
+export fn destroy_framebuffer(context,framebuffer)
+    if framebuffer ~= 0 then Raw._lsxVKDestroyFramebuffer(context,framebuffer) end
+end
+
+export fn uniform_number(context,offset,value)
+    return context ~= 0 and offset >= 0 and Raw._lsxVKUniform1f(context,offset,value) ~= 0
+end
+
+export fn uniform_whole(context,offset,value)
+    return context ~= 0 and offset >= 0 and Raw._lsxVKUniform1i(context,offset,value) ~= 0
+end
+
+export fn uniform_vector2(context,offset,x,y)
+    return context ~= 0 and offset >= 0 and Raw._lsxVKUniform2f(context,offset,x,y) ~= 0
+end
+
+export fn uniform_vector3(context,offset,x,y,z)
+    return context ~= 0 and offset >= 0 and Raw._lsxVKUniform3f(context,offset,x,y,z) ~= 0
+end
+
+export fn uniform_vector4(context,offset,x,y,z,w)
+    return context ~= 0 and offset >= 0 and Raw._lsxVKUniform4f(context,offset,x,y,z,w) ~= 0
+end
+
+export fn uniform_matrix4(context,offset,values)
+    if context == 0 or offset < 0 or values == 0 then return false end
+    return Raw._lsxVKUniformMat4(context,offset,values) ~= 0
+end
+
+export fn create_storage(context,data,bytes,binding)
+    if context == 0 or bytes < 1 or binding < 0 then return 0 end
+    return Raw._lsxVKCreateStorage(context,data,bytes,binding)
+end
+
+export fn storage_ready(storage)
+    return storage ~= 0 and Raw._lsxVKStorageReady(storage) ~= 0
+end
+
+export fn storage_error(storage)
+    return Raw._lsxVKStorageError(storage)
+end
+
+export fn bind_storage(context,storage,binding)
+    if context ~= 0 and storage ~= 0 then Raw._lsxVKBindStorage(context,storage,binding) end
+end
+
+export fn update_storage(context,storage,data,bytes)
+    if context == 0 or storage == 0 or data == 0 or bytes < 1 then return false end
+    return Raw._lsxVKUpdateStorage(context,storage,data,bytes) ~= 0
+end
+
+export fn read_storage(context,storage,output,bytes)
+    if context == 0 or storage == 0 or output == 0 or bytes < 1 then return false end
+    return Raw._lsxVKReadStorage(context,storage,output,bytes) ~= 0
+end
+
+export fn destroy_storage(context,storage)
+    if storage ~= 0 then Raw._lsxVKDestroyStorage(context,storage) end
+end
+
+export fn create_compute_shader(context,words,count)
+    if context == 0 or words == 0 or count < 1 then return 0 end
+    return Raw._lsxVKCreateComputeShader(context,words,count)
+end
+
+export fn dispatch(context,shader,x,y,z)
+    if context == 0 or shader == 0 then return false end
+    return Raw._lsxVKDispatch(context,shader,x,y,z) ~= 0
+end
+
+export fn create_shader(context,vertexPointer,vertexCount,fragmentPointer,fragmentCount,vertexLayout,pipelineFlags,rayFlags,modelOffset)
+    if context == 0 or vertexPointer == 0 or fragmentPointer == 0 or vertexCount < 1 or fragmentCount < 1 then return 0 end
+    return Raw._lsxVKCreateShaderEx(context,vertexPointer,vertexCount,fragmentPointer,fragmentCount,vertexLayout,pipelineFlags,rayFlags,modelOffset)
+end
+
+export fn shader_ready(shader)
+    return shader ~= 0 and Raw._lsxVKShaderReady(shader) ~= 0
+end
+
+export fn shader_error(shader)
+    return Raw._lsxVKShaderError(shader)
+end
+
+export fn bind_shader(context,shader)
+    Raw._lsxVKBindShader(context,shader)
+end
+
+export fn destroy_shader(context,shader)
+    if shader ~= 0 then Raw._lsxVKDestroyShader(context,shader) end
+end
+
+export fn destroy(context)
+    if context ~= 0 then Raw._lsxVKDestroy(context) end
+end

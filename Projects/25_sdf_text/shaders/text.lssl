@@ -1,0 +1,26 @@
+shader SDFText
+vertex
+    input position = Vector2
+    input inputUV = Vector2
+    output uv = Vector2
+    uniform viewport = Vector2
+
+    main = fn()
+        uv = inputUV
+        local ndc = (position / viewport) * Vector2(2.0,-2.0) + Vector2(-1.0,1.0)
+        screen.position = Vector4(ndc,0.0,1.0)
+    end
+end
+fragment
+    input uv = Vector2
+    texture fontAtlas
+    output finalColor = Color4
+
+    main = fn()
+        local distanceValue = fontAtlas.sample(uv).r
+        local edge = max(fwidth(distanceValue),0.002)
+        local alpha = smoothstep(0.5 - edge,0.5 + edge,distanceValue)
+        finalColor = Color4(0.90,0.95,1.0,alpha)
+    end
+end
+end

@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/vulkan-lazyui-runtime-hud.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

@@ -1,0 +1,7 @@
+{
+  "name": "49_vulkan_full_game_loop",
+  "entry": "main.lsx",
+  "output": "build/49_vulkan_full_game_loop.exe",
+  "subsystem": "windows",
+  "optimize": 6
+}

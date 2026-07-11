@@ -19,5 +19,5 @@ int main(void) {
         }
     }
     sink = checksum;
-    return checksum == 0;
+    return checksum != INT64_C(16008288000000);
 }

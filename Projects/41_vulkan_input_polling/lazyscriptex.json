@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/41_vulkan_input_polling.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

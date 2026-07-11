@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/vulkan-lazyui-text-image-clip.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

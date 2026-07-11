@@ -1,0 +1,36 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "shaders/solid.lssl" as Solid
+
+fn main()
+    LSG.use_vulkan()
+
+    local window = LSG.open("52 - Vulkan framebuffer + blit",1024,720)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+
+    local shader = Solid.create()
+    if not shader.ready() then return LSG.show_error(shader.error()) end
+
+    local vertices = {-0.8,-0.7, 0.8,-0.7, 0.0,0.8}
+    local triangle = LSG.mesh(vertices,Solid.vertex_layout)
+    if not triangle.ready() then return LSG.show_error(triangle.error()) end
+
+    local target = LSG.framebuffer(512,512)
+    if not target.ready() then return LSG.show_error(target.error()) end
+
+    while window.running() do
+        if not target.begin(0.04,0.08,0.15) then return LSG.show_error(target.error()) end
+        shader.bind()
+        triangle.draw()
+        if not target.display(window,LSG.LINEAR) then return LSG.show_error(target.error()) end
+        window.end()
+    end
+
+    target.destroy()
+    triangle.destroy()
+    vertices.destroy()
+    shader.destroy()
+    window.destroy()
+    return 0
+end

@@ -1,0 +1,21 @@
+shader Textured
+vertex
+    input position = Vector2
+    input inputUV = Vector2
+    output uv = Vector2
+
+    main = fn()
+        uv = inputUV
+        screen.position = Vector4(position,0.0,1.0)
+    end
+end
+fragment
+    input uv = Vector2
+    texture image
+    output finalColor = Color4
+
+    main = fn()
+        finalColor = image.sample(uv)
+    end
+end
+end

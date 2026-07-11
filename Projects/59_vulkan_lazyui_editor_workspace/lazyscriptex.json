@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/vulkan-lazyui-editor-workspace.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

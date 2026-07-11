@@ -1,39 +1,31 @@
-use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
-
-fn fail(message)
-    Win32.MessageBoxA(0, message, "LazyScriptEX Native GameKit", Win32.MB_OK + Win32.MB_ICONERROR)
-    return 1
-end
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "shaders/textured.lssl" as Textured
 
 fn main()
-    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return fail("GLFW failed.") end
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR, 4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR, 6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE, GLFW.GLFW_OPENGL_CORE_PROFILE)
-    local window = GLFW.glfwCreateWindow(900, 700, "04 - Procedural texture", 0, 0)
-    if window == 0 then return fail("Window failed.") end
-    GLFW.glfwMakeContextCurrent(window)
-    if GL.lsxLoadOpenGL() < 1 then return fail("OpenGL loading failed.") end
+    local window = LSG.open("04 - Procedural texture",900,700)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+    local shader = Textured.create()
+    if not shader.ready() then return LSG.show_error(shader.error()) end
 
-    local vs = "#version 460 core\nlayout(location=0)in vec2 p;layout(location=1)in vec2 uv0;out vec2 uv;void main(){uv=uv0;gl_Position=vec4(p,0,1);}"
-    local fs = "#version 460 core\nin vec2 uv;out vec4 o;uniform sampler2D tex;void main(){o=texture(tex,uv);}"
-    local program = GL.lsxCreateProgram(vs, fs)
-
-    local pixels = {}
-    pixels.resize(64 * 64)
+    local pixels = LSG.pixel_image(64,64)
+    if not pixels.ready() then return LSG.show_error(pixels.error()) end
     local y = 0
     while y < 64 do
         local x = 0
         while x < 64 do
-            local color = 0xFF5064EB
-            if ((x / 8) + (y / 8)) % 2 ~= 0 then color = 0xFF4B3223 end
-            pixels[y * 64 + x] = color
+            local color = LSG.rgba(235,100,80,255)
+            if ((x / 8) + (y / 8)) % 2 == 0 then color = LSG.rgba(74,192,240,255) end
+            pixels.set(x,y,color)
             x = x + 1
         end
         y = y + 1
     end
+
+    local texture = LSG.texture_from_pixels(pixels)
+    if not texture.ready() then return LSG.show_error(texture.error()) end
+    pixels.destroy()
 
     local vertices = {
         -0.8,-0.8, 0.0,1.0,
@@ -41,45 +33,21 @@ fn main()
         -0.8, 0.8, 0.0,0.0,
          0.8, 0.8, 1.0,0.0
     }
+    local quad = LSG.mesh_mode(vertices,Textured.vertex_layout,LSG.TRIANGLE_STRIP)
 
-    local vao = GL.createVertexArray()
-    local vbo = GL.createBuffer()
-    local texture = GL.createTexture()
-    GL.glBindVertexArray(vao)
-    GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo)
-    GL.glBufferData(GL.GL_ARRAY_BUFFER, vertices.byte_length(), vertices, GL.GL_STATIC_DRAW)
-    GL.glVertexAttribPointer(0, 2, GL.GL_FLOAT, 0, 16, 0)
-    GL.glEnableVertexAttribArray(0)
-    GL.glVertexAttribPointer(1, 2, GL.GL_FLOAT, 0, 16, 8)
-    GL.glEnableVertexAttribArray(1)
-    GL.glBindTexture(GL.GL_TEXTURE_2D, texture)
-    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_NEAREST)
-    GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST)
-    GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA8, 64, 64, 0, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, pixels)
-
-    local framebuffer = GLFW.FramebufferSize.new()
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window)
-        GL.glViewport(0, 0, framebuffer.width, framebuffer.height)
-        GL.glClearColor(0.03,0.04,0.06,1)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-        GL.glUseProgram(program)
-        GL.glBindVertexArray(vao)
-        GL.glBindTexture(GL.GL_TEXTURE_2D, texture)
-        GL.glDrawArrays(GL.GL_TRIANGLE_STRIP,0,4)
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
+    while window.running() do
+        window.begin(0.03,0.04,0.06)
+        shader.bind()
+        shader.texture("image",0)
+        texture.bind(0)
+        quad.draw()
+        window.end()
     end
 
-    framebuffer.destroy()
-    GL.deleteTexture(texture)
-    GL.deleteBuffer(vbo)
-    GL.deleteVertexArray(vao)
-    GL.glDeleteProgram(program)
+    quad.destroy()
     vertices.destroy()
-    pixels.destroy()
-    GLFW.glfwDestroyWindow(window)
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
+    texture.destroy()
+    shader.destroy()
+    window.destroy()
     return 0
 end

@@ -1,0 +1,23 @@
+shader VulkanInstances
+vulkan
+vertex
+    input position = Vector2
+    input tint = Color3
+    output color = Color3
+    main = fn()
+        local column = instance.id % 8
+        local row = instance.id / 8
+        local x = Number(column) * 0.23 - 0.80
+        local y = Number(row) * 0.27 - 0.65
+        color = tint
+        screen.position = Vector4(position * 0.085 + Vector2(x,y),0.0,1.0)
+    end
+end
+fragment
+    input color = Color3
+    output finalColor = Color4
+    main = fn()
+        finalColor = Color4(color,1.0)
+    end
+end
+end

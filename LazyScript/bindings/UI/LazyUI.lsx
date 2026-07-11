@@ -1,5 +1,6 @@
 use "../GLFW/GLFW.lsx" as GLFW
 use "../Platform/Win32.lsx" as Win32
+use "../../LSG.lsx" as LSG
 
 -- LazyUI: native LSX retained UI objects with function-created elements.
 -- No ECS dependency is required. Every element carries runner/ECS reservation
@@ -421,7 +422,7 @@ export const CanvasCommand = {
     color:u32 = 4294967295,
     color2:u32 = 0,
     text:string = null,
-    texture:u32 = 0
+    texture:LSG.Texture = null
 }
 
 export const CanvasContext = {
@@ -853,7 +854,7 @@ export const CanvasContext = {
         self.draw_text(text,x,y,self.stroke_color)
     end,
 
-    draw_image = fn(texture:u32,x:f32,y:f32,width:f32,height:f32,color:u32)
+    draw_image = fn(texture:LSG.Texture,x:f32,y:f32,width:f32,height:f32,color:u32)
         local command = CanvasCommand.new()
         command.kind = CANVAS_IMAGE
         command.texture = texture
@@ -865,7 +866,7 @@ export const CanvasContext = {
         self.push(command)
     end,
 
-    image = fn(texture:u32,x:f32,y:f32,width:f32,height:f32)
+    image = fn(texture:LSG.Texture,x:f32,y:f32,width:f32,height:f32)
         self.draw_image(texture,x,y,width,height,4294967295)
     end,
 
@@ -1312,7 +1313,7 @@ export const Element = {
 
     step_value:f32 = 1.0,
 
-    texture:u32 = 0,
+    texture:LSG.Texture = null,
 
     canvas_shape:i32 = 0,
 
@@ -1653,12 +1654,12 @@ export const Element = {
     set_placeholder = fn(value:string) self.placeholder = value self.mark_visual_dirty() end,
     set_source = fn(value:string) self.source = value self.mark_visual_dirty() end,
 
-    -- Assigns an already-loaded OpenGL texture to an image element and records
+    -- Assigns an already-loaded LSG texture to an image element and records
     -- its intrinsic aspect ratio. With only CSS width or height specified, the
     -- other dimension remains automatic and layout preserves the source image
     -- proportions instead of stretching it.
-    set_texture = fn(texture_id:u32,intrinsic_width:f32,intrinsic_height:f32)
-        self.texture = texture_id
+    set_texture = fn(texture:LSG.Texture,intrinsic_width:f32,intrinsic_height:f32)
+        self.texture = texture
         if intrinsic_width > 0.0 and intrinsic_height > 0.0 then
             self.style.aspect_ratio = intrinsic_width / intrinsic_height
         end
@@ -5825,6 +5826,10 @@ export fn document(root:Element) -> Document
     return value
 end
 
+static const WindowInputRegistry = {
+    values = {}
+}
+
 export const WindowInput = {
     window:ptr = 0,
     native_window:handle = 0,
@@ -5841,13 +5846,21 @@ export const WindowInput = {
         -- glfwCreateWindow returns GLFWwindow*, not HWND. Resolve the real
         -- native window before installing the wheel message bridge.
         self.native_window = GLFW.glfwGetWin32Window(window)
-        if self.native_window ~= 0 then self.original_wndproc = Win32.SetWindowLongPtrW(self.native_window,Win32.GWLP_WNDPROC,lazyui_window_proc) end
+        if self.native_window ~= 0 then
+            register_window_input(self)
+            self.original_wndproc = Win32.SetWindowLongPtrW(self.native_window,Win32.GWLP_WNDPROC,lazyui_window_proc)
+            if self.original_wndproc == 0 then
+                unregister_window_input(self)
+                self.native_window = 0
+            end
+        end
         return true
     end,
 
     destroy = fn()
         if self.window ~= 0 then
             if self.native_window ~= 0 and self.original_wndproc ~= 0 then Win32.SetWindowLongPtrW(self.native_window,Win32.GWLP_WNDPROC,self.original_wndproc) end
+            unregister_window_input(self)
             GLFW.glfwSetKeyCallback(self.window,0)
             GLFW.glfwSetCharCallback(self.window,0)
             if GLFW.glfwGetWindowUserPointer(self.window) == self then GLFW.glfwSetWindowUserPointer(self.window,0) end
@@ -5859,6 +5872,37 @@ export const WindowInput = {
     end
 }
 
+fn register_window_input(input)
+    if input == null or input.native_window == 0 then return end
+    local values = WindowInputRegistry.values
+    local index = 0
+    while index < values.length() do
+        if values[index] == input then return end
+        index = index + 1
+    end
+    values.push(input)
+end
+
+fn unregister_window_input(input)
+    local values = WindowInputRegistry.values
+    local index = values.length() - 1
+    while index >= 0 do
+        if values[index] == input then values.remove(index) end
+        index = index - 1
+    end
+end
+
+fn find_window_input(nativeWindow)
+    local values = WindowInputRegistry.values
+    local index = 0
+    while index < values.length() do
+        local input = values[index]
+        if input ~= null and input.native_window == nativeWindow then return input end
+        index = index + 1
+    end
+    return null
+end
+
 fn wheel_delta_from_wparam(wparam:u64) -> i32
     local high:i64 = wparam / 65536 % 65536
     if high >= 32768 then high = high - 65536 end
@@ -5866,11 +5910,11 @@ fn wheel_delta_from_wparam(wparam:u64) -> i32
 end
 
 fn lazyui_window_proc(window:handle,message:u32,wparam:u64,lparam:i64) -> i64
-    -- GLFW stores the WindowInput object on GLFWwindow*, so map the HWND back
-    -- through the active context. LazyUI windows process events on the owning
-    -- thread and the current context remains attached throughout the loop.
-    local glfwWindow = GLFW.glfwGetCurrentContext()
-    local input:WindowInput = GLFW.glfwGetWindowUserPointer(glfwWindow)
+    -- Vulkan windows do not have an OpenGL current context. Resolve the input
+    -- bridge directly from the HWND registry instead of calling
+    -- glfwGetCurrentContext(), which returns null for Vulkan and previously
+    -- crashed as soon as Windows delivered the first message.
+    local input:WindowInput = find_window_input(window)
     if input ~= null and input.document ~= null then
         if message == Win32.WM_MOUSEWHEEL then
             local wheelY:f32 = wheel_delta_from_wparam(wparam) / 120.0
@@ -5903,4 +5947,10 @@ export fn connect_window_input(window:ptr,document:Document) -> WindowInput
     local input = WindowInput.new()
     input.attach(window,document)
     return input
+end
+
+-- LSG-friendly overload. The caller passes the graphics Window object; the
+-- native handle stays inside the graphics/UI bridge rather than application code.
+export fn connect_graphics_input(window:LSG.Window,document:Document) -> WindowInput
+    return connect_window_input(window.handle,document)
 end

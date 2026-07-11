@@ -1,0 +1,21 @@
+shader CameraCube
+vertex
+    input position = Vector3
+    output color = Color3
+    uniform model = Matrix4
+    uniform view = Matrix4
+    uniform projection = Matrix4
+
+    main = fn()
+        screen.position = projection * view * model * Vector4(position,1.0)
+        color = position * 0.5 + 0.5
+    end
+end
+fragment
+    input color = Color3
+    output finalColor = Color4
+    main = fn()
+        finalColor = Color4(color,1.0)
+    end
+end
+end

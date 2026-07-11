@@ -13,6 +13,7 @@ struct SurfaceData {
     vec4 borderWidths;
     vec4 shadowParams;
     vec4 clipRect;
+    vec4 clipRadii;
     vec4 misc;
     vec4 extra;
     vec4 extra2;
@@ -35,6 +36,7 @@ flat out vec4 cornerRadii;
 flat out vec4 borderWidths;
 flat out vec4 shadowParams;
 flat out vec4 clipRect;
+flat out vec4 clipRadii;
 flat out vec4 misc;
 flat out vec4 extra;
 flat out vec4 extra2;
@@ -65,6 +67,7 @@ void main() {
     borderWidths = surface.borderWidths;
     shadowParams = surface.shadowParams;
     clipRect = surface.clipRect;
+    clipRadii = surface.clipRadii;
     misc = surface.misc;
     extra = surface.extra;
     extra2 = surface.extra2;
@@ -84,6 +87,7 @@ flat in vec4 cornerRadii;
 flat in vec4 borderWidths;
 flat in vec4 shadowParams;
 flat in vec4 clipRect;
+flat in vec4 clipRadii;
 flat in vec4 misc;
 flat in vec4 extra;
 flat in vec4 extra2;
@@ -146,8 +150,14 @@ vec4 selectedBorderColor(vec2 point) {
 }
 
 void main() {
+    float clipCoverage = 1.0;
     if (clipRect.z > 0.0 && clipRect.w > 0.0) {
-        if (pixelPosition.x < clipRect.x || pixelPosition.y < clipRect.y || pixelPosition.x > clipRect.x + clipRect.z || pixelPosition.y > clipRect.y + clipRect.w) discard;
+        vec2 clipCenter = clipRect.xy + clipRect.zw * 0.5;
+        vec2 clipHalf = max(clipRect.zw * 0.5, vec2(0.0));
+        float clipDistance = roundedBoxDistance(pixelPosition - clipCenter, clipHalf, clipRadii);
+        float clipAA = max(fwidth(clipDistance), 0.75);
+        clipCoverage = 1.0 - smoothstep(-clipAA, clipAA, clipDistance);
+        if (clipCoverage <= 0.001) discard;
     }
 
     vec2 center = boxRect.xy + boxRect.zw * 0.5;
@@ -211,7 +221,7 @@ void main() {
         result = over(result, vec4(extra.rgb, outlineAlpha));
     }
 
-    result.a *= misc.x;
+    result.a *= misc.x * clipCoverage;
     if (result.a <= 0.001) discard;
     outputColor = result;
 }
@@ -224,6 +234,7 @@ struct GlyphData {
     vec4 uvRect;
     vec4 color;
     vec4 clipRect;
+    vec4 clipRadii;
 };
 
 layout(std430,binding=0) readonly buffer LazyUITextBuffer {
@@ -234,6 +245,7 @@ uniform vec2 viewport;
 out vec2 uv;
 flat out vec4 textColor;
 flat out vec4 clipRect;
+flat out vec4 clipRadii;
 out vec2 pixelPosition;
 
 const vec2 corners[4] = vec2[4](
@@ -248,6 +260,7 @@ void main() {
     uv = mix(glyph.uvRect.xy,glyph.uvRect.zw,corner);
     textColor = glyph.color;
     clipRect = glyph.clipRect;
+    clipRadii = glyph.clipRadii;
     vec2 ndc = (pixelPosition / viewport) * vec2(2.0,-2.0) + vec2(-1.0,1.0);
     gl_Position = vec4(ndc,0.0,1.0);
 }
@@ -257,17 +270,32 @@ export const TEXT_FRAGMENT = `#version 460 core
 in vec2 uv;
 flat in vec4 textColor;
 flat in vec4 clipRect;
+flat in vec4 clipRadii;
 in vec2 pixelPosition;
 out vec4 color;
 uniform sampler2D fontAtlas;
+float selectedClipRadius(vec2 p, vec4 radii) {
+    if (p.x < 0.0) return p.y < 0.0 ? radii.x : radii.w;
+    return p.y < 0.0 ? radii.y : radii.z;
+}
+float roundedClipCoverage(vec2 pixelPosition, vec4 clipRect, vec4 clipRadii) {
+    if (clipRect.z <= 0.0 || clipRect.w <= 0.0) return 1.0;
+    vec2 center = clipRect.xy + clipRect.zw * 0.5;
+    vec2 halfSize = max(clipRect.zw * 0.5, vec2(0.0));
+    vec2 point = pixelPosition - center;
+    float radius = max(0.0, selectedClipRadius(point, clipRadii));
+    vec2 q = abs(point) - halfSize + vec2(radius);
+    float distanceValue = min(max(q.x,q.y),0.0) + length(max(q,vec2(0.0))) - radius;
+    float aa = max(fwidth(distanceValue),0.75);
+    return 1.0 - smoothstep(-aa,aa,distanceValue);
+}
 void main() {
-    if (clipRect.z > 0.0 && clipRect.w > 0.0) {
-        if (pixelPosition.x < clipRect.x || pixelPosition.y < clipRect.y || pixelPosition.x > clipRect.x + clipRect.z || pixelPosition.y > clipRect.y + clipRect.w) discard;
-    }
+    float clipCoverage = roundedClipCoverage(pixelPosition,clipRect,clipRadii);
+    if (clipCoverage <= 0.001) discard;
     float distanceValue = texture(fontAtlas,uv).r;
     float edge = max(fwidth(distanceValue),0.002);
     float alpha = smoothstep(0.5-edge,0.5+edge,distanceValue);
-    color = vec4(textColor.rgb,textColor.a*alpha);
+    color = vec4(textColor.rgb,textColor.a*alpha*clipCoverage);
     if (color.a <= 0.001) discard;
 }
 `
@@ -278,6 +306,7 @@ struct ImageData {
     vec4 rect;
     vec4 color;
     vec4 clipRect;
+    vec4 clipRadii;
 };
 
 layout(std430,binding=0) readonly buffer LazyUIImageBuffer {
@@ -288,6 +317,7 @@ uniform vec2 viewport;
 out vec2 uv;
 flat out vec4 tint;
 flat out vec4 clipRect;
+flat out vec4 clipRadii;
 out vec2 pixelPosition;
 
 const vec2 corners[4] = vec2[4](
@@ -302,6 +332,7 @@ void main() {
     uv = corner;
     tint = image.color;
     clipRect = image.clipRect;
+    clipRadii = image.clipRadii;
     vec2 ndc = (pixelPosition / viewport) * vec2(2.0,-2.0) + vec2(-1.0,1.0);
     gl_Position = vec4(ndc,0.0,1.0);
 }
@@ -311,10 +342,26 @@ export const IMAGE_FRAGMENT = `#version 460 core
 in vec2 uv;
 flat in vec4 tint;
 flat in vec4 clipRect;
+flat in vec4 clipRadii;
 in vec2 pixelPosition;
 out vec4 color;
 uniform sampler2D sourceTexture;
-void main(){if(clipRect.z>0.0&&clipRect.w>0.0){if(pixelPosition.x<clipRect.x||pixelPosition.y<clipRect.y||pixelPosition.x>clipRect.x+clipRect.z||pixelPosition.y>clipRect.y+clipRect.w)discard;}color=texture(sourceTexture,uv)*tint;if(color.a<=0.001)discard;}
+float selectedClipRadius(vec2 p, vec4 radii) {
+    if (p.x < 0.0) return p.y < 0.0 ? radii.x : radii.w;
+    return p.y < 0.0 ? radii.y : radii.z;
+}
+float roundedClipCoverage(vec2 pixelPosition, vec4 clipRect, vec4 clipRadii) {
+    if (clipRect.z <= 0.0 || clipRect.w <= 0.0) return 1.0;
+    vec2 center = clipRect.xy + clipRect.zw * 0.5;
+    vec2 halfSize = max(clipRect.zw * 0.5, vec2(0.0));
+    vec2 point = pixelPosition - center;
+    float radius = max(0.0, selectedClipRadius(point, clipRadii));
+    vec2 q = abs(point) - halfSize + vec2(radius);
+    float distanceValue = min(max(q.x,q.y),0.0) + length(max(q,vec2(0.0))) - radius;
+    float aa = max(fwidth(distanceValue),0.75);
+    return 1.0 - smoothstep(-aa,aa,distanceValue);
+}
+void main(){float clipCoverage=roundedClipCoverage(pixelPosition,clipRect,clipRadii);if(clipCoverage<=0.001)discard;color=texture(sourceTexture,uv)*tint;color.a*=clipCoverage;if(color.a<=0.001)discard;}
 `
 
 export const SOLID_VERTEX = `#version 460 core
@@ -322,17 +369,35 @@ layout(location=0) in vec2 position;
 layout(location=1) in vec2 unusedUV;
 layout(location=2) in vec4 inputColor;
 layout(location=3) in vec4 inputClip;
+layout(location=4) in vec4 inputClipRadii;
 uniform vec2 viewport;
 out vec4 vertexColor;
 out vec4 clipRect;
+out vec4 clipRadii;
 out vec2 pixelPosition;
-void main(){pixelPosition=position;vertexColor=inputColor;clipRect=inputClip;vec2 ndc=(position/viewport)*vec2(2.0,-2.0)+vec2(-1.0,1.0);gl_Position=vec4(ndc,0.0,1.0);}
+void main(){pixelPosition=position;vertexColor=inputColor;clipRect=inputClip;clipRadii=inputClipRadii;vec2 ndc=(position/viewport)*vec2(2.0,-2.0)+vec2(-1.0,1.0);gl_Position=vec4(ndc,0.0,1.0);}
 `
 
 export const SOLID_FRAGMENT = `#version 460 core
 in vec4 vertexColor;
 in vec4 clipRect;
+in vec4 clipRadii;
 in vec2 pixelPosition;
 out vec4 color;
-void main(){if(clipRect.z>0.0&&clipRect.w>0.0){if(pixelPosition.x<clipRect.x||pixelPosition.y<clipRect.y||pixelPosition.x>clipRect.x+clipRect.z||pixelPosition.y>clipRect.y+clipRect.w)discard;}color=vertexColor;if(color.a<=0.001)discard;}
+float selectedClipRadius(vec2 p, vec4 radii) {
+    if (p.x < 0.0) return p.y < 0.0 ? radii.x : radii.w;
+    return p.y < 0.0 ? radii.y : radii.z;
+}
+float roundedClipCoverage(vec2 pixelPosition, vec4 clipRect, vec4 clipRadii) {
+    if (clipRect.z <= 0.0 || clipRect.w <= 0.0) return 1.0;
+    vec2 center = clipRect.xy + clipRect.zw * 0.5;
+    vec2 halfSize = max(clipRect.zw * 0.5, vec2(0.0));
+    vec2 point = pixelPosition - center;
+    float radius = max(0.0, selectedClipRadius(point, clipRadii));
+    vec2 q = abs(point) - halfSize + vec2(radius);
+    float distanceValue = min(max(q.x,q.y),0.0) + length(max(q,vec2(0.0))) - radius;
+    float aa = max(fwidth(distanceValue),0.75);
+    return 1.0 - smoothstep(-aa,aa,distanceValue);
+}
+void main(){float clipCoverage=roundedClipCoverage(pixelPosition,clipRect,clipRadii);if(clipCoverage<=0.001)discard;color=vertexColor;color.a*=clipCoverage;if(color.a<=0.001)discard;}
 `

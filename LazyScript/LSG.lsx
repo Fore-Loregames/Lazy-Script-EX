@@ -1,0 +1,1851 @@
+-- LazyScript Graphics (LSG)
+-- -------------------------
+-- The beginner-facing graphics API. OpenGL, Vulkan, and GLFW stay behind this module.
+-- Game code chooses a backend, opens a window, creates resources, and draws without
+-- importing native graphics bindings directly.
+
+use "bindings/GLFW/GLFW.lsx" as GLFW
+use "bindings/OpenGL/OpenGL46.lsx" as GL
+use "bindings/Graphics/Texture2D.lsx" as TextureLoader
+use "bindings/Graphics/STBImage.lsx" as STBImage
+use "bindings/Platform/Win32.lsx" as Win32
+use "bindings/Vulkan/Vulkan.lsx" as Vulkan
+use "bindings/Math/GLM.lsx" as GLM
+
+export const OPENGL = 0
+export const VULKAN = 1
+
+export const TRIANGLES = GL.GL_TRIANGLES
+export const TRIANGLE_STRIP = GL.GL_TRIANGLE_STRIP
+export const LINES = GL.GL_LINES
+export const POINTS = GL.GL_POINTS
+
+export const COLOR = GL.GL_COLOR_BUFFER_BIT
+export const DEPTH = GL.GL_DEPTH_BUFFER_BIT
+export const STENCIL = GL.GL_STENCIL_BUFFER_BIT
+
+export const STATIC = GL.GL_STATIC_DRAW
+export const DYNAMIC = GL.GL_DYNAMIC_DRAW
+export const STREAM = GL.GL_STREAM_DRAW
+
+export const NEAREST = GL.GL_NEAREST
+export const LINEAR = GL.GL_LINEAR
+
+export static const Key = {
+    Escape = GLFW.GLFW_KEY_ESCAPE
+    Space = GLFW.GLFW_KEY_SPACE
+    Enter = GLFW.GLFW_KEY_ENTER
+    One = GLFW.GLFW_KEY_1
+    Two = GLFW.GLFW_KEY_2
+    Three = GLFW.GLFW_KEY_3
+    Four = GLFW.GLFW_KEY_4
+    Left = GLFW.GLFW_KEY_LEFT
+    Right = GLFW.GLFW_KEY_RIGHT
+    Up = GLFW.GLFW_KEY_UP
+    Down = GLFW.GLFW_KEY_DOWN
+    A = GLFW.GLFW_KEY_A
+    B = GLFW.GLFW_KEY_B
+    D = GLFW.GLFW_KEY_D
+    E = GLFW.GLFW_KEY_E
+    F = GLFW.GLFW_KEY_F
+    G = GLFW.GLFW_KEY_G
+    Q = GLFW.GLFW_KEY_Q
+    R = GLFW.GLFW_KEY_R
+    S = GLFW.GLFW_KEY_S
+    W = GLFW.GLFW_KEY_W
+    Minus = GLFW.GLFW_KEY_MINUS
+    Equal = GLFW.GLFW_KEY_EQUAL
+}
+
+export static const Modifier = {
+    Shift = GLFW.GLFW_MOD_SHIFT
+    Control = GLFW.GLFW_MOD_CONTROL
+    Alt = GLFW.GLFW_MOD_ALT
+    Super = GLFW.GLFW_MOD_SUPER
+}
+
+export static const Mouse = {
+    Left = GLFW.GLFW_MOUSE_BUTTON_LEFT
+    Middle = GLFW.GLFW_MOUSE_BUTTON_MIDDLE
+    Right = GLFW.GLFW_MOUSE_BUTTON_RIGHT
+}
+
+export static const Runtime = {
+    libraries_ready:bool = false
+    glfw_ready:bool = false
+    opengl_ready:bool = false
+    windows:i32 = 0
+    error_message:string = null
+    graphics_backend:i32 = OPENGL
+    active_context:ptr = 0
+    active_width:i32 = 1
+    active_height:i32 = 1
+    ray_tracing:bool = false
+
+    prepare = fn()
+        if self.glfw_ready then return true end
+        if GLFW.lsxLoadLibraries() < 1 then
+            self.error_message = "Could not load glfw3.dll. Run setup-runtime.bat first."
+            return false
+        end
+        self.libraries_ready = true
+        if GLFW.glfwInit() == 0 then
+            self.error_message = "GLFW could not start."
+            GLFW.lsxUnloadLibraries()
+            self.libraries_ready = false
+            return false
+        end
+        self.glfw_ready = true
+        return true
+    end
+
+    prepare_opengl = fn()
+        if self.opengl_ready then return true end
+        if GL.lsxLoadOpenGL() < 1 then
+            self.error_message = "OpenGL functions could not be loaded."
+            return false
+        end
+        self.opengl_ready = true
+        return true
+    end
+
+    release_window = fn()
+        if self.windows > 0 then self.windows = self.windows - 1 end
+        if self.windows > 0 then return end
+        if self.glfw_ready then GLFW.glfwTerminate() end
+        if self.libraries_ready then GLFW.lsxUnloadLibraries() end
+        self.opengl_ready = false
+        self.glfw_ready = false
+        self.libraries_ready = false
+        self.error_message = null
+        self.active_context = 0
+        self.active_width = 1
+        self.active_height = 1
+    end
+}
+
+export const WindowSize = {
+    width:i32 = 0
+    height:i32 = 0
+
+    refresh = fn(window)
+        if window.handle ~= 0 then
+            GLFW.glfwGetWindowSize(window.handle,self,memory.ptr(self,4))
+        end
+        return self
+    end
+
+    destroy = fn()
+        self.width = 0
+        self.height = 0
+    end
+}
+
+export fn window_size() -> WindowSize
+    return WindowSize.new()
+end
+
+export const Cursor = {
+    x:f32 = 0.0
+    y:f32 = 0.0
+
+    refresh = fn(window)
+        if window.handle ~= 0 then
+            GLFW.glfwGetCursorPos(window.handle,self,memory.ptr(self,4))
+        end
+        return self
+    end
+
+    destroy = fn()
+        self.x = 0.0
+        self.y = 0.0
+    end
+}
+
+export fn cursor() -> Cursor
+    return Cursor.new()
+end
+
+export const Window = {
+    -- Width and height intentionally live first so GLFW can write both values
+    -- directly into this object without a short-lived helper object.
+    width:i32 = 0
+    height:i32 = 0
+    handle:ptr = 0
+    title:string = null
+    error_message:string = null
+    owns_runtime:bool = false
+    graphics_backend:i32 = OPENGL
+    graphics_context:ptr = 0
+    frame_started:bool = false
+    frame_size_ready:bool = false
+    fps_buffer:u64 = 0
+    fps_title:string = null
+    fps_prefix_length:i64 = 0
+    fps_frames:i64 = 0
+    fps_last:f32 = 0.0
+    fps_enabled:bool = true
+
+    prepare_fps_title = fn()
+        if self.fps_buffer ~= 0 then memory.free(self.fps_buffer) self.fps_buffer = 0 end
+        self.fps_title = null
+        self.fps_prefix_length = 0
+        self.fps_frames = 0
+        self.fps_last = GLFW.glfwGetTime()
+        if self.title == null then return false end
+        local suffix = " | FPS: "
+        local titleLength = string.length(self.title)
+        local suffixLength = string.length(suffix)
+        local capacity = titleLength + suffixLength + 24
+        self.fps_buffer = memory.alloc(capacity)
+        if self.fps_buffer == 0 then return false end
+        local index = 0
+        while index < titleLength do
+            memory.write_u8(self.fps_buffer,index,string.byte_at(self.title,index))
+            index += 1
+        end
+        local suffixIndex = 0
+        while suffixIndex < suffixLength do
+            memory.write_u8(self.fps_buffer,index,string.byte_at(suffix,suffixIndex))
+            index += 1
+            suffixIndex += 1
+        end
+        self.fps_prefix_length = index
+        memory.write_u8(self.fps_buffer,index,48)
+        memory.write_u8(self.fps_buffer,index + 1,0)
+        self.fps_title = string.from_utf8(self.fps_buffer)
+        return true
+    end
+
+    update_fps_title = fn()
+        if not self.fps_enabled or self.handle == 0 then return end
+        if self.fps_buffer == 0 and not self.prepare_fps_title() then return end
+        self.fps_frames += 1
+        -- Window-title measurement must not become the benchmark bottleneck.
+        -- Checking the clock once per 32 presents keeps the counter useful
+        -- even in multi-thousand-FPS examples without timing every frame.
+        if self.fps_frames % 32 ~= 0 then return end
+        local now = GLFW.glfwGetTime()
+        local elapsed = now - self.fps_last
+        if elapsed < 1.0 then return end
+        -- Divide by the actual sampling interval. At low frame rates the 32nd
+        -- present can arrive well after one second, so displaying the raw frame
+        -- count would over-report performance.
+        local number:i64 = self.fps_frames * 1.0 / elapsed + 0.5
+        local digits = 1
+        local probe = number
+        while probe >= 10 do
+            probe = probe / 10
+            digits += 1
+        end
+        local cursor = self.fps_prefix_length + digits - 1
+        memory.write_u8(self.fps_buffer,cursor + 1,0)
+        if number == 0 then
+            memory.write_u8(self.fps_buffer,cursor,48)
+        else
+            while number > 0 do
+                memory.write_u8(self.fps_buffer,cursor,48 + number % 10)
+                number = number / 10
+                cursor -= 1
+            end
+        end
+        GLFW.glfwSetWindowTitle(self.handle,self.fps_title)
+        self.fps_frames = 0
+        self.fps_last = now
+    end
+
+    set_fps_counter = fn(value)
+        self.fps_enabled = value
+        if value then
+            self.prepare_fps_title()
+        else
+            if self.handle ~= 0 then GLFW.glfwSetWindowTitle(self.handle,self.title) end
+        end
+    end
+
+    -- Compatibility alias. New code should use set_fps_counter().
+    show_fps = fn(value)
+        self.set_fps_counter(value)
+    end
+
+    ready = fn()
+        if self.handle == 0 then return false end
+        if self.graphics_backend == VULKAN then return Vulkan.ready(self.graphics_context) end
+        return true
+    end
+
+    error = fn()
+        if self.error_message ~= null then return self.error_message end
+        if self.graphics_backend == VULKAN and self.graphics_context ~= 0 and not Vulkan.ready(self.graphics_context) then return Vulkan.error(self.graphics_context) end
+        if Runtime.error_message ~= null then return Runtime.error_message end
+        if self.ready() then return "No window error" end
+        return "The window was not created"
+    end
+
+    refresh = fn()
+        if self.handle == 0 then return end
+        GLFW.glfwGetFramebufferSize(self.handle,self,memory.ptr(self,4))
+        if self.width < 1 then self.width = 1 end
+        if self.height < 1 then self.height = 1 end
+        if self.graphics_backend == VULKAN and Runtime.active_context == self.graphics_context then
+            Runtime.active_width = self.width
+            Runtime.active_height = self.height
+        end
+    end
+
+    running = fn()
+        if self.handle == 0 then return false end
+        self.refresh()
+        self.frame_size_ready = true
+        return GLFW.glfwWindowShouldClose(self.handle) == 0
+    end
+
+    close = fn()
+        if self.handle ~= 0 then GLFW.glfwSetWindowShouldClose(self.handle,1) end
+    end
+
+    set_title = fn(value)
+        self.title = value
+        self.prepare_fps_title()
+        if self.handle ~= 0 then GLFW.glfwSetWindowTitle(self.handle,value) end
+    end
+
+    -- Compatibility alias. New code should use set_title().
+    rename = fn(value)
+        self.set_title(value)
+    end
+
+    is_key_down = fn(key)
+        if self.handle == 0 then return false end
+        return GLFW.glfwGetKey(self.handle,key) == GLFW.GLFW_PRESS
+    end
+
+    -- Compatibility alias. New code should use is_key_down().
+    key_down = fn(key)
+        return self.is_key_down(key)
+    end
+
+    is_mouse_down = fn(button)
+        if self.handle == 0 then return false end
+        return GLFW.glfwGetMouseButton(self.handle,button) == GLFW.GLFW_PRESS
+    end
+
+    -- Compatibility alias. New code should use is_mouse_down().
+    mouse_down = fn(button)
+        return self.is_mouse_down(button)
+    end
+
+    cursor_position = fn(position)
+        return position.refresh(self)
+    end
+
+    -- Compatibility alias. New code should use cursor_position().
+    cursor = fn(position)
+        return self.cursor_position(position)
+    end
+
+    begin = fn(red,green,blue)
+        if not self.frame_size_ready then self.refresh() end
+        self.frame_size_ready = true
+        if self.graphics_backend == VULKAN then
+            Runtime.active_context = self.graphics_context
+            self.frame_started = Vulkan.begin(self.graphics_context,self.width,self.height,red,green,blue,1.0)
+            return
+        end
+        GL.glViewport(0,0,self.width,self.height)
+        GL.glClearColor(red,green,blue,1.0)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+    end
+
+    begin_3d = fn(red,green,blue)
+        self.begin(red,green,blue)
+        if self.graphics_backend == OPENGL then GL.glClear(GL.GL_COLOR_BUFFER_BIT + GL.GL_DEPTH_BUFFER_BIT) end
+    end
+
+    end = fn()
+        if self.handle == 0 then return false end
+        if self.graphics_backend == VULKAN then
+            local presented = true
+            if self.frame_started then presented = Vulkan.present(self.graphics_context) end
+            self.frame_started = false
+            self.frame_size_ready = false
+            GLFW.glfwPollEvents()
+            self.update_fps_title()
+            if not presented then
+                self.error_message = Vulkan.error(self.graphics_context)
+                Win32.MessageBoxA(0,self.error_message,"LazyScript Vulkan",Win32.MB_OK + Win32.MB_ICONERROR)
+                self.close()
+                return false
+            end
+            return true
+        end
+        GLFW.glfwSwapBuffers(self.handle)
+        self.frame_size_ready = false
+        GLFW.glfwPollEvents()
+        self.update_fps_title()
+        return true
+    end
+
+    -- Compatibility alias. New code should use end().
+    present = fn()
+        return self.end()
+    end
+
+    activate = fn()
+        if self.graphics_backend == OPENGL and self.handle ~= 0 then GLFW.glfwMakeContextCurrent(self.handle) end
+        if self.graphics_backend == VULKAN then
+            Runtime.active_context = self.graphics_context
+            Runtime.active_width = self.width
+            Runtime.active_height = self.height
+        end
+    end
+
+    -- Compatibility alias. New code should use activate().
+    make_current = fn()
+        self.activate()
+    end
+
+    -- Enables or disables presentation synchronization on both backends.
+    -- Vulkan safely recreates the swapchain and selects the best supported
+    -- present mode: FIFO when enabled, IMMEDIATE when disabled, then MAILBOX
+    -- or FIFO_RELAXED as driver-supported fallbacks.
+    set_vsync = fn(value)
+        if self.graphics_backend == VULKAN then
+            if self.graphics_context == 0 then return false end
+            return Vulkan.set_vsync(self.graphics_context,value)
+        end
+        self.activate()
+        if value then GLFW.glfwSwapInterval(1) else GLFW.glfwSwapInterval(0) end
+        return true
+    end
+
+    -- Compatibility alias. New code should use set_vsync().
+    vsync = fn(value)
+        return self.set_vsync(value)
+    end
+
+    set_icon = fn(image:PixelImage)
+        if self.handle == 0 or image == null or not image.ready() then return false end
+        GLFW.setWindowIconRGBA(self.handle,image.width,image.height,image.bytes.byte_data())
+        return true
+    end
+
+    destroy = fn()
+        if self.handle == 0 then return end
+        if self.graphics_backend == VULKAN and self.graphics_context ~= 0 then
+            Vulkan.destroy(self.graphics_context)
+            if Runtime.active_context == self.graphics_context then
+                Runtime.active_context = 0
+                Runtime.active_width = 1
+                Runtime.active_height = 1
+            end
+            self.graphics_context = 0
+        end
+        GLFW.glfwDestroyWindow(self.handle)
+        self.handle = 0
+        self.width = 0
+        self.height = 0
+        if self.fps_buffer ~= 0 then memory.free(self.fps_buffer) self.fps_buffer = 0 end
+        self.fps_title = null
+        self.fps_prefix_length = 0
+        self.fps_frames = 0
+        self.fps_last = 0.0
+        if self.owns_runtime then Runtime.release_window() end
+        self.owns_runtime = false
+    end
+}
+
+fn open_internal(title,width,height,shared,visible) -> Window
+    local result = Window.new()
+    result.title = title
+    result.width = width
+    result.height = height
+    result.graphics_backend = Runtime.graphics_backend
+
+    if not Runtime.prepare() then
+        result.error_message = Runtime.error_message
+        return result
+    end
+
+    GLFW.glfwDefaultWindowHints()
+    GLFW.glfwWindowHint(GLFW.GLFW_RESIZABLE,GLFW.GLFW_TRUE)
+    if visible then GLFW.glfwWindowHint(GLFW.GLFW_VISIBLE,GLFW.GLFW_TRUE) else GLFW.glfwWindowHint(GLFW.GLFW_VISIBLE,GLFW.GLFW_FALSE) end
+
+    if result.graphics_backend == VULKAN then
+        GLFW.glfwWindowHint(GLFW.GLFW_CLIENT_API,GLFW.GLFW_NO_API)
+        shared = 0
+    else
+        GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
+        GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
+        GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
+    end
+
+    result.handle = GLFW.glfwCreateWindow(width,height,title,0,shared)
+    if result.handle == 0 then
+        result.error_message = "GLFW could not create the window."
+        if Runtime.windows == 0 then Runtime.release_window() end
+        return result
+    end
+
+    if result.graphics_backend == VULKAN then
+        result.graphics_context = Vulkan.create(result.handle,width,height)
+        if not Vulkan.ready(result.graphics_context) then
+            result.error_message = Vulkan.error(result.graphics_context)
+            Vulkan.destroy(result.graphics_context)
+            result.graphics_context = 0
+            GLFW.glfwDestroyWindow(result.handle)
+            result.handle = 0
+            if Runtime.windows == 0 then Runtime.release_window() end
+            return result
+        end
+        Runtime.active_context = result.graphics_context
+        Runtime.active_width = width
+        Runtime.active_height = height
+    else
+        GLFW.glfwMakeContextCurrent(result.handle)
+        GLFW.glfwSwapInterval(1)
+        if not Runtime.prepare_opengl() then
+            result.error_message = Runtime.error_message
+            GLFW.glfwDestroyWindow(result.handle)
+            result.handle = 0
+            if Runtime.windows == 0 then Runtime.release_window() end
+            return result
+        end
+    end
+
+    Runtime.windows += 1
+    result.owns_runtime = true
+    result.refresh()
+    result.prepare_fps_title()
+    return result
+end
+
+export fn use_opengl()
+    if Runtime.windows > 0 then return false end
+    Runtime.graphics_backend = OPENGL
+    return true
+end
+
+export fn use_vulkan()
+    if Runtime.windows > 0 then return false end
+    Runtime.graphics_backend = VULKAN
+    return true
+end
+
+export fn set_ray_tracing(value)
+    Runtime.ray_tracing = value
+    return true
+end
+
+-- Compatibility aliases. New code should use set_ray_tracing().
+export fn enable_ray_tracing()
+    return set_ray_tracing(true)
+end
+
+export fn disable_ray_tracing()
+    return set_ray_tracing(false)
+end
+
+export fn is_ray_tracing_enabled()
+    return Runtime.ray_tracing
+end
+
+export fn ray_tracing_enabled()
+    return is_ray_tracing_enabled()
+end
+
+export fn supports_hardware_ray_tracing()
+    return supports_ray_queries() or supports_ray_pipelines()
+end
+
+export fn hardware_ray_tracing_supported()
+    return supports_hardware_ray_tracing()
+end
+
+export fn current_backend()
+    return Runtime.graphics_backend
+end
+
+export fn backend()
+    return current_backend()
+end
+
+export fn active_context()
+    return Runtime.active_context
+end
+
+export fn context()
+    return active_context()
+end
+
+-- Current frame size. LSSL uses this automatically for ray scenes so resizing
+-- a Vulkan window does not distort the camera.
+export fn frame_width()
+    return Runtime.active_width
+end
+
+export fn frame_height()
+    return Runtime.active_height
+end
+
+export fn render_width()
+    return frame_width()
+end
+
+export fn render_height()
+    return frame_height()
+end
+
+export fn device_name()
+    if Runtime.graphics_backend ~= VULKAN or Runtime.active_context == 0 then return "Vulkan is not active" end
+    return Vulkan.device_name(Runtime.active_context)
+end
+
+export fn vulkan_device_name()
+    return device_name()
+end
+
+-- Diagnostic flight recorder for Vulkan. It writes the first three complete
+-- frames to LazyScriptEX-Vulkan.log beside the running executable.
+export fn set_vulkan_trace(enabled)
+    if Runtime.graphics_backend ~= VULKAN or Runtime.active_context == 0 then return false end
+    return Vulkan.enable_trace(Runtime.active_context,enabled)
+end
+
+export fn enable_vulkan_trace(enabled)
+    return set_vulkan_trace(enabled)
+end
+
+export fn mark_vulkan_trace(marker)
+    if Runtime.graphics_backend == VULKAN and Runtime.active_context ~= 0 then Vulkan.trace_marker(Runtime.active_context,marker) end
+end
+
+export fn vulkan_trace(marker)
+    mark_vulkan_trace(marker)
+end
+
+export fn supports_ray_queries()
+    return Runtime.graphics_backend == VULKAN and Vulkan.ray_query_supported(Runtime.active_context)
+end
+
+export fn ray_query_supported()
+    return supports_ray_queries()
+end
+
+export fn supports_ray_pipelines()
+    return Runtime.graphics_backend == VULKAN and Vulkan.ray_pipeline_supported(Runtime.active_context)
+end
+
+export fn ray_pipeline_supported()
+    return supports_ray_pipelines()
+end
+
+
+-- Shared ray-scene lighting. Engine light components and future model loaders
+-- call these same functions; every ray-enabled LSSL shader sees the result.
+export fn set_ray_sun(directionX,directionY,directionZ,red,green,blue,intensity,ambient)
+    if Runtime.graphics_backend ~= VULKAN or Runtime.active_context == 0 then return false end
+    return Vulkan.set_ray_sun(Runtime.active_context,directionX,directionY,directionZ,red,green,blue,intensity,ambient)
+end
+
+export fn ray_sun(directionX,directionY,directionZ,red,green,blue,intensity,ambient)
+    return set_ray_sun(directionX,directionY,directionZ,red,green,blue,intensity,ambient)
+end
+
+export fn clear_ray_point_lights()
+    if Runtime.graphics_backend == VULKAN and Runtime.active_context ~= 0 then Vulkan.clear_ray_point_lights(Runtime.active_context) end
+end
+
+export fn add_ray_point_light(x,y,z,red,green,blue,intensity,range)
+    if Runtime.graphics_backend ~= VULKAN or Runtime.active_context == 0 then return false end
+    return Vulkan.add_ray_point_light(Runtime.active_context,x,y,z,red,green,blue,intensity,range)
+end
+
+export fn ray_point_light(x,y,z,red,green,blue,intensity,range)
+    return add_ray_point_light(x,y,z,red,green,blue,intensity,range)
+end
+
+export fn ray_scene_triangle_count()
+    if Runtime.graphics_backend ~= VULKAN or Runtime.active_context == 0 then return 0 end
+    return Vulkan.ray_triangle_count(Runtime.active_context)
+end
+
+export fn ray_triangle_count()
+    return ray_scene_triangle_count()
+end
+
+export fn open(title,width,height) -> Window
+    return open_internal(title,width,height,0,true)
+end
+
+export fn open_hidden_window(title,width,height) -> Window
+    return open_internal(title,width,height,0,false)
+end
+
+export fn open_hidden(title,width,height) -> Window
+    return open_hidden_window(title,width,height)
+end
+
+export fn open_shared_window(title,width,height,otherWindow:Window) -> Window
+    return open_internal(title,width,height,otherWindow.handle,true)
+end
+
+export fn open_shared(title,width,height,otherWindow:Window) -> Window
+    return open_shared_window(title,width,height,otherWindow)
+end
+
+export fn show_error(message)
+    Win32.MessageBoxA(0,message,"LazyScript Graphics",Win32.MB_OK + Win32.MB_ICONERROR)
+    return 1
+end
+
+export fn time_seconds()
+    return GLFW.glfwGetTime()
+end
+
+export fn time()
+    return time_seconds()
+end
+
+export fn poll_events()
+    GLFW.glfwPollEvents()
+end
+
+export fn poll()
+    poll_events()
+end
+
+export fn depth_test(value)
+    if value then GL.glEnable(GL.GL_DEPTH_TEST) else GL.glDisable(GL.GL_DEPTH_TEST) end
+end
+
+export fn depth(value)
+    depth_test(value)
+end
+
+export fn face_culling(value)
+    if value then GL.glEnable(GL.GL_CULL_FACE) else GL.glDisable(GL.GL_CULL_FACE) end
+end
+
+export fn culling(value)
+    face_culling(value)
+end
+
+export fn alpha_blending(value)
+    if value then
+        GL.glEnable(GL.GL_BLEND)
+        GL.glBlendFunc(GL.GL_SRC_ALPHA,GL.GL_ONE_MINUS_SRC_ALPHA)
+    else
+        GL.glDisable(GL.GL_BLEND)
+    end
+end
+
+export fn blending(value)
+    alpha_blending(value)
+end
+
+export fn scissor_test(value)
+    if value then GL.glEnable(GL.GL_SCISSOR_TEST) else GL.glDisable(GL.GL_SCISSOR_TEST) end
+end
+
+export fn scissor(value)
+    scissor_test(value)
+end
+
+export fn set_scissor(x,y,width,height)
+    GL.glScissor(x,y,width,height)
+end
+
+export fn scissor_box(x,y,width,height)
+    set_scissor(x,y,width,height)
+end
+
+export fn set_viewport(x,y,width,height)
+    GL.glViewport(x,y,width,height)
+end
+
+export fn viewport(x,y,width,height)
+    set_viewport(x,y,width,height)
+end
+
+export fn clear_screen(red,green,blue,alpha,parts)
+    GL.glClearColor(red,green,blue,alpha)
+    GL.glClear(parts)
+end
+
+export fn clear(red,green,blue,alpha,parts)
+    clear_screen(red,green,blue,alpha,parts)
+end
+
+fn layout_components(layout)
+    local code = layout
+    local total = 0
+    while code > 0 do
+        local size = code % 16
+        if size < 1 or size > 4 then return 0 end
+        total = total + size
+        code = code / 16
+    end
+    return total
+end
+
+fn apply_layout(layout,stride)
+    local code = layout
+    local attribute = 0
+    local offset = 0
+    while code > 0 do
+        local size = code % 16
+        if size < 1 or size > 4 then return false end
+        GL.glVertexAttribPointer(attribute,size,GL.GL_FLOAT,GL.GL_FALSE,stride,offset)
+        GL.glEnableVertexAttribArray(attribute)
+        offset = offset + size * 4
+        attribute = attribute + 1
+        code = code / 16
+    end
+    return attribute > 0
+end
+
+export const Mesh = {
+    vertex_array:u32 = 0
+    vertex_buffer:u32 = 0
+    index_buffer:u32 = 0
+    _native_mesh:ptr = 0
+    count:i32 = 0
+    mode:u32 = GL.GL_TRIANGLES
+    indexed:bool = false
+    ok:bool = false
+    error_message:string = null
+    graphics_backend:i32 = OPENGL
+
+    ready = fn()
+        if self.graphics_backend == VULKAN then
+            if self._native_mesh ~= 0 then return self.ok and Vulkan.mesh_ready(self._native_mesh) end
+            return self.ok and self.count > 0
+        end
+        return self.ok and self.vertex_array ~= 0
+    end
+
+    error = fn()
+        if self.error_message ~= null then return self.error_message end
+        if self.ready() then return "No mesh error" end
+        return "The mesh could not be created"
+    end
+
+    bind = fn()
+        if self.graphics_backend == OPENGL and self.vertex_array ~= 0 then GL.glBindVertexArray(self.vertex_array) end
+    end
+
+    update_vertices = fn(vertices)
+        if not self.ready() or vertices == null or vertices.byte_length() < 1 then return false end
+        if self.graphics_backend == VULKAN then
+            return Vulkan.update_mesh(Runtime.active_context,self._native_mesh,memory.ptr(vertices,0),vertices.byte_length())
+        end
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER,self.vertex_buffer)
+        GL.glBufferSubData(GL.GL_ARRAY_BUFFER,0,vertices.byte_length(),vertices)
+        return GL.glGetError() == GL.GL_NO_ERROR
+    end
+
+
+    -- Compatibility alias. New code should use update_vertices().
+    update = fn(vertices)
+        return self.update_vertices(vertices)
+    end
+
+    -- Vulkan meshes created from a Vector3 position stream automatically join
+    -- the shared ray scene. These controls are ordinary mesh/material state;
+    -- custom LSSL shaders never need to rebuild or traverse the triangles.
+    set_ray_visible = fn(value)
+        if self.graphics_backend ~= VULKAN or self._native_mesh == 0 then return false end
+        return Vulkan.set_mesh_ray_visible(Runtime.active_context,self._native_mesh,value)
+    end
+
+    ray_visible = fn(value)
+        return self.set_ray_visible(value)
+    end
+
+    set_ray_transform = fn(matrix:GLM.Mat4)
+        if self.graphics_backend ~= VULKAN or self._native_mesh == 0 or matrix == null then return false end
+        return Vulkan.set_mesh_ray_transform(Runtime.active_context,self._native_mesh,memory.ptr(matrix.data,0))
+    end
+
+    ray_transform = fn(matrix:GLM.Mat4)
+        return self.set_ray_transform(matrix)
+    end
+
+    set_ray_material = fn(red,green,blue,roughness,metallic,emissive)
+        if self.graphics_backend ~= VULKAN or self._native_mesh == 0 then return false end
+        return Vulkan.set_mesh_ray_material(Runtime.active_context,self._native_mesh,red,green,blue,1.0,roughness,metallic,emissive)
+    end
+
+    ray_material = fn(red,green,blue,roughness,metallic,emissive)
+        return self.set_ray_material(red,green,blue,roughness,metallic,emissive)
+    end
+
+    set_ray_material_rgba = fn(red,green,blue,alpha,roughness,metallic,emissive)
+        if self.graphics_backend ~= VULKAN or self._native_mesh == 0 then return false end
+        return Vulkan.set_mesh_ray_material(Runtime.active_context,self._native_mesh,red,green,blue,alpha,roughness,metallic,emissive)
+    end
+
+    ray_material_rgba = fn(red,green,blue,alpha,roughness,metallic,emissive)
+        return self.set_ray_material_rgba(red,green,blue,alpha,roughness,metallic,emissive)
+    end
+
+    draw = fn()
+        if not self.ready() then return end
+        if self.graphics_backend == VULKAN then
+            if self._native_mesh ~= 0 then Vulkan.draw_mesh(Runtime.active_context,self._native_mesh,1)
+            else Vulkan.draw(Runtime.active_context,self.count,1) end
+            return
+        end
+        GL.glBindVertexArray(self.vertex_array)
+        if self.indexed then
+            GL.glDrawElements(self.mode,self.count,GL.GL_UNSIGNED_INT,0)
+        else
+            GL.glDrawArrays(self.mode,0,self.count)
+        end
+    end
+
+    draw_instances = fn(amount)
+        if not self.ready() then return end
+        if self.graphics_backend == VULKAN then
+            if self._native_mesh ~= 0 then Vulkan.draw_mesh(Runtime.active_context,self._native_mesh,amount)
+            else Vulkan.draw(Runtime.active_context,self.count,amount) end
+            return
+        end
+        GL.glBindVertexArray(self.vertex_array)
+        if self.indexed then
+            GL.glDrawElementsInstanced(self.mode,self.count,GL.GL_UNSIGNED_INT,0,amount)
+        else
+            GL.glDrawArraysInstanced(self.mode,0,self.count,amount)
+        end
+    end
+
+    -- Compatibility alias. New code should use draw_instances().
+    draw_many = fn(amount)
+        self.draw_instances(amount)
+    end
+
+    destroy = fn()
+        if self.graphics_backend == VULKAN then
+            if self._native_mesh ~= 0 then Vulkan.destroy_mesh(Runtime.active_context,self._native_mesh) end
+            self._native_mesh = 0
+            self.count = 0
+            self.ok = false
+            self.error_message = null
+            return
+        end
+        if self.index_buffer ~= 0 then GL.deleteBuffer(self.index_buffer) self.index_buffer = 0 end
+        if self.vertex_buffer ~= 0 then GL.deleteBuffer(self.vertex_buffer) self.vertex_buffer = 0 end
+        if self.vertex_array ~= 0 then GL.deleteVertexArray(self.vertex_array) self.vertex_array = 0 end
+        self.count = 0
+        self.indexed = false
+        self.ok = false
+        self.error_message = null
+    end
+}
+
+export fn mesh(vertices,layout)
+    local result = Mesh.new()
+    result.graphics_backend = Runtime.graphics_backend
+    local components = layout_components(layout)
+    if Runtime.graphics_backend == VULKAN then
+        if components <= 0 then
+            result.error_message = "The shader has no usable vertex inputs. Use empty_mesh() for vertex.id-only shaders."
+            return result
+        end
+        result.count = vertices.length() / components
+        result._native_mesh = Vulkan.create_mesh(Runtime.active_context,memory.ptr(vertices,0),vertices.byte_length(),components * 4,result.count,layout % 16)
+        if not Vulkan.mesh_ready(result._native_mesh) then
+            result.error_message = Vulkan.mesh_error(result._native_mesh)
+            return result
+        end
+        result.ok = true
+        return result
+    end
+    if components <= 0 then
+        result.error_message = "The shader has no usable vertex inputs."
+        return result
+    end
+
+    local vertexArray = GL.createVertexArray()
+    local vertexBuffer = GL.createBuffer()
+    if vertexArray == 0 or vertexBuffer == 0 then
+        if vertexBuffer ~= 0 then GL.deleteBuffer(vertexBuffer) end
+        if vertexArray ~= 0 then GL.deleteVertexArray(vertexArray) end
+        result.error_message = "OpenGL could not create the vertex array or vertex buffer."
+        return result
+    end
+
+    GL.glBindVertexArray(vertexArray)
+    GL.glBindBuffer(GL.GL_ARRAY_BUFFER,vertexBuffer)
+    GL.glBufferData(GL.GL_ARRAY_BUFFER,vertices.byte_length(),vertices,GL.GL_STATIC_DRAW)
+    local stride = components * 4
+    if not apply_layout(layout,stride) then
+        GL.deleteBuffer(vertexBuffer)
+        GL.deleteVertexArray(vertexArray)
+        result.error_message = "The shader vertex layout is invalid."
+        return result
+    end
+    GL.glBindVertexArray(0)
+
+    result.vertex_array = vertexArray
+    result.vertex_buffer = vertexBuffer
+    result.count = vertices.length() / components
+    result.ok = true
+    return result
+end
+
+export fn mesh_mode(vertices,layout,mode)
+    local result = mesh(vertices,layout)
+    result.mode = mode
+    if result.graphics_backend == VULKAN and mode ~= TRIANGLES then result.set_ray_visible(false) end
+    return result
+end
+
+export fn dynamic_mesh(vertices,layout)
+    local result = Mesh.new()
+    result.graphics_backend = Runtime.graphics_backend
+    local components = layout_components(layout)
+    if Runtime.graphics_backend == VULKAN then
+        if components <= 0 then
+            result.error_message = "The shader has no usable vertex inputs."
+            return result
+        end
+        result.count = vertices.length() / components
+        result._native_mesh = Vulkan.create_mesh(Runtime.active_context,memory.ptr(vertices,0),vertices.byte_length(),components * 4,result.count,layout % 16)
+        if not Vulkan.mesh_ready(result._native_mesh) then
+            result.error_message = Vulkan.mesh_error(result._native_mesh)
+            return result
+        end
+        result.ok = true
+        return result
+    end
+    if components <= 0 then
+        result.error_message = "The shader has no usable vertex inputs."
+        return result
+    end
+
+    local vertexArray = GL.createVertexArray()
+    local vertexBuffer = GL.createBuffer()
+    if vertexArray == 0 or vertexBuffer == 0 then
+        if vertexBuffer ~= 0 then GL.deleteBuffer(vertexBuffer) end
+        if vertexArray ~= 0 then GL.deleteVertexArray(vertexArray) end
+        result.error_message = "OpenGL could not create the dynamic vertex array or vertex buffer."
+        return result
+    end
+
+    GL.glBindVertexArray(vertexArray)
+    GL.glBindBuffer(GL.GL_ARRAY_BUFFER,vertexBuffer)
+    GL.glBufferData(GL.GL_ARRAY_BUFFER,vertices.byte_length(),vertices,GL.GL_DYNAMIC_DRAW)
+    local stride = components * 4
+    if not apply_layout(layout,stride) then
+        GL.deleteBuffer(vertexBuffer)
+        GL.deleteVertexArray(vertexArray)
+        result.error_message = "The shader vertex layout is invalid."
+        return result
+    end
+    GL.glBindVertexArray(0)
+
+    result.vertex_array = vertexArray
+    result.vertex_buffer = vertexBuffer
+    result.count = vertices.length() / components
+    result.ok = true
+    return result
+end
+
+export fn indexed_mesh(vertices,indices,layout)
+    local result = Mesh.new()
+    result.graphics_backend = Runtime.graphics_backend
+    local components = layout_components(layout)
+    if Runtime.graphics_backend == VULKAN then
+        if components <= 0 then
+            result.error_message = "The shader has no usable vertex inputs."
+            return result
+        end
+        local vertex_count = vertices.length() / components
+        result._native_mesh = Vulkan.create_indexed_mesh(Runtime.active_context,memory.ptr(vertices,0),vertices.byte_length(),components * 4,vertex_count,memory.ptr(indices,0),indices.byte_length(),indices.length(),layout % 16)
+        if not Vulkan.mesh_ready(result._native_mesh) then
+            result.error_message = Vulkan.mesh_error(result._native_mesh)
+            return result
+        end
+        result.count = indices.length()
+        result.indexed = true
+        result.ok = true
+        return result
+    end
+    if components <= 0 then
+        result.error_message = "The shader has no usable vertex inputs."
+        return result
+    end
+
+    local vertexArray = GL.createVertexArray()
+    local vertexBuffer = GL.createBuffer()
+    local indexBuffer = GL.createBuffer()
+    if vertexArray == 0 or vertexBuffer == 0 or indexBuffer == 0 then
+        if indexBuffer ~= 0 then GL.deleteBuffer(indexBuffer) end
+        if vertexBuffer ~= 0 then GL.deleteBuffer(vertexBuffer) end
+        if vertexArray ~= 0 then GL.deleteVertexArray(vertexArray) end
+        result.error_message = "OpenGL could not create the indexed mesh buffers."
+        return result
+    end
+
+    GL.glBindVertexArray(vertexArray)
+    GL.glBindBuffer(GL.GL_ARRAY_BUFFER,vertexBuffer)
+    GL.glBufferData(GL.GL_ARRAY_BUFFER,vertices.byte_length(),vertices,GL.GL_STATIC_DRAW)
+    GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER,indexBuffer)
+    GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER,indices.byte_length(),indices,GL.GL_STATIC_DRAW)
+    local stride = components * 4
+    if not apply_layout(layout,stride) then
+        GL.deleteBuffer(indexBuffer)
+        GL.deleteBuffer(vertexBuffer)
+        GL.deleteVertexArray(vertexArray)
+        result.error_message = "The shader vertex layout is invalid."
+        return result
+    end
+    GL.glBindVertexArray(0)
+
+    result.vertex_array = vertexArray
+    result.vertex_buffer = vertexBuffer
+    result.index_buffer = indexBuffer
+    result.count = indices.length()
+    result.indexed = true
+    result.ok = true
+    return result
+end
+
+export fn indexed_mesh_mode(vertices,indices,layout,mode)
+    local result = indexed_mesh(vertices,indices,layout)
+    result.mode = mode
+    if result.graphics_backend == VULKAN and mode ~= TRIANGLES then result.set_ray_visible(false) end
+    return result
+end
+
+export fn empty_mesh(vertexCount)
+    local result = Mesh.new()
+    result.graphics_backend = Runtime.graphics_backend
+    if Runtime.graphics_backend == VULKAN then
+        result.count = vertexCount
+        result.ok = vertexCount > 0
+        if not result.ok then result.error_message = "A Vulkan mesh needs at least one vertex." end
+        return result
+    end
+    local vertexArray = GL.createVertexArray()
+    if vertexArray == 0 then
+        result.error_message = "OpenGL could not create the empty vertex array."
+        return result
+    end
+    result.vertex_array = vertexArray
+    result.count = vertexCount
+    result.ok = true
+    return result
+end
+
+export const Storage = {
+    id:u32 = 0
+    native_storage:ptr = 0
+    owner_context:ptr = 0
+    graphics_backend:i32 = OPENGL
+    binding:i32 = 0
+    bytes:i64 = 0
+    error_message:string = null
+
+    ready = fn()
+        if self.graphics_backend == VULKAN then return Vulkan.storage_ready(self.native_storage) end
+        return self.id ~= 0
+    end
+
+    error = fn()
+        if self.error_message ~= null then return self.error_message end
+        if self.graphics_backend == VULKAN and self.native_storage ~= 0 then return Vulkan.storage_error(self.native_storage) end
+        if self.ready() then return "No storage error" end
+        return "The storage buffer could not be created"
+    end
+
+    bind = fn()
+        if self.graphics_backend == VULKAN then
+            Vulkan.bind_storage(self.owner_context,self.native_storage,self.binding)
+            return
+        end
+        if self.id ~= 0 then GL.glBindBufferBase(GL.GL_SHADER_STORAGE_BUFFER,self.binding,self.id) end
+    end
+
+    update = fn(values)
+        if not self.ready() or values == null or values.byte_length() < 1 or values.byte_length() > self.bytes then return false end
+        if self.graphics_backend == VULKAN then
+            return Vulkan.update_storage(self.owner_context,self.native_storage,memory.ptr(values,0),values.byte_length())
+        end
+        GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,self.id)
+        GL.glBufferSubData(GL.GL_SHADER_STORAGE_BUFFER,0,values.byte_length(),values)
+        return GL.glGetError() == GL.GL_NO_ERROR
+    end
+
+    read_into = fn(values)
+        if not self.ready() or values == null then return false end
+        local amount = values.byte_length()
+        if amount > self.bytes then amount = self.bytes end
+        if self.graphics_backend == VULKAN then return Vulkan.read_storage(self.owner_context,self.native_storage,memory.ptr(values,0),amount) end
+        GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,self.id)
+        GL.glGetBufferSubData(GL.GL_SHADER_STORAGE_BUFFER,0,amount,values)
+        return true
+    end
+
+    -- Compatibility alias. New code should use read_into().
+    read = fn(values)
+        return self.read_into(values)
+    end
+
+    destroy = fn()
+        if self.graphics_backend == VULKAN then
+            if self.native_storage ~= 0 then Vulkan.destroy_storage(self.owner_context,self.native_storage) end
+            self.native_storage = 0
+            self.owner_context = 0
+        else
+            if self.id ~= 0 then GL.deleteBuffer(self.id) self.id = 0 end
+        end
+        self.bytes = 0
+        self.error_message = null
+    end
+}
+
+export fn storage(values,binding) -> Storage
+    local result = Storage.new()
+    result.graphics_backend = Runtime.graphics_backend
+    result.owner_context = Runtime.active_context
+    result.binding = binding
+    result.bytes = values.byte_length()
+    if Runtime.graphics_backend == VULKAN then
+        result.native_storage = Vulkan.create_storage(Runtime.active_context,memory.ptr(values,0),result.bytes,binding)
+        if not Vulkan.storage_ready(result.native_storage) then result.error_message = Vulkan.storage_error(result.native_storage) end
+        return result
+    end
+    result.id = GL.createBuffer()
+    GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,result.id)
+    GL.glBufferData(GL.GL_SHADER_STORAGE_BUFFER,result.bytes,values,GL.GL_DYNAMIC_COPY)
+    GL.glBindBufferBase(GL.GL_SHADER_STORAGE_BUFFER,binding,result.id)
+    return result
+end
+
+export fn empty_storage(bytes,binding) -> Storage
+    local result = Storage.new()
+    result.graphics_backend = Runtime.graphics_backend
+    result.owner_context = Runtime.active_context
+    result.binding = binding
+    result.bytes = bytes
+    if Runtime.graphics_backend == VULKAN then
+        result.native_storage = Vulkan.create_storage(Runtime.active_context,0,bytes,binding)
+        if not Vulkan.storage_ready(result.native_storage) then result.error_message = Vulkan.storage_error(result.native_storage) end
+        return result
+    end
+    result.id = GL.createBuffer()
+    GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,result.id)
+    GL.glBufferData(GL.GL_SHADER_STORAGE_BUFFER,bytes,0,GL.GL_DYNAMIC_COPY)
+    GL.glBindBufferBase(GL.GL_SHADER_STORAGE_BUFFER,binding,result.id)
+    return result
+end
+
+-- CPU-side RGBA pixels for procedural textures, icons, cursors, and generated images.
+-- The storage is always tightly packed u8 RGBA bytes, so native graphics APIs
+-- never have to guess the element size of a caller-created numeric table.
+export fn rgba(red,green,blue,alpha)
+    return red + green * 256 + blue * 65536 + alpha * 16777216
+end
+
+export const PixelImage = {
+    width:i32 = 0
+    height:i32 = 0
+    bytes = {}
+    ok:bool = false
+    error_message:string = null
+
+    initialize = fn(width,height)
+        self.width = width
+        self.height = height
+        if width < 1 or height < 1 then
+            self.error_message = "Pixel image dimensions must be greater than zero"
+            return false
+        end
+        if not self.bytes.resize_bytes(width * height * 4) then
+            self.error_message = "Could not allocate the pixel image"
+            return false
+        end
+        self.ok = true
+        self.fill(rgba(0,0,0,0))
+        return true
+    end
+
+    ready = fn()
+        return self.ok and self.width > 0 and self.height > 0 and self.bytes.byte_length() >= self.width * self.height * 4
+    end
+
+    error = fn()
+        if self.error_message ~= null then return self.error_message end
+        if self.ready() then return "No pixel image error" end
+        return "The pixel image could not be created"
+    end
+
+    set_pixel = fn(x,y,color)
+        -- Keep this hot path flat. Calling ready() here used to make x/y cross a
+        -- nested method call before the byte offset was calculated, which could
+        -- collapse repeated writes onto the first row in optimized builds.
+        if not self.ok or self.width < 1 or self.height < 1 then return false end
+        if x < 0 or y < 0 or x >= self.width or y >= self.height then return false end
+        if self.bytes.byte_length() < self.width * self.height * 4 then return false end
+        local offset = (y * self.width + x) * 4
+        local data = self.bytes.byte_data()
+        local red = color % 256
+        local green = color / 256 % 256
+        local blue = color / 65536 % 256
+        local alpha = color / 16777216 % 256
+        memory.write_u8(data,offset,red)
+        memory.write_u8(data,offset + 1,green)
+        memory.write_u8(data,offset + 2,blue)
+        memory.write_u8(data,offset + 3,alpha)
+        return true
+    end
+
+    set = fn(x,y,color)
+        return self.set_pixel(x,y,color)
+    end
+
+    set_pixel_rgba = fn(x,y,red,green,blue,alpha)
+        if not self.ok or self.width < 1 or self.height < 1 then return false end
+        if x < 0 or y < 0 or x >= self.width or y >= self.height then return false end
+        if self.bytes.byte_length() < self.width * self.height * 4 then return false end
+        local offset = (y * self.width + x) * 4
+        local data = self.bytes.byte_data()
+        memory.write_u8(data,offset,red)
+        memory.write_u8(data,offset + 1,green)
+        memory.write_u8(data,offset + 2,blue)
+        memory.write_u8(data,offset + 3,alpha)
+        return true
+    end
+
+    set_rgba = fn(x,y,red,green,blue,alpha)
+        return self.set_pixel_rgba(x,y,red,green,blue,alpha)
+    end
+
+    fill = fn(color)
+        if not self.ok or self.width < 1 or self.height < 1 then return false end
+        local byteCount = self.width * self.height * 4
+        if self.bytes.byte_length() < byteCount then return false end
+        local data = self.bytes.byte_data()
+        local red = color % 256
+        local green = color / 256 % 256
+        local blue = color / 65536 % 256
+        local alpha = color / 16777216 % 256
+        local offset = 0
+        while offset < byteCount do
+            memory.write_u8(data,offset,red)
+            memory.write_u8(data,offset + 1,green)
+            memory.write_u8(data,offset + 2,blue)
+            memory.write_u8(data,offset + 3,alpha)
+            offset += 4
+        end
+        return true
+    end
+
+    destroy = fn()
+        self.bytes.destroy()
+        self.width = 0
+        self.height = 0
+        self.ok = false
+        self.error_message = null
+    end
+}
+
+export fn pixel_image(width,height) -> PixelImage
+    local image = PixelImage.new()
+    image.initialize(width,height)
+    return image
+end
+
+export const Texture = {
+    id:u32 = 0
+    native_texture:ptr = 0
+    owner_context:ptr = 0
+    graphics_backend:i32 = OPENGL
+    width:i32 = 0
+    height:i32 = 0
+    ok:bool = false
+    error_message:string = null
+
+    ready = fn()
+        if self.graphics_backend == VULKAN then
+            return self.ok and self.native_texture ~= 0 and Vulkan.texture_ready(self.native_texture)
+        end
+        return self.ok and self.id ~= 0
+    end
+
+    error = fn()
+        if self.error_message ~= null then return self.error_message end
+        if self.graphics_backend == VULKAN and self.native_texture ~= 0 then return Vulkan.texture_error(self.native_texture) end
+        if self.ready() then return "No texture error" end
+        return "The texture could not be created"
+    end
+
+    bind = fn(unit)
+        if self.graphics_backend == VULKAN then
+            Vulkan.bind_texture(self.owner_context,self.native_texture,unit)
+            return
+        end
+        GL.glActiveTexture(GL.GL_TEXTURE0 + unit)
+        GL.glBindTexture(GL.GL_TEXTURE_2D,self.id)
+    end
+
+    destroy = fn()
+        if self.graphics_backend == VULKAN then
+            if self.native_texture ~= 0 then Vulkan.destroy_texture(self.owner_context,self.native_texture) end
+            self.native_texture = 0
+            self.owner_context = 0
+        else
+            if self.id ~= 0 then GL.deleteTexture(self.id) self.id = 0 end
+        end
+        self.width = 0
+        self.height = 0
+        self.ok = false
+        self.error_message = null
+    end
+}
+
+fn failed_texture(message) -> Texture
+    local texture = Texture.new()
+    texture.graphics_backend = Runtime.graphics_backend
+    texture.owner_context = Runtime.active_context
+    texture.error_message = message
+    return texture
+end
+
+fn texture_from_rgba_pointer(width,height,pixels,linear) -> Texture
+    local texture = Texture.new()
+    texture.graphics_backend = Runtime.graphics_backend
+    texture.owner_context = Runtime.active_context
+    texture.width = width
+    texture.height = height
+    if width < 1 or height < 1 or pixels == 0 then
+        texture.error_message = "The texture needs valid dimensions and RGBA pixel data"
+        return texture
+    end
+
+    if Runtime.graphics_backend == VULKAN then
+        texture.native_texture = Vulkan.create_texture(Runtime.active_context,width,height,pixels,width * height * 4,linear)
+        if not Vulkan.texture_ready(texture.native_texture) then
+            texture.error_message = Vulkan.texture_error(texture.native_texture)
+            return texture
+        end
+        texture.ok = true
+        return texture
+    end
+
+    texture.id = GL.createTexture()
+    if texture.id == 0 then
+        texture.error_message = "OpenGL could not create the texture"
+        return texture
+    end
+    GL.glBindTexture(GL.GL_TEXTURE_2D,texture.id)
+    GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT,1)
+    while GL.glGetError() ~= GL.GL_NO_ERROR do end
+    GL.glTexImage2D(GL.GL_TEXTURE_2D,0,GL.GL_RGBA8,width,height,0,GL.GL_RGBA,GL.GL_UNSIGNED_BYTE,pixels)
+    local upload_error = GL.glGetError()
+    GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT,4)
+    local filter = GL.GL_NEAREST
+    if linear then filter = GL.GL_LINEAR end
+    GL.glTexParameteri(GL.GL_TEXTURE_2D,GL.GL_TEXTURE_MIN_FILTER,filter)
+    GL.glTexParameteri(GL.GL_TEXTURE_2D,GL.GL_TEXTURE_MAG_FILTER,filter)
+    if upload_error ~= GL.GL_NO_ERROR then
+        GL.deleteTexture(texture.id)
+        texture.id = 0
+        texture.error_message = "OpenGL rejected the RGBA pixel upload"
+        return texture
+    end
+    texture.ok = true
+    return texture
+end
+
+export fn empty_texture(width,height) -> Texture
+    if width < 1 or height < 1 then return failed_texture("Texture dimensions must be greater than zero") end
+    local image = pixel_image(width,height)
+    if not image.ready() then return failed_texture(image.error()) end
+    image.fill(rgba(0,0,0,0))
+    local texture = texture_from_rgba_pointer(width,height,image.bytes.byte_data(),true)
+    image.destroy()
+    return texture
+end
+
+-- Uploads a PixelImage made with LSG.pixel_image(). This is the safe beginner
+-- path for checkerboards, generated icons, paint canvases, and other CPU pixels.
+export fn texture_from_pixels(image:PixelImage) -> Texture
+    if image == null or not image.ready() then return failed_texture("The procedural pixel image is not ready") end
+    return texture_from_rgba_pointer(image.width,image.height,image.bytes.byte_data(),false)
+end
+
+-- Advanced byte-buffer path. The collection must contain tightly packed RGBA8
+-- bytes created with resize_bytes(), not one integer table entry per pixel.
+export fn texture_from_rgba(width,height,pixels) -> Texture
+    if pixels == null or pixels.byte_length() < width * height * 4 then
+        return failed_texture("The RGBA byte buffer is smaller than width * height * 4")
+    end
+    return texture_from_rgba_pointer(width,height,pixels.byte_data(),false)
+end
+
+fn take_loaded_texture(loaded:TextureLoader.Texture) -> Texture
+    local texture = Texture.new()
+    texture.graphics_backend = OPENGL
+    texture.id = loaded.id
+    texture.width = loaded.width
+    texture.height = loaded.height
+    texture.ok = loaded.valid()
+    texture.error_message = loaded.error_message
+    loaded.id = 0
+    loaded.destroy()
+    return texture
+end
+
+fn load_vulkan_texture(path,flipY) -> Texture
+    local image = STBImage.load_ex(path,STBImage.STBI_RGBA,flipY)
+    if not image.valid() then
+        local message = image.error()
+        image.destroy()
+        return failed_texture(message)
+    end
+    local width = image.width
+    local height = image.height
+    local bytes = image.bytes
+    local pixels = {}
+    if not pixels.resize_bytes(bytes) then
+        image.destroy()
+        return failed_texture("Could not allocate the Vulkan RGBA upload buffer")
+    end
+    if not pixels.copy_bytes_from_ptr(image.pixels(),bytes) then
+        image.destroy()
+        pixels.destroy()
+        return failed_texture("Could not copy the decoded image pixels")
+    end
+    image.destroy()
+    local texture = texture_from_rgba_pointer(width,height,pixels.byte_data(),true)
+    pixels.destroy()
+    return texture
+end
+
+export fn load_texture(path) -> Texture
+    if Runtime.graphics_backend == VULKAN then return load_vulkan_texture(path,false) end
+    return take_loaded_texture(TextureLoader.load(path))
+end
+
+export fn load_texture_flipped(path) -> Texture
+    if Runtime.graphics_backend == VULKAN then return load_vulkan_texture(path,true) end
+    return take_loaded_texture(TextureLoader.load_flipped(path))
+end
+
+export fn load_ui_texture(path) -> Texture
+    if Runtime.graphics_backend == VULKAN then return load_vulkan_texture(path,false) end
+    return take_loaded_texture(TextureLoader.load_ui(path))
+end
+
+export fn load_ui_texture_flipped(path) -> Texture
+    if Runtime.graphics_backend == VULKAN then return load_vulkan_texture(path,true) end
+    return take_loaded_texture(TextureLoader.load_ui_flipped(path))
+end
+
+export const Framebuffer = {
+    id:u32 = 0
+    color:Texture = null
+    width:i32 = 0
+    height:i32 = 0
+    native_framebuffer:ptr = 0
+    owner_context:ptr = 0
+    graphics_backend:i32 = OPENGL
+    error_message:string = null
+
+    ready = fn()
+        if self.graphics_backend == VULKAN then return Vulkan.framebuffer_ready(self.native_framebuffer) end
+        return self.id ~= 0 and self.color ~= null and self.color.ready()
+    end
+
+    error = fn()
+        if self.error_message ~= null then return self.error_message end
+        if self.graphics_backend == VULKAN and self.native_framebuffer ~= 0 then return Vulkan.framebuffer_error(self.native_framebuffer) end
+        if self.ready() then return "No framebuffer error" end
+        return "The framebuffer was not created"
+    end
+
+    begin = fn(red,green,blue)
+        if self.graphics_backend == VULKAN then
+            if self.owner_context == 0 or self.native_framebuffer == 0 then return false end
+            local windowWidth = Runtime.active_width
+            local windowHeight = Runtime.active_height
+            Runtime.active_context = self.owner_context
+            Runtime.active_width = self.width
+            Runtime.active_height = self.height
+            return Vulkan.begin_framebuffer(self.owner_context,self.native_framebuffer,windowWidth,windowHeight,red,green,blue,1.0)
+        end
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER,self.id)
+        GL.glViewport(0,0,self.width,self.height)
+        GL.glClearColor(red,green,blue,1.0)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT + GL.GL_DEPTH_BUFFER_BIT)
+        return true
+    end
+
+    bind_color = fn(unit)
+        if self.graphics_backend == VULKAN then return false end
+        self.color.bind(unit)
+        return true
+    end
+
+    display = fn(window:Window,filter)
+        if not window.frame_size_ready then window.refresh() window.frame_size_ready = true end
+        if self.graphics_backend == VULKAN then
+            window.activate()
+            local linear = filter == LINEAR
+            window.frame_started = Vulkan.show_framebuffer(self.owner_context,self.native_framebuffer,linear)
+            return window.frame_started
+        end
+        GL.glBindFramebuffer(GL.GL_READ_FRAMEBUFFER,self.id)
+        GL.glBindFramebuffer(GL.GL_DRAW_FRAMEBUFFER,0)
+        GL.glBlitFramebuffer(0,0,self.width,self.height,0,0,window.width,window.height,GL.GL_COLOR_BUFFER_BIT,filter)
+        return true
+    end
+
+    -- Compatibility alias. New code should use display().
+    show = fn(window:Window,filter)
+        return self.display(window,filter)
+    end
+
+    destroy = fn()
+        if self.graphics_backend == VULKAN then
+            if self.native_framebuffer ~= 0 then Vulkan.destroy_framebuffer(self.owner_context,self.native_framebuffer) end
+            self.native_framebuffer = 0
+            self.owner_context = 0
+        else
+            if self.color ~= null then self.color.destroy() end
+            if self.id ~= 0 then GL.deleteFramebuffer(self.id) self.id = 0 end
+        end
+        self.width = 0
+        self.height = 0
+    end
+}
+
+export fn framebuffer(width,height) -> Framebuffer
+    local result = Framebuffer.new()
+    result.width = width
+    result.height = height
+    result.graphics_backend = Runtime.graphics_backend
+    if Runtime.graphics_backend == VULKAN then
+        result.owner_context = Runtime.active_context
+        result.native_framebuffer = Vulkan.create_framebuffer(result.owner_context,width,height)
+        if not Vulkan.framebuffer_ready(result.native_framebuffer) then result.error_message = Vulkan.framebuffer_error(result.native_framebuffer) end
+        return result
+    end
+    result.color = empty_texture(width,height)
+    result.id = GL.createFramebuffer()
+    GL.glBindFramebuffer(GL.GL_FRAMEBUFFER,result.id)
+    GL.glFramebufferTexture2D(GL.GL_FRAMEBUFFER,GL.GL_COLOR_ATTACHMENT0,GL.GL_TEXTURE_2D,result.color.id,0)
+    GL.glBindFramebuffer(GL.GL_FRAMEBUFFER,0)
+    return result
+end
+
+export fn render_to_screen()
+    GL.glBindFramebuffer(GL.GL_FRAMEBUFFER,0)
+end
+
+export fn screen()
+    render_to_screen()
+end
+
+export fn graphics_limit(name)
+    if name == "texture_size" then return GL.getInteger(GL.GL_MAX_TEXTURE_SIZE) end
+    if name == "texture_units" then return GL.getInteger(GL.GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS) end
+    if name == "storage_bindings" then return GL.getInteger(GL.GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS) end
+    return 0
+end
+
+export fn integer_limit(name)
+    return graphics_limit(name)
+end
+
+export fn renderer_name()
+    if Runtime.graphics_backend == VULKAN then return Vulkan.device_name(Runtime.active_context) end
+    return GL.getString(GL.GL_RENDERER)
+end
+
+export fn graphics_name()
+    return renderer_name()
+end
+
+export fn renderer_vendor()
+    if Runtime.graphics_backend == VULKAN then return "Vulkan" end
+    return GL.getString(GL.GL_VENDOR)
+end
+
+export fn graphics_vendor()
+    return renderer_vendor()
+end
+
+export fn renderer_version()
+    if Runtime.graphics_backend == VULKAN then return "Vulkan 1.1+" end
+    return GL.getString(GL.GL_VERSION)
+end
+
+export fn graphics_version()
+    return renderer_version()
+end
+
+export const Timer = {
+    id:u32 = 0
+
+    begin = fn()
+        if self.id ~= 0 then GL.glBeginQuery(GL.GL_TIME_ELAPSED,self.id) end
+    end
+
+    end = fn()
+        if self.id ~= 0 then GL.glEndQuery(GL.GL_TIME_ELAPSED) end
+    end
+
+    -- Compatibility alias. New code should use end().
+    finish = fn()
+        self.end()
+    end
+
+    destroy = fn()
+        if self.id ~= 0 then GL.deleteQuery(self.id) self.id = 0 end
+    end
+}
+
+export fn timer() -> Timer
+    local result = Timer.new()
+    result.id = GL.createQuery()
+    return result
+end
+
+-- Draw generated triangle-list vertices without a CPU vertex buffer. Retained
+-- systems such as LazyUI use this with storage-backed vertex shaders.
+export fn draw_vertices(vertices,instances)
+    if vertices < 1 then return end
+    if instances < 1 then instances = 1 end
+    if Runtime.graphics_backend == VULKAN then
+        Vulkan.draw(Runtime.active_context,vertices,instances)
+        return
+    end
+    local index = 0
+    while index < instances do
+        GL.glDrawArrays(GL.GL_TRIANGLES,0,vertices)
+        index += 1
+    end
+end
+
+-- Draws a range while keeping Vulkan first-vertex/first-instance details hidden.
+-- Storage-backed systems use this to preserve painter order without per-draw
+-- base uniforms.
+export fn draw_vertices_from(vertices,instances,firstVertex,firstInstance)
+    if vertices < 1 then return end
+    if instances < 1 then instances = 1 end
+    if Runtime.graphics_backend == VULKAN then
+        Vulkan.draw_base(Runtime.active_context,vertices,instances,firstVertex,firstInstance)
+        return
+    end
+    GL.glDrawArraysInstancedBaseInstance(GL.GL_TRIANGLES,firstVertex,vertices,instances,firstInstance)
+end
+
+-- Advanced bridge functions. They keep OpenGL hidden while still allowing an
+-- engine to reach operations that do not yet have a higher-level LSG object.
+export fn bind_texture(unit,texture)
+    GL.glActiveTexture(GL.GL_TEXTURE0 + unit)
+    GL.glBindTexture(GL.GL_TEXTURE_2D,texture)
+end
+
+export fn draw_arrays(mode,first,count)
+    GL.glDrawArrays(mode,first,count)
+end
+
+export fn draw_elements(mode,count)
+    GL.glDrawElements(mode,count,GL.GL_UNSIGNED_INT,0)
+end
+
+export fn set_window_icon(window:Window,image:PixelImage)
+    return window.set_icon(image)
+end
+
+export fn primary_monitor()
+    return GLFW.glfwGetPrimaryMonitor()
+end
+
+export fn monitors() -> GLFW.MonitorList
+    local monitors = GLFW.MonitorList.new()
+    monitors.refresh()
+    return monitors
+end
+
+export fn monitor_list() -> GLFW.MonitorList
+    return monitors()
+end
+
+export fn video_modes(monitor) -> GLFW.VideoModeList
+    local modes = GLFW.VideoModeList.new()
+    modes.refresh(monitor)
+    return modes
+end
+
+export fn video_mode() -> GLFW.VideoMode
+    return GLFW.VideoMode.new()
+end
+
+export fn monitor_work_area(monitor) -> GLFW.MonitorWorkArea
+    local workArea = GLFW.MonitorWorkArea.new()
+    workArea.refresh(monitor)
+    return workArea
+end
+
+export fn monitor_physical_size(monitor) -> GLFW.MonitorPhysicalSize
+    local physicalSize = GLFW.MonitorPhysicalSize.new()
+    physicalSize.refresh(monitor)
+    return physicalSize
+end
+
+export const ContentScale = {
+    native:GLFW.ContentScale = null
+    x:f32 = 1.0
+    y:f32 = 1.0
+
+    refresh_monitor = fn(monitor)
+        if self.native == null then self.native = GLFW.ContentScale.new() end
+        self.native.refresh_monitor(monitor)
+        self.x = self.native.x
+        self.y = self.native.y
+        return self
+    end
+
+    destroy = fn()
+        if self.native ~= null then self.native.destroy() end
+        self.x = 1.0
+        self.y = 1.0
+    end
+}
+
+export fn monitor_scale(monitor) -> ContentScale
+    local contentScale = ContentScale.new()
+    contentScale.native = GLFW.ContentScale.new()
+    contentScale.refresh_monitor(monitor)
+    return contentScale
+end
+
+export fn gamepad_state(number) -> GLFW.GamepadState
+    local gamepadState = GLFW.GamepadState.new()
+    gamepadState.initialize()
+    gamepadState.refresh(number)
+    return gamepadState
+end
+
+export fn gamepad(number) -> GLFW.GamepadState
+    return gamepad_state(number)
+end
+
+export fn is_gamepad_connected(number)
+    return GLFW.glfwJoystickIsGamepad(number) ~= 0
+end
+
+export fn gamepad_connected(number)
+    return is_gamepad_connected(number)
+end
+
+export const GAMEPAD_ONE = GLFW.GLFW_JOYSTICK_1
+export const GAMEPAD_LEFT_X = GLFW.GLFW_GAMEPAD_AXIS_LEFT_X
+export const GAMEPAD_LEFT_Y = GLFW.GLFW_GAMEPAD_AXIS_LEFT_Y

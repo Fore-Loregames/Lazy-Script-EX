@@ -1,4 +1,10 @@
 use "LazyUI.lsx" as UI
+use "../../LSG.lsx" as LSG
+use "../../LSSL.lsx" as LSSL
+use "shaders/batch.lssl" as VulkanBatch
+use "shaders/vector_fast.lssl" as VulkanVectorFast
+use "shaders/vector_effect.lssl" as VulkanVectorEffect
+use "shaders/solid.lssl" as VulkanSolid
 use "ShaderSources.lsx" as Shaders
 use "../OpenGL/OpenGL46.lsx" as GL
 use "../Text/FreeType.lsx" as FreeType
@@ -47,22 +53,26 @@ export TAG_COLOR_PICKER = 690891131
 
 -- Retained paint commands preserve DOM/canvas painter order while still
 -- drawing consecutive instances of the same pipeline in one batch.
-export RENDER_RUN_BOX = 1
-export RENDER_RUN_TEXT = 2
-export RENDER_RUN_IMAGE = 3
-export RENDER_RUN_SOLID = 4
+export RENDER_RUN_VECTOR_FAST = 1
+export RENDER_RUN_VECTOR_EFFECT = 2
+export RENDER_RUN_TEXT = 3
+export RENDER_RUN_IMAGE = 4
+export RENDER_RUN_SOLID = 5
+-- Compatibility name for code that treats every analytic surface as a box.
+export RENDER_RUN_BOX = RENDER_RUN_VECTOR_FAST
 
-fn push_surface_vertex(vertices,x:f32,y:f32,u:f32,v:f32,r:f32,g:f32,b:f32,a:f32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+fn push_surface_vertex(vertices,x:f32,y:f32,u:f32,v:f32,r:f32,g:f32,b:f32,a:f32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32,clipTopLeft:f32,clipTopRight:f32,clipBottomRight:f32,clipBottomLeft:f32)
     vertices.push(x) vertices.push(y)
     vertices.push(u) vertices.push(v)
     vertices.push(r) vertices.push(g) vertices.push(b) vertices.push(a)
     vertices.push(clipX) vertices.push(clipY) vertices.push(clipWidth) vertices.push(clipHeight)
+    vertices.push(clipTopLeft) vertices.push(clipTopRight) vertices.push(clipBottomRight) vertices.push(clipBottomLeft)
 end
 
-fn push_surface_triangle(vertices,x:f32,y:f32,x2:f32,y2:f32,x3:f32,y3:f32,r:f32,g:f32,b:f32,a:f32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
-    push_surface_vertex(vertices,x,y,0.0,0.0,r,g,b,a,clipX,clipY,clipWidth,clipHeight)
-    push_surface_vertex(vertices,x2,y2,0.0,0.0,r,g,b,a,clipX,clipY,clipWidth,clipHeight)
-    push_surface_vertex(vertices,x3,y3,0.0,0.0,r,g,b,a,clipX,clipY,clipWidth,clipHeight)
+fn push_surface_triangle(vertices,x:f32,y:f32,x2:f32,y2:f32,x3:f32,y3:f32,r:f32,g:f32,b:f32,a:f32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32,clipTopLeft:f32,clipTopRight:f32,clipBottomRight:f32,clipBottomLeft:f32)
+    push_surface_vertex(vertices,x,y,0.0,0.0,r,g,b,a,clipX,clipY,clipWidth,clipHeight,clipTopLeft,clipTopRight,clipBottomRight,clipBottomLeft)
+    push_surface_vertex(vertices,x2,y2,0.0,0.0,r,g,b,a,clipX,clipY,clipWidth,clipHeight,clipTopLeft,clipTopRight,clipBottomRight,clipBottomLeft)
+    push_surface_vertex(vertices,x3,y3,0.0,0.0,r,g,b,a,clipX,clipY,clipWidth,clipHeight,clipTopLeft,clipTopRight,clipBottomRight,clipBottomLeft)
 end
 
 fn clear_visual_dirty_tree(element:UI.Element)
@@ -76,6 +86,21 @@ fn clear_visual_dirty_tree(element:UI.Element)
 end
 
 export const Renderer = {
+    graphics_backend:i32 = LSG.OPENGL,
+    vulkan_batch_shader:LSSL.Shader = null,
+    vulkan_vector_fast_shader:LSSL.Shader = null,
+    vulkan_vector_effect_shader:LSSL.Shader = null,
+    vulkan_solid_shader:LSSL.Shader = null,
+    vulkan_analytic_ready:bool = false,
+    vulkan_command_storage:LSG.Storage = null,
+    vulkan_box_storage:LSG.Storage = null,
+    vulkan_text_storage:LSG.Storage = null,
+    vulkan_image_storage:LSG.Storage = null,
+    vulkan_solid_storage:LSG.Storage = null,
+    -- Old Vulkan buffers are kept alive until renderer shutdown. Reallocating
+    -- and destroying a retained buffer while a recorded frame may still own a
+    -- descriptor to it can terminate the driver instead of producing an error.
+    vulkan_retired_storage = {},
     box_program:u32 = 0,
     text_program:u32 = 0,
     image_program:u32 = 0,
@@ -104,6 +129,18 @@ export const Renderer = {
     image_batch_starts = {},
     image_batch_counts = {},
     image_data = {},
+    vulkan_command_data = {},
+    vulkan_plan_types = {},
+    vulkan_plan_starts = {},
+    vulkan_plan_counts = {},
+    vulkan_plan_batches = {},
+    vulkan_batch_texture1 = {},
+    vulkan_batch_texture2 = {},
+    vulkan_batch_texture3 = {},
+    vulkan_batch_texture4 = {},
+    vulkan_batch_texture5 = {},
+    vulkan_batch_texture6 = {},
+    vulkan_batch_texture7 = {},
     render_run_types = {},
     render_run_starts = {},
     render_run_counts = {},
@@ -117,7 +154,14 @@ export const Renderer = {
     box_capacity_bytes:i64 = 0,
     text_capacity_bytes:i64 = 0,
     image_capacity_bytes:i64 = 0,
+    command_capacity_bytes:i64 = 0,
     surface_capacity_bytes:i64 = 0,
+    vulkan_command_count:i64 = 0,
+    vulkan_batch_count:i64 = 0,
+    active_clip_top_left:f32 = 0.0,
+    active_clip_top_right:f32 = 0.0,
+    active_clip_bottom_right:f32 = 0.0,
+    active_clip_bottom_left:f32 = 0.0,
     face:FreeType.Face = null,
     atlas:Font.Atlas = null,
     atlas_texture:Font.Texture = null,
@@ -137,61 +181,75 @@ export const Renderer = {
     cache_hits:i64 = 0,
     cache_valid:bool = false,
     gpu_upload_dirty:bool = true,
+    vulkan_upload_frames_remaining:i64 = 0,
     frame_rebuilt:bool = false,
     last_root:UI.Element = null,
     ready:bool = false,
 
     initialize = fn(fontPath:string,fontPixelHeight:i32) -> bool
         if self.ready then return true end
+        self.graphics_backend = LSG.current_backend()
         if self.box_geometry.length() == 0 then
             local geometryIndex = 0
             while geometryIndex < 14 do
                 self.box_geometry.push(0.0)
-                geometryIndex = geometryIndex + 1
+                geometryIndex += 1
             end
         end
-        self.box_program = GL.lsxCreateProgram(Shaders.BOX_VERTEX,Shaders.BOX_FRAGMENT)
-        self.text_program = GL.lsxCreateProgram(Shaders.TEXT_VERTEX,Shaders.TEXT_FRAGMENT)
-        self.image_program = GL.lsxCreateProgram(Shaders.IMAGE_VERTEX,Shaders.IMAGE_FRAGMENT)
-        self.solid_program = GL.lsxCreateProgram(Shaders.SOLID_VERTEX,Shaders.SOLID_FRAGMENT)
-        if self.box_program == 0 or self.text_program == 0 or self.image_program == 0 or self.solid_program == 0 then return false end
 
-        -- Every box, circle, ellipse, line, border, and shadow uses one
-        -- shader-generated unit quad. Per-element values live in the flat
-        -- surface table and gl_InstanceID selects the correct record. This is
-        -- the same proven instanced path as example 06 combined with the
-        -- four-corner panel layout from example 24; no index table is needed.
-        self.box_vao = GL.createVertexArray()
-        self.box_data_buffer = GL.createBuffer()
-        self.text_data_buffer = GL.createBuffer()
-        self.image_data_buffer = GL.createBuffer()
-        GL.glBindVertexArray(self.box_vao)
-        GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,self.box_data_buffer)
-        GL.glBindBufferBase(GL.GL_SHADER_STORAGE_BUFFER,0,self.box_data_buffer)
+        if self.graphics_backend == LSG.VULKAN then
+            -- The analytic vector path keeps the normal graphics rasterizer but
+            -- gives each primitive class a small purpose-built shader. The old
+            -- unified batch remains a validated fallback for drivers that reject
+            -- one of the specialized pipelines.
+            self.vulkan_vector_fast_shader = VulkanVectorFast.create()
+            self.vulkan_vector_effect_shader = VulkanVectorEffect.create()
+            self.vulkan_batch_shader = VulkanBatch.create()
+            self.vulkan_solid_shader = VulkanSolid.create()
+            self.vulkan_analytic_ready = self.vulkan_vector_fast_shader.ready() and self.vulkan_vector_effect_shader.ready()
+            if not self.vulkan_solid_shader.ready() then return false end
+            if not self.vulkan_analytic_ready and not self.vulkan_batch_shader.ready() then return false end
+        else
+            self.box_program = GL.lsxCreateProgram(Shaders.BOX_VERTEX,Shaders.BOX_FRAGMENT)
+            self.text_program = GL.lsxCreateProgram(Shaders.TEXT_VERTEX,Shaders.TEXT_FRAGMENT)
+            self.image_program = GL.lsxCreateProgram(Shaders.IMAGE_VERTEX,Shaders.IMAGE_FRAGMENT)
+            self.solid_program = GL.lsxCreateProgram(Shaders.SOLID_VERTEX,Shaders.SOLID_FRAGMENT)
+            if self.box_program == 0 or self.text_program == 0 or self.image_program == 0 or self.solid_program == 0 then return false end
 
-        -- Text glyphs and images also use the same four-corner instanced quad.
-        -- Only free-form polygons and triangles need a streamed vertex buffer.
-        self.surface_vao = GL.createVertexArray()
-        self.surface_vbo = GL.createBuffer()
-        GL.glBindVertexArray(self.surface_vao)
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER,self.surface_vbo)
-        GL.glVertexAttribPointer(0,2,GL.GL_FLOAT,0,48,0)
-        GL.glEnableVertexAttribArray(0)
-        GL.glVertexAttribPointer(1,2,GL.GL_FLOAT,0,48,8)
-        GL.glEnableVertexAttribArray(1)
-        GL.glVertexAttribPointer(2,4,GL.GL_FLOAT,0,48,16)
-        GL.glEnableVertexAttribArray(2)
-        GL.glVertexAttribPointer(3,4,GL.GL_FLOAT,0,48,32)
-        GL.glEnableVertexAttribArray(3)
+            self.box_vao = GL.createVertexArray()
+            self.box_data_buffer = GL.createBuffer()
+            self.text_data_buffer = GL.createBuffer()
+            self.image_data_buffer = GL.createBuffer()
+            GL.glBindVertexArray(self.box_vao)
+            GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,self.box_data_buffer)
+            GL.glBindBufferBase(GL.GL_SHADER_STORAGE_BUFFER,0,self.box_data_buffer)
 
-        self.box_viewport = GL.glGetUniformLocation(self.box_program,"viewport")
-        self.text_viewport = GL.glGetUniformLocation(self.text_program,"viewport")
-        self.image_viewport = GL.glGetUniformLocation(self.image_program,"viewport")
-        self.solid_viewport = GL.glGetUniformLocation(self.solid_program,"viewport")
-        GL.glUseProgram(self.text_program)
-        GL.glUniform1i(GL.glGetUniformLocation(self.text_program,"fontAtlas"),0)
-        GL.glUseProgram(self.image_program)
-        GL.glUniform1i(GL.glGetUniformLocation(self.image_program,"sourceTexture"),0)
+            self.surface_vao = GL.createVertexArray()
+            self.surface_vbo = GL.createBuffer()
+            GL.glBindVertexArray(self.surface_vao)
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER,self.surface_vbo)
+            GL.glVertexAttribPointer(0,2,GL.GL_FLOAT,0,64,0)
+            GL.glEnableVertexAttribArray(0)
+            GL.glVertexAttribPointer(1,2,GL.GL_FLOAT,0,64,8)
+            GL.glEnableVertexAttribArray(1)
+            GL.glVertexAttribPointer(2,4,GL.GL_FLOAT,0,64,16)
+            GL.glEnableVertexAttribArray(2)
+            GL.glVertexAttribPointer(3,4,GL.GL_FLOAT,0,64,32)
+            GL.glEnableVertexAttribArray(3)
+            GL.glVertexAttribPointer(4,4,GL.GL_FLOAT,0,64,48)
+            GL.glEnableVertexAttribArray(4)
+
+            self.box_viewport = GL.glGetUniformLocation(self.box_program,"viewport")
+            self.text_viewport = GL.glGetUniformLocation(self.text_program,"viewport")
+            self.image_viewport = GL.glGetUniformLocation(self.image_program,"viewport")
+            self.solid_viewport = GL.glGetUniformLocation(self.solid_program,"viewport")
+            GL.glUseProgram(self.text_program)
+            GL.glUniform1i(GL.glGetUniformLocation(self.text_program,"fontAtlas"),0)
+            GL.glUseProgram(self.image_program)
+            GL.glUniform1i(GL.glGetUniformLocation(self.image_program,"sourceTexture"),0)
+            GL.glEnable(GL.GL_BLEND)
+            GL.glBlendFunc(GL.GL_SRC_ALPHA,GL.GL_ONE_MINUS_SRC_ALPHA)
+        end
 
         if fontPath == null then fontPath = "C:/Windows/Fonts/segoeui.ttf" end
         if fontPixelHeight <= 0 then fontPixelHeight = 64 end
@@ -203,9 +261,6 @@ export const Renderer = {
         if not self.atlas_texture.valid() then return false end
         self.control_style = UI.Style.new()
         self.control_text_style = UI.Style.new()
-
-        GL.glEnable(GL.GL_BLEND)
-        GL.glBlendFunc(GL.GL_SRC_ALPHA,GL.GL_ONE_MINUS_SRC_ALPHA)
         self.ready = true
         return true
     end,
@@ -218,22 +273,33 @@ export const Renderer = {
         if self.diagnostics_enabled then
             self.diagnostics.stage("LazyUI renderer diagnostics enabled")
             self.diagnostics.number("renderer.ready=",self.ready)
-            self.diagnostics.number("program.box=",self.box_program)
-            self.diagnostics.number("program.text=",self.text_program)
-            self.diagnostics.number("program.image=",self.image_program)
-            self.diagnostics.number("program.solid=",self.solid_program)
-            self.diagnostics.number("program.box.linked=",GL.programLinked(self.box_program))
-            self.diagnostics.number("program.text.linked=",GL.programLinked(self.text_program))
-            self.diagnostics.number("program.image.linked=",GL.programLinked(self.image_program))
-            self.diagnostics.number("program.solid.linked=",GL.programLinked(self.solid_program))
-            self.diagnostics.number("vao.box=",self.box_vao)
-            self.diagnostics.number("vao.surface=",self.surface_vao)
-            self.diagnostics.number("buffer.surface=",self.surface_vbo)
-            self.diagnostics.number("buffer.box_data=",self.box_data_buffer)
-            self.diagnostics.number("buffer.text_data=",self.text_data_buffer)
-            self.diagnostics.number("buffer.image_data=",self.image_data_buffer)
-            self.diagnostics.number("uniform.box_viewport=",self.box_viewport)
-            self.diagnostics.number("uniform.text_viewport=",self.text_viewport)
+            self.diagnostics.number("renderer.backend=",self.graphics_backend)
+            if self.graphics_backend == LSG.VULKAN then
+                self.diagnostics.number("vulkan.native.trace=",LSG.set_vulkan_trace(true))
+                LSG.mark_vulkan_trace("lazyui.diagnostics.enabled")
+                self.diagnostics.number("vulkan.analytic.ready=",self.vulkan_analytic_ready)
+                self.diagnostics.number("vulkan.vector_fast.ready=",self.vulkan_vector_fast_shader.ready())
+                self.diagnostics.number("vulkan.vector_effect.ready=",self.vulkan_vector_effect_shader.ready())
+                self.diagnostics.number("vulkan.batch_fallback.ready=",self.vulkan_batch_shader.ready())
+                self.diagnostics.number("vulkan.solid.ready=",self.vulkan_solid_shader.ready())
+            else
+                self.diagnostics.number("program.box=",self.box_program)
+                self.diagnostics.number("program.text=",self.text_program)
+                self.diagnostics.number("program.image=",self.image_program)
+                self.diagnostics.number("program.solid=",self.solid_program)
+                self.diagnostics.number("program.box.linked=",GL.programLinked(self.box_program))
+                self.diagnostics.number("program.text.linked=",GL.programLinked(self.text_program))
+                self.diagnostics.number("program.image.linked=",GL.programLinked(self.image_program))
+                self.diagnostics.number("program.solid.linked=",GL.programLinked(self.solid_program))
+                self.diagnostics.number("vao.box=",self.box_vao)
+                self.diagnostics.number("vao.surface=",self.surface_vao)
+                self.diagnostics.number("buffer.surface=",self.surface_vbo)
+                self.diagnostics.number("buffer.box_data=",self.box_data_buffer)
+                self.diagnostics.number("buffer.text_data=",self.text_data_buffer)
+                self.diagnostics.number("buffer.image_data=",self.image_data_buffer)
+                self.diagnostics.number("uniform.box_viewport=",self.box_viewport)
+                self.diagnostics.number("uniform.text_viewport=",self.text_viewport)
+            end
             self.diagnostics.number("font.face.valid=",self.face.valid())
             self.diagnostics.number("font.atlas.valid=",self.atlas.valid())
             self.diagnostics.number("font.texture.valid=",self.atlas_texture.valid())
@@ -244,7 +310,7 @@ export const Renderer = {
 
     _diagnostic_gl_error = fn(label:string)
         if not self.diagnostics_enabled or self.diagnostics == null or self.diagnostics_frames >= 3 then return end
-        self.diagnostics.number(label,GL.glGetError())
+        if self.graphics_backend == LSG.OPENGL then self.diagnostics.number(label,GL.glGetError()) end
     end,
 
     begin = fn(width:f32,height:f32)
@@ -253,6 +319,10 @@ export const Renderer = {
         self.viewport_height = height
         self.frame_rebuilt = false
         if viewportChanged then self.cache_valid = false end
+        -- Vulkan storage objects already own one buffer per frame in flight.
+        -- Dirty retained data is uploaded to the two frame slots once each;
+        -- unchanged interfaces then reuse both GPU copies without a per-frame
+        -- CPU upload.
     end,
 
     invalidate = fn()
@@ -282,6 +352,20 @@ export const Renderer = {
         self.image_batch_starts.clear()
         self.image_batch_counts.clear()
         self.image_data.clear()
+        self.vulkan_command_data.clear()
+        self.vulkan_plan_types.clear()
+        self.vulkan_plan_starts.clear()
+        self.vulkan_plan_counts.clear()
+        self.vulkan_plan_batches.clear()
+        self.vulkan_batch_texture1.clear()
+        self.vulkan_batch_texture2.clear()
+        self.vulkan_batch_texture3.clear()
+        self.vulkan_batch_texture4.clear()
+        self.vulkan_batch_texture5.clear()
+        self.vulkan_batch_texture6.clear()
+        self.vulkan_batch_texture7.clear()
+        self.vulkan_command_count = 0
+        self.vulkan_batch_count = 0
         self.render_run_types.clear()
         self.render_run_starts.clear()
         self.render_run_counts.clear()
@@ -305,12 +389,14 @@ export const Renderer = {
         self.root_y = root.y
         self.root_width = root.width
         self.root_height = root.height
+        set_active_clip_radii(self,0.0,0.0,0.0,0.0)
         submit_tree(self,root,0.0,0.0,self.viewport_width,self.viewport_height)
         -- Popups are submitted after the regular tree so they remain above
         -- later siblings. Separate base-instance ranges preserve box/text
         -- painter order without giving every element its own draw call.
         self.overlay_box_start = self.box_count
         self.overlay_text_start = self.text_glyph_count
+        set_active_clip_radii(self,0.0,0.0,0.0,0.0)
         local overlayIndex:i64 = 0
         while overlayIndex < self.select_overlays.length() do
             submit_select_popup(self,self.select_overlays[overlayIndex])
@@ -318,15 +404,142 @@ export const Renderer = {
         end
         self.overlay_box_count = self.box_count - self.overlay_box_start
         self.overlay_text_count = self.text_glyph_count - self.overlay_text_start
+        if self.graphics_backend == LSG.VULKAN then
+            if self.vulkan_analytic_ready then
+                build_vulkan_analytic_plan(self)
+            else
+                build_vulkan_fallback_plan(self)
+            end
+        end
         clear_visual_dirty_tree(root)
         self.last_root = root
         self.cache_valid = true
         self.gpu_upload_dirty = true
+        if self.graphics_backend == LSG.VULKAN then self.vulkan_upload_frames_remaining = 2 end
         self.frame_rebuilt = true
+    end,
+
+    _finish_diagnostics = fn()
+        if not self.diagnostics_enabled or self.diagnostics == null or self.diagnostics_frames >= 3 then return end
+        self.diagnostics.stage("LazyUI frame summary")
+        self.diagnostics.number("frame.index=",self.diagnostics_frames)
+        self.diagnostics.number("viewport.width=",self.viewport_width)
+        self.diagnostics.number("viewport.height=",self.viewport_height)
+        self.diagnostics.number("root.x=",self.root_x)
+        self.diagnostics.number("root.y=",self.root_y)
+        self.diagnostics.number("root.width=",self.root_width)
+        self.diagnostics.number("root.height=",self.root_height)
+        self.diagnostics.number("elements.retained_visited=",self.retained_count)
+        self.diagnostics.number("elements.submitted=",self.element_count)
+        self.diagnostics.number("elements.culled=",self.culled_count)
+        self.diagnostics.number("cache.frame_rebuilt=",self.frame_rebuilt)
+        self.diagnostics.number("cache.hits=",self.cache_hits)
+        self.diagnostics.number("paint.runs=",self.render_run_count)
+        self.diagnostics.number("boxes.count=",self.box_count)
+        self.diagnostics.number("boxes.data_values=",self.box_data.length())
+        self.diagnostics.number("boxes.data_bytes=",self.box_data.byte_length())
+        self.diagnostics.number("boxes.buffer_capacity=",self.box_capacity_bytes)
+        self.diagnostics.number("text.items=",self.text_count)
+        self.diagnostics.number("text.glyph_instances=",self.text_glyph_count)
+        self.diagnostics.number("text.instance_values=",self.text_data.length())
+        self.diagnostics.number("text.instance_bytes=",self.text_data.byte_length())
+        self.diagnostics.number("canvas.shapes=",self.canvas_shape_count)
+        self.diagnostics.number("solid.vertex_values=",self.solid_vertices.length())
+        self.diagnostics.number("images.instances=",self.image_count)
+        self.diagnostics.number("images.batches=",self.image_textures.length())
+        self.diagnostics.number("vulkan.ui_commands=",self.vulkan_command_count)
+        self.diagnostics.number("vulkan.ui_batches=",self.vulkan_batch_count)
+        self.diagnostics.number("vulkan.ui_plan_steps=",self.vulkan_plan_types.length())
+        self._diagnostic_gl_error("gl.error.frame_end=")
+        self.diagnostics_frames = self.diagnostics_frames + 1
+        if self.graphics_backend == LSG.VULKAN and self.diagnostics_frames >= 3 then LSG.set_vulkan_trace(false) end
+    end,
+
+    _flush_vulkan = fn()
+        LSG.mark_vulkan_trace("lazyui.flush.enter")
+        if self.diagnostics_enabled and self.diagnostics_frames < 3 then self.diagnostics.stage("LazyUI Vulkan flush begin") end
+        if self.gpu_upload_dirty then
+            LSG.mark_vulkan_trace("lazyui.upload.begin")
+            if self.vulkan_command_count > 0 then
+                LSG.mark_vulkan_trace("lazyui.upload.commands")
+                local vulkanCommandBytes = self.vulkan_command_data.byte_length()
+                if self.vulkan_command_storage == null or vulkanCommandBytes > self.command_capacity_bytes then
+                    if self.vulkan_command_storage ~= null then self.vulkan_retired_storage.push(self.vulkan_command_storage) end
+                    self.command_capacity_bytes = next_buffer_capacity(vulkanCommandBytes)
+                    self.vulkan_command_storage = LSG.empty_storage(self.command_capacity_bytes,0)
+                end
+                if self.vulkan_command_storage ~= null and self.vulkan_command_storage.ready() then self.vulkan_command_storage.update(self.vulkan_command_data) end
+            end
+            if self.box_count > 0 then
+                LSG.mark_vulkan_trace("lazyui.upload.box")
+                local vulkanBoxBytes = self.box_data.byte_length()
+                if self.vulkan_box_storage == null or vulkanBoxBytes > self.box_capacity_bytes then
+                    if self.vulkan_box_storage ~= null then self.vulkan_retired_storage.push(self.vulkan_box_storage) end
+                    self.box_capacity_bytes = next_buffer_capacity(vulkanBoxBytes)
+                    self.vulkan_box_storage = LSG.empty_storage(self.box_capacity_bytes,1)
+                end
+                if self.vulkan_box_storage ~= null and self.vulkan_box_storage.ready() then self.vulkan_box_storage.update(self.box_data) end
+            end
+            if self.text_glyph_count > 0 then
+                LSG.mark_vulkan_trace("lazyui.upload.text")
+                local vulkanTextBytes = self.text_data.byte_length()
+                if self.vulkan_text_storage == null or vulkanTextBytes > self.text_capacity_bytes then
+                    if self.vulkan_text_storage ~= null then self.vulkan_retired_storage.push(self.vulkan_text_storage) end
+                    self.text_capacity_bytes = next_buffer_capacity(vulkanTextBytes)
+                    self.vulkan_text_storage = LSG.empty_storage(self.text_capacity_bytes,2)
+                end
+                if self.vulkan_text_storage ~= null and self.vulkan_text_storage.ready() then self.vulkan_text_storage.update(self.text_data) end
+            end
+            if self.image_count > 0 then
+                LSG.mark_vulkan_trace("lazyui.upload.image")
+                local vulkanImageBytes = self.image_data.byte_length()
+                if self.vulkan_image_storage == null or vulkanImageBytes > self.image_capacity_bytes then
+                    if self.vulkan_image_storage ~= null then self.vulkan_retired_storage.push(self.vulkan_image_storage) end
+                    self.image_capacity_bytes = next_buffer_capacity(vulkanImageBytes)
+                    self.vulkan_image_storage = LSG.empty_storage(self.image_capacity_bytes,3)
+                end
+                if self.vulkan_image_storage ~= null and self.vulkan_image_storage.ready() then self.vulkan_image_storage.update(self.image_data) end
+            end
+            if self.solid_vertices.length() > 0 then
+                LSG.mark_vulkan_trace("lazyui.upload.solid")
+                local vulkanSolidBytes = self.solid_vertices.byte_length()
+                if self.vulkan_solid_storage == null or vulkanSolidBytes > self.surface_capacity_bytes then
+                    if self.vulkan_solid_storage ~= null then self.vulkan_retired_storage.push(self.vulkan_solid_storage) end
+                    self.surface_capacity_bytes = next_buffer_capacity(vulkanSolidBytes)
+                    self.vulkan_solid_storage = LSG.empty_storage(self.surface_capacity_bytes,0)
+                end
+                if self.vulkan_solid_storage ~= null and self.vulkan_solid_storage.ready() then self.vulkan_solid_storage.update(self.solid_vertices) end
+            end
+            LSG.mark_vulkan_trace("lazyui.upload.complete")
+            if self.vulkan_upload_frames_remaining > 0 then self.vulkan_upload_frames_remaining = self.vulkan_upload_frames_remaining - 1 end
+            if self.vulkan_upload_frames_remaining <= 0 then self.gpu_upload_dirty = false end
+        end
+
+        if self.diagnostics_enabled and self.diagnostics_frames < 3 then
+            self.diagnostics.number("vulkan.command.storage.ready=",self.vulkan_command_storage ~= null and self.vulkan_command_storage.ready())
+            self.diagnostics.number("vulkan.box.storage.ready=",self.vulkan_box_storage ~= null and self.vulkan_box_storage.ready())
+            self.diagnostics.number("vulkan.text.storage.ready=",self.vulkan_text_storage ~= null and self.vulkan_text_storage.ready())
+            self.diagnostics.number("vulkan.image.storage.ready=",self.vulkan_image_storage ~= null and self.vulkan_image_storage.ready())
+            self.diagnostics.number("vulkan.solid.storage.ready=",self.vulkan_solid_storage ~= null and self.vulkan_solid_storage.ready())
+            self.diagnostics.number("vulkan.render.runs=",self.render_run_types.length())
+        end
+
+        LSG.mark_vulkan_trace("lazyui.draws.begin")
+        if self.vulkan_analytic_ready then
+            flush_vulkan_analytic(self)
+        else
+            flush_vulkan_batch_fallback(self)
+        end
+        LSG.mark_vulkan_trace("lazyui.draws.complete")
+        if self.vulkan_upload_frames_remaining <= 0 then self.gpu_upload_dirty = false end
+        LSG.mark_vulkan_trace("lazyui.flush.complete")
+        if self.diagnostics_enabled and self.diagnostics_frames < 3 then self.diagnostics.stage("LazyUI Vulkan flush complete") end
+        self._finish_diagnostics()
     end,
 
     flush = fn()
         if not self.ready then return end
+        if self.graphics_backend == LSG.VULKAN then self._flush_vulkan() return end
         GL.glEnable(GL.GL_BLEND)
         GL.glBlendFunc(GL.GL_SRC_ALPHA,GL.GL_ONE_MINUS_SRC_ALPHA)
         GL.glDisable(GL.GL_DEPTH_TEST)
@@ -382,7 +595,7 @@ export const Renderer = {
         -- panels, canvas labels behind nodes, caret/selection ordering intact,
         -- and runtime overlays correct without giving every glyph its own draw.
         local activeKind:i32 = 0
-        local activeTexture:u32 = 0
+        local activeTexture:LSG.Texture = null
         local runIndex:i64 = 0
         while runIndex < self.render_run_types.length() do
             local kind = self.render_run_types[runIndex]
@@ -390,7 +603,7 @@ export const Renderer = {
             local count = self.render_run_counts[runIndex]
             local texture = self.render_run_textures[runIndex]
             if count > 0 then
-                if kind == RENDER_RUN_BOX then
+                if kind == RENDER_RUN_VECTOR_FAST or kind == RENDER_RUN_VECTOR_EFFECT then
                     if activeKind ~= kind then
                         GL.glUseProgram(self.box_program)
                         GL.glUniform2f(self.box_viewport,self.viewport_width,self.viewport_height)
@@ -398,7 +611,7 @@ export const Renderer = {
                         GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,self.box_data_buffer)
                         GL.glBindBufferBase(GL.GL_SHADER_STORAGE_BUFFER,0,self.box_data_buffer)
                         activeKind = kind
-                        activeTexture = 0
+                        activeTexture = null
                     end
                     GL.glDrawArraysInstancedBaseInstance(GL.GL_TRIANGLE_STRIP,0,4,count,start)
                 elseif kind == RENDER_RUN_TEXT then
@@ -410,7 +623,7 @@ export const Renderer = {
                         GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,self.text_data_buffer)
                         GL.glBindBufferBase(GL.GL_SHADER_STORAGE_BUFFER,0,self.text_data_buffer)
                         activeKind = kind
-                        activeTexture = 0
+                        activeTexture = null
                     end
                     GL.glDrawArraysInstancedBaseInstance(GL.GL_TRIANGLE_STRIP,0,4,count,start)
                 elseif kind == RENDER_RUN_IMAGE then
@@ -421,11 +634,10 @@ export const Renderer = {
                         GL.glBindBuffer(GL.GL_SHADER_STORAGE_BUFFER,self.image_data_buffer)
                         GL.glBindBufferBase(GL.GL_SHADER_STORAGE_BUFFER,0,self.image_data_buffer)
                         activeKind = kind
-                        activeTexture = 0
+                        activeTexture = null
                     end
-                    if activeTexture ~= texture then
-                        GL.glActiveTexture(GL.GL_TEXTURE0)
-                        GL.glBindTexture(GL.GL_TEXTURE_2D,texture)
+                    if activeTexture ~= texture and texture ~= null then
+                        texture.bind(0)
                         activeTexture = texture
                     end
                     GL.glDrawArraysInstancedBaseInstance(GL.GL_TRIANGLE_STRIP,0,4,count,start)
@@ -436,7 +648,7 @@ export const Renderer = {
                         GL.glBindVertexArray(self.surface_vao)
                         GL.glBindBuffer(GL.GL_ARRAY_BUFFER,self.surface_vbo)
                         activeKind = kind
-                        activeTexture = 0
+                        activeTexture = null
                     end
                     GL.glDrawArrays(GL.GL_TRIANGLES,start,count)
                 end
@@ -446,50 +658,41 @@ export const Renderer = {
         self._diagnostic_gl_error("gl.error.painter_runs=")
         self.gpu_upload_dirty = false
 
-        if self.diagnostics_enabled and self.diagnostics_frames < 3 then
-            self.diagnostics.stage("LazyUI frame summary")
-            self.diagnostics.number("frame.index=",self.diagnostics_frames)
-            self.diagnostics.number("viewport.width=",self.viewport_width)
-            self.diagnostics.number("viewport.height=",self.viewport_height)
-            self.diagnostics.number("root.x=",self.root_x)
-            self.diagnostics.number("root.y=",self.root_y)
-            self.diagnostics.number("root.width=",self.root_width)
-            self.diagnostics.number("root.height=",self.root_height)
-            self.diagnostics.number("elements.retained_visited=",self.retained_count)
-            self.diagnostics.number("elements.submitted=",self.element_count)
-            self.diagnostics.number("elements.culled=",self.culled_count)
-            self.diagnostics.number("cache.frame_rebuilt=",self.frame_rebuilt)
-            self.diagnostics.number("cache.hits=",self.cache_hits)
-            self.diagnostics.number("paint.runs=",self.render_run_count)
-            self.diagnostics.number("boxes.count=",self.box_count)
-            self.diagnostics.number("boxes.data_values=",self.box_data.length())
-            self.diagnostics.number("boxes.data_bytes=",self.box_data.byte_length())
-            self.diagnostics.number("boxes.buffer_capacity=",self.box_capacity_bytes)
-            self.diagnostics.number("text.items=",self.text_count)
-            self.diagnostics.number("text.glyph_instances=",self.text_glyph_count)
-            self.diagnostics.number("text.instance_values=",self.text_data.length())
-            self.diagnostics.number("text.instance_bytes=",self.text_data.byte_length())
-            self.diagnostics.number("canvas.shapes=",self.canvas_shape_count)
-            self.diagnostics.number("solid.vertex_values=",self.solid_vertices.length())
-            self.diagnostics.number("images.instances=",self.image_count)
-            self.diagnostics.number("images.batches=",self.image_textures.length())
-            self._diagnostic_gl_error("gl.error.frame_end=")
-            self.diagnostics_frames = self.diagnostics_frames + 1
-        end
+        self._finish_diagnostics()
     end,
 
     destroy = fn()
         if self.diagnostics_enabled and self.diagnostics ~= null then self.diagnostics.stage("LazyUI renderer destroy") end
-        if self.box_program ~= 0 then GL.glDeleteProgram(self.box_program) self.box_program = 0 end
-        if self.text_program ~= 0 then GL.glDeleteProgram(self.text_program) self.text_program = 0 end
-        if self.image_program ~= 0 then GL.glDeleteProgram(self.image_program) self.image_program = 0 end
-        if self.solid_program ~= 0 then GL.glDeleteProgram(self.solid_program) self.solid_program = 0 end
-        if self.box_data_buffer ~= 0 then GL.deleteBuffer(self.box_data_buffer) self.box_data_buffer = 0 end
-        if self.text_data_buffer ~= 0 then GL.deleteBuffer(self.text_data_buffer) self.text_data_buffer = 0 end
-        if self.image_data_buffer ~= 0 then GL.deleteBuffer(self.image_data_buffer) self.image_data_buffer = 0 end
-        if self.surface_vbo ~= 0 then GL.deleteBuffer(self.surface_vbo) self.surface_vbo = 0 end
-        if self.box_vao ~= 0 then GL.deleteVertexArray(self.box_vao) self.box_vao = 0 end
-        if self.surface_vao ~= 0 then GL.deleteVertexArray(self.surface_vao) self.surface_vao = 0 end
+        if self.graphics_backend == LSG.VULKAN then
+            if self.vulkan_batch_shader ~= null then self.vulkan_batch_shader.destroy() self.vulkan_batch_shader = null end
+            if self.vulkan_vector_fast_shader ~= null then self.vulkan_vector_fast_shader.destroy() self.vulkan_vector_fast_shader = null end
+            if self.vulkan_vector_effect_shader ~= null then self.vulkan_vector_effect_shader.destroy() self.vulkan_vector_effect_shader = null end
+            if self.vulkan_solid_shader ~= null then self.vulkan_solid_shader.destroy() self.vulkan_solid_shader = null end
+            self.vulkan_analytic_ready = false
+            local retiredIndex = 0
+            while retiredIndex < self.vulkan_retired_storage.length() do
+                local retiredStorage = self.vulkan_retired_storage[retiredIndex]
+                if retiredStorage ~= null then retiredStorage.destroy() end
+                retiredIndex += 1
+            end
+            self.vulkan_retired_storage.clear()
+            if self.vulkan_command_storage ~= null then self.vulkan_command_storage.destroy() self.vulkan_command_storage = null end
+            if self.vulkan_box_storage ~= null then self.vulkan_box_storage.destroy() self.vulkan_box_storage = null end
+            if self.vulkan_text_storage ~= null then self.vulkan_text_storage.destroy() self.vulkan_text_storage = null end
+            if self.vulkan_image_storage ~= null then self.vulkan_image_storage.destroy() self.vulkan_image_storage = null end
+            if self.vulkan_solid_storage ~= null then self.vulkan_solid_storage.destroy() self.vulkan_solid_storage = null end
+        else
+            if self.box_program ~= 0 then GL.glDeleteProgram(self.box_program) self.box_program = 0 end
+            if self.text_program ~= 0 then GL.glDeleteProgram(self.text_program) self.text_program = 0 end
+            if self.image_program ~= 0 then GL.glDeleteProgram(self.image_program) self.image_program = 0 end
+            if self.solid_program ~= 0 then GL.glDeleteProgram(self.solid_program) self.solid_program = 0 end
+            if self.box_data_buffer ~= 0 then GL.deleteBuffer(self.box_data_buffer) self.box_data_buffer = 0 end
+            if self.text_data_buffer ~= 0 then GL.deleteBuffer(self.text_data_buffer) self.text_data_buffer = 0 end
+            if self.image_data_buffer ~= 0 then GL.deleteBuffer(self.image_data_buffer) self.image_data_buffer = 0 end
+            if self.surface_vbo ~= 0 then GL.deleteBuffer(self.surface_vbo) self.surface_vbo = 0 end
+            if self.box_vao ~= 0 then GL.deleteVertexArray(self.box_vao) self.box_vao = 0 end
+            if self.surface_vao ~= 0 then GL.deleteVertexArray(self.surface_vao) self.surface_vao = 0 end
+        end
         if self.atlas_texture ~= null then self.atlas_texture.destroy() self.atlas_texture = null end
         if self.control_style ~= null then self.control_style.destroy() self.control_style = null end
         if self.control_text_style ~= null then self.control_text_style.destroy() self.control_text_style = null end
@@ -503,15 +706,29 @@ export const Renderer = {
         self.image_batch_starts.destroy()
         self.image_batch_counts.destroy()
         self.image_data.destroy()
+        self.vulkan_command_data.destroy()
+        self.vulkan_plan_types.destroy()
+        self.vulkan_plan_starts.destroy()
+        self.vulkan_plan_counts.destroy()
+        self.vulkan_plan_batches.destroy()
+        self.vulkan_batch_texture1.destroy()
+        self.vulkan_batch_texture2.destroy()
+        self.vulkan_batch_texture3.destroy()
+        self.vulkan_batch_texture4.destroy()
+        self.vulkan_batch_texture5.destroy()
+        self.vulkan_batch_texture6.destroy()
+        self.vulkan_batch_texture7.destroy()
         self.render_run_types.destroy()
         self.render_run_starts.destroy()
         self.render_run_counts.destroy()
         self.render_run_textures.destroy()
+        self.vulkan_retired_storage.destroy()
         self.render_run_count = 0
         self.select_overlays.destroy()
         self.box_capacity_bytes = 0
         self.text_capacity_bytes = 0
         self.image_capacity_bytes = 0
+        self.command_capacity_bytes = 0
         self.surface_capacity_bytes = 0
         self.cache_valid = false
         self.gpu_upload_dirty = true
@@ -524,7 +741,121 @@ export const Renderer = {
 }
 
 
-fn record_render_run(renderer:Renderer,kind:i32,start:i64,count:i64,texture:u32)
+-- Execute the compact painter-ordered analytic plan. Ordinary rounded
+-- rectangles, controls, glyphs, and images share one small shader and one
+-- retained command stream. Only boxes that actually request shadows or
+-- outlines leave the fast batch for the effect shader.
+fn flush_vulkan_analytic(renderer:Renderer)
+    local activePlanType:i32 = 0
+    local planIndex:i64 = 0
+    while planIndex < renderer.vulkan_plan_types.length() do
+        local planType = renderer.vulkan_plan_types[planIndex]
+        local start = renderer.vulkan_plan_starts[planIndex]
+        local count = renderer.vulkan_plan_counts[planIndex]
+        local batchIndex = renderer.vulkan_plan_batches[planIndex]
+        if count > 0 then
+            if planType == 1 and renderer.vulkan_command_storage ~= null then
+                if activePlanType ~= 1 then
+                    renderer.vulkan_vector_fast_shader.bind()
+                    renderer.vulkan_vector_fast_shader.vector2("viewport",renderer.viewport_width,renderer.viewport_height)
+                    renderer.atlas_texture.bind(0)
+                    renderer.vulkan_command_storage.bind()
+                    if renderer.vulkan_box_storage ~= null then renderer.vulkan_box_storage.bind() end
+                    if renderer.vulkan_text_storage ~= null then renderer.vulkan_text_storage.bind() end
+                    if renderer.vulkan_image_storage ~= null then renderer.vulkan_image_storage.bind() end
+                    activePlanType = 1
+                end
+                local texture1:LSG.Texture = renderer.vulkan_batch_texture1[batchIndex]
+                local texture2:LSG.Texture = renderer.vulkan_batch_texture2[batchIndex]
+                local texture3:LSG.Texture = renderer.vulkan_batch_texture3[batchIndex]
+                local texture4:LSG.Texture = renderer.vulkan_batch_texture4[batchIndex]
+                local texture5:LSG.Texture = renderer.vulkan_batch_texture5[batchIndex]
+                local texture6:LSG.Texture = renderer.vulkan_batch_texture6[batchIndex]
+                local texture7:LSG.Texture = renderer.vulkan_batch_texture7[batchIndex]
+                if texture1 ~= null then texture1.bind(1) else renderer.atlas_texture.bind(1) end
+                if texture2 ~= null then texture2.bind(2) else renderer.atlas_texture.bind(2) end
+                if texture3 ~= null then texture3.bind(3) else renderer.atlas_texture.bind(3) end
+                if texture4 ~= null then texture4.bind(4) else renderer.atlas_texture.bind(4) end
+                if texture5 ~= null then texture5.bind(5) else renderer.atlas_texture.bind(5) end
+                if texture6 ~= null then texture6.bind(6) else renderer.atlas_texture.bind(6) end
+                if texture7 ~= null then texture7.bind(7) else renderer.atlas_texture.bind(7) end
+                LSG.draw_vertices_from(4,count,0,start)
+            elseif planType == 2 and renderer.vulkan_box_storage ~= null then
+                if activePlanType ~= 2 then
+                    renderer.vulkan_vector_effect_shader.bind()
+                    renderer.vulkan_vector_effect_shader.vector2("viewport",renderer.viewport_width,renderer.viewport_height)
+                    renderer.vulkan_box_storage.bind()
+                    activePlanType = 2
+                end
+                LSG.draw_vertices_from(4,count,0,start)
+            elseif planType == 3 and renderer.vulkan_solid_storage ~= null then
+                if activePlanType ~= 3 then
+                    renderer.vulkan_solid_shader.bind()
+                    renderer.vulkan_solid_shader.vector2("viewport",renderer.viewport_width,renderer.viewport_height)
+                    renderer.vulkan_solid_storage.bind()
+                    activePlanType = 3
+                end
+                LSG.draw_vertices_from(count,1,start,0)
+            end
+        end
+        planIndex = planIndex + 1
+    end
+end
+
+-- Validated compatibility path retained for Vulkan implementations that reject
+-- any specialized analytic pipeline. It consumes the same retained streams and
+-- preserves painter order through the older unified command shader.
+fn flush_vulkan_batch_fallback(renderer:Renderer)
+    local activePlanType:i32 = 0
+    local planIndex:i64 = 0
+    while planIndex < renderer.vulkan_plan_types.length() do
+        local planType = renderer.vulkan_plan_types[planIndex]
+        local start = renderer.vulkan_plan_starts[planIndex]
+        local count = renderer.vulkan_plan_counts[planIndex]
+        local batchIndex = renderer.vulkan_plan_batches[planIndex]
+        if count > 0 then
+            if planType == 1 and renderer.vulkan_command_storage ~= null then
+                if activePlanType ~= 1 then
+                    renderer.vulkan_batch_shader.bind()
+                    renderer.vulkan_batch_shader.vector2("viewport",renderer.viewport_width,renderer.viewport_height)
+                    renderer.atlas_texture.bind(0)
+                    renderer.vulkan_command_storage.bind()
+                    if renderer.vulkan_box_storage ~= null then renderer.vulkan_box_storage.bind() end
+                    if renderer.vulkan_text_storage ~= null then renderer.vulkan_text_storage.bind() end
+                    if renderer.vulkan_image_storage ~= null then renderer.vulkan_image_storage.bind() end
+                    activePlanType = 1
+                end
+                local texture1:LSG.Texture = renderer.vulkan_batch_texture1[batchIndex]
+                local texture2:LSG.Texture = renderer.vulkan_batch_texture2[batchIndex]
+                local texture3:LSG.Texture = renderer.vulkan_batch_texture3[batchIndex]
+                local texture4:LSG.Texture = renderer.vulkan_batch_texture4[batchIndex]
+                local texture5:LSG.Texture = renderer.vulkan_batch_texture5[batchIndex]
+                local texture6:LSG.Texture = renderer.vulkan_batch_texture6[batchIndex]
+                local texture7:LSG.Texture = renderer.vulkan_batch_texture7[batchIndex]
+                if texture1 ~= null then texture1.bind(1) else renderer.atlas_texture.bind(1) end
+                if texture2 ~= null then texture2.bind(2) else renderer.atlas_texture.bind(2) end
+                if texture3 ~= null then texture3.bind(3) else renderer.atlas_texture.bind(3) end
+                if texture4 ~= null then texture4.bind(4) else renderer.atlas_texture.bind(4) end
+                if texture5 ~= null then texture5.bind(5) else renderer.atlas_texture.bind(5) end
+                if texture6 ~= null then texture6.bind(6) else renderer.atlas_texture.bind(6) end
+                if texture7 ~= null then texture7.bind(7) else renderer.atlas_texture.bind(7) end
+                LSG.draw_vertices_from(4,count,0,start)
+            elseif planType == 2 and renderer.vulkan_solid_storage ~= null then
+                if activePlanType ~= 2 then
+                    renderer.vulkan_solid_shader.bind()
+                    renderer.vulkan_solid_shader.vector2("viewport",renderer.viewport_width,renderer.viewport_height)
+                    renderer.vulkan_solid_storage.bind()
+                    activePlanType = 2
+                end
+                LSG.draw_vertices_from(count,1,start,0)
+            end
+        end
+        planIndex = planIndex + 1
+    end
+end
+
+
+fn record_render_run(renderer:Renderer,kind:i32,start:i64,count:i64,texture:LSG.Texture)
     if renderer == null or count <= 0 then return end
     local runCount = renderer.render_run_types.length()
     if runCount > 0 then
@@ -542,10 +873,192 @@ fn record_render_run(renderer:Renderer,kind:i32,start:i64,count:i64,texture:u32)
     renderer.render_run_count = renderer.render_run_types.length()
 end
 
+fn begin_vulkan_batch(renderer:Renderer) -> i64
+    local batchIndex = renderer.vulkan_batch_count
+    renderer.vulkan_batch_texture1.push(null)
+    renderer.vulkan_batch_texture2.push(null)
+    renderer.vulkan_batch_texture3.push(null)
+    renderer.vulkan_batch_texture4.push(null)
+    renderer.vulkan_batch_texture5.push(null)
+    renderer.vulkan_batch_texture6.push(null)
+    renderer.vulkan_batch_texture7.push(null)
+    local planIndex = renderer.vulkan_plan_types.length()
+    renderer.vulkan_plan_types.push(1)
+    renderer.vulkan_plan_starts.push(renderer.vulkan_command_count)
+    renderer.vulkan_plan_counts.push(0)
+    renderer.vulkan_plan_batches.push(batchIndex)
+    renderer.vulkan_batch_count = renderer.vulkan_batch_count + 1
+    return planIndex
+end
+
+fn vulkan_batch_texture_slot(renderer:Renderer,batchIndex:i64,texture:LSG.Texture) -> i32
+    if texture == null then return 0 end
+    if renderer.vulkan_batch_texture1[batchIndex] == texture then return 1 end
+    if renderer.vulkan_batch_texture2[batchIndex] == texture then return 2 end
+    if renderer.vulkan_batch_texture3[batchIndex] == texture then return 3 end
+    if renderer.vulkan_batch_texture4[batchIndex] == texture then return 4 end
+    if renderer.vulkan_batch_texture5[batchIndex] == texture then return 5 end
+    if renderer.vulkan_batch_texture6[batchIndex] == texture then return 6 end
+    if renderer.vulkan_batch_texture7[batchIndex] == texture then return 7 end
+    if renderer.vulkan_batch_texture1[batchIndex] == null then renderer.vulkan_batch_texture1[batchIndex] = texture return 1 end
+    if renderer.vulkan_batch_texture2[batchIndex] == null then renderer.vulkan_batch_texture2[batchIndex] = texture return 2 end
+    if renderer.vulkan_batch_texture3[batchIndex] == null then renderer.vulkan_batch_texture3[batchIndex] = texture return 3 end
+    if renderer.vulkan_batch_texture4[batchIndex] == null then renderer.vulkan_batch_texture4[batchIndex] = texture return 4 end
+    if renderer.vulkan_batch_texture5[batchIndex] == null then renderer.vulkan_batch_texture5[batchIndex] = texture return 5 end
+    if renderer.vulkan_batch_texture6[batchIndex] == null then renderer.vulkan_batch_texture6[batchIndex] = texture return 6 end
+    if renderer.vulkan_batch_texture7[batchIndex] == null then renderer.vulkan_batch_texture7[batchIndex] = texture return 7 end
+    return 0
+end
+
+fn append_vulkan_command(renderer:Renderer,planIndex:i64,kind:i32,itemIndex:i64,textureSlot:i32)
+    renderer.vulkan_command_data.push(kind * 1.0)
+    renderer.vulkan_command_data.push(itemIndex * 1.0)
+    renderer.vulkan_command_data.push(textureSlot * 1.0)
+    renderer.vulkan_command_data.push(0.0)
+    renderer.vulkan_command_count = renderer.vulkan_command_count + 1
+    renderer.vulkan_plan_counts[planIndex] = renderer.vulkan_plan_counts[planIndex] + 1
+end
+
+fn build_vulkan_fallback_plan(renderer:Renderer)
+    renderer.vulkan_command_data.clear()
+    renderer.vulkan_plan_types.clear()
+    renderer.vulkan_plan_starts.clear()
+    renderer.vulkan_plan_counts.clear()
+    renderer.vulkan_plan_batches.clear()
+    renderer.vulkan_batch_texture1.clear()
+    renderer.vulkan_batch_texture2.clear()
+    renderer.vulkan_batch_texture3.clear()
+    renderer.vulkan_batch_texture4.clear()
+    renderer.vulkan_batch_texture5.clear()
+    renderer.vulkan_batch_texture6.clear()
+    renderer.vulkan_batch_texture7.clear()
+    renderer.vulkan_command_count = 0
+    renderer.vulkan_batch_count = 0
+
+    local currentPlan:i64 = -1
+    local currentBatch:i64 = -1
+    local runIndex:i64 = 0
+    while runIndex < renderer.render_run_types.length() do
+        local kind = renderer.render_run_types[runIndex]
+        local start = renderer.render_run_starts[runIndex]
+        local count = renderer.render_run_counts[runIndex]
+        local texture = renderer.render_run_textures[runIndex]
+        if kind == RENDER_RUN_SOLID then
+            if count > 0 then
+                renderer.vulkan_plan_types.push(2)
+                renderer.vulkan_plan_starts.push(start)
+                renderer.vulkan_plan_counts.push(count)
+                renderer.vulkan_plan_batches.push(-1)
+            end
+            currentPlan = -1
+            currentBatch = -1
+        elseif count > 0 then
+            if currentPlan < 0 then
+                currentPlan = begin_vulkan_batch(renderer)
+                currentBatch = renderer.vulkan_plan_batches[currentPlan]
+            end
+            local textureSlot:i32 = 0
+            if kind == RENDER_RUN_IMAGE then
+                textureSlot = vulkan_batch_texture_slot(renderer,currentBatch,texture)
+                if textureSlot == 0 then
+                    currentPlan = begin_vulkan_batch(renderer)
+                    currentBatch = renderer.vulkan_plan_batches[currentPlan]
+                    textureSlot = vulkan_batch_texture_slot(renderer,currentBatch,texture)
+                end
+            end
+            local batchKind:i32 = 1
+            if kind == RENDER_RUN_TEXT then batchKind = 2 end
+            if kind == RENDER_RUN_IMAGE then batchKind = 3 end
+            local itemOffset:i64 = 0
+            while itemOffset < count do
+                append_vulkan_command(renderer,currentPlan,batchKind,start + itemOffset,textureSlot)
+                itemOffset = itemOffset + 1
+            end
+        end
+        runIndex = runIndex + 1
+    end
+end
+
+fn add_vulkan_direct_plan(renderer:Renderer,planType:i32,start:i64,count:i64)
+    renderer.vulkan_plan_types.push(planType)
+    renderer.vulkan_plan_starts.push(start)
+    renderer.vulkan_plan_counts.push(count)
+    renderer.vulkan_plan_batches.push(-1)
+end
+
+fn clear_vulkan_render_plan(renderer:Renderer)
+    renderer.vulkan_command_data.clear()
+    renderer.vulkan_plan_types.clear()
+    renderer.vulkan_plan_starts.clear()
+    renderer.vulkan_plan_counts.clear()
+    renderer.vulkan_plan_batches.clear()
+    renderer.vulkan_batch_texture1.clear()
+    renderer.vulkan_batch_texture2.clear()
+    renderer.vulkan_batch_texture3.clear()
+    renderer.vulkan_batch_texture4.clear()
+    renderer.vulkan_batch_texture5.clear()
+    renderer.vulkan_batch_texture6.clear()
+    renderer.vulkan_batch_texture7.clear()
+    renderer.vulkan_command_count = 0
+    renderer.vulkan_batch_count = 0
+end
+
+fn build_vulkan_analytic_plan(renderer:Renderer)
+    clear_vulkan_render_plan(renderer)
+    local currentPlan:i64 = -1
+    local currentBatch:i64 = -1
+    local runIndex:i64 = 0
+    while runIndex < renderer.render_run_types.length() do
+        local kind = renderer.render_run_types[runIndex]
+        local start = renderer.render_run_starts[runIndex]
+        local count = renderer.render_run_counts[runIndex]
+        local texture = renderer.render_run_textures[runIndex]
+        if kind == RENDER_RUN_VECTOR_EFFECT then
+            if count > 0 then add_vulkan_direct_plan(renderer,2,start,count) end
+            currentPlan = -1
+            currentBatch = -1
+        elseif kind == RENDER_RUN_SOLID then
+            if count > 0 then add_vulkan_direct_plan(renderer,3,start,count) end
+            currentPlan = -1
+            currentBatch = -1
+        elseif count > 0 then
+            if currentPlan < 0 then
+                currentPlan = begin_vulkan_batch(renderer)
+                currentBatch = renderer.vulkan_plan_batches[currentPlan]
+            end
+            local textureSlot:i32 = 0
+            if kind == RENDER_RUN_IMAGE then
+                textureSlot = vulkan_batch_texture_slot(renderer,currentBatch,texture)
+                if textureSlot == 0 then
+                    currentPlan = begin_vulkan_batch(renderer)
+                    currentBatch = renderer.vulkan_plan_batches[currentPlan]
+                    textureSlot = vulkan_batch_texture_slot(renderer,currentBatch,texture)
+                end
+            end
+            local batchKind:i32 = 1
+            if kind == RENDER_RUN_TEXT then batchKind = 2 end
+            if kind == RENDER_RUN_IMAGE then batchKind = 3 end
+            local itemOffset:i64 = 0
+            while itemOffset < count do
+                append_vulkan_command(renderer,currentPlan,batchKind,start + itemOffset,textureSlot)
+                itemOffset = itemOffset + 1
+            end
+        end
+        runIndex = runIndex + 1
+    end
+end
+
+fn set_active_clip_radii(renderer:Renderer,topLeft:f32,topRight:f32,bottomRight:f32,bottomLeft:f32)
+    renderer.active_clip_top_left = topLeft
+    renderer.active_clip_top_right = topRight
+    renderer.active_clip_bottom_right = bottomRight
+    renderer.active_clip_bottom_left = bottomLeft
+end
+
 fn submit_surface_triangle(renderer:Renderer,x:f32,y:f32,x2:f32,y2:f32,x3:f32,y3:f32,r:f32,g:f32,b:f32,a:f32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
-    local start = renderer.solid_vertices.length() / 12
-    push_surface_triangle(renderer.solid_vertices,x,y,x2,y2,x3,y3,r,g,b,a,clipX,clipY,clipWidth,clipHeight)
-    record_render_run(renderer,RENDER_RUN_SOLID,start,3,0)
+    local start = renderer.solid_vertices.length() / 16
+    push_surface_triangle(renderer.solid_vertices,x,y,x2,y2,x3,y3,r,g,b,a,clipX,clipY,clipWidth,clipHeight,renderer.active_clip_top_left,renderer.active_clip_top_right,renderer.active_clip_bottom_right,renderer.active_clip_bottom_left)
+    record_render_run(renderer,RENDER_RUN_SOLID,start,3,null)
 end
 
 fn prepare_box_rect(renderer:Renderer,x:f32,y:f32,width:f32,height:f32)
@@ -597,12 +1110,18 @@ fn submit_prepared_box(renderer:Renderer,style:UI.Style)
     renderer.box_data.push(style.border_top_width) renderer.box_data.push(style.border_right_width) renderer.box_data.push(style.border_bottom_width) renderer.box_data.push(style.border_left_width)
     renderer.box_data.push(style.shadow_x) renderer.box_data.push(style.shadow_y) renderer.box_data.push(style.shadow_blur) renderer.box_data.push(style.shadow_spread)
     renderer.box_data.push(renderer.box_geometry[4]) renderer.box_data.push(renderer.box_geometry[5]) renderer.box_data.push(renderer.box_geometry[6]) renderer.box_data.push(renderer.box_geometry[7])
+    renderer.box_data.push(renderer.active_clip_top_left) renderer.box_data.push(renderer.active_clip_top_right) renderer.box_data.push(renderer.active_clip_bottom_right) renderer.box_data.push(renderer.active_clip_bottom_left)
     -- Opacity/gradient/outline plus outline color and shape information.
     renderer.box_data.push(style.opacity) renderer.box_data.push(style.gradient_mode) renderer.box_data.push(style.gradient_angle) renderer.box_data.push(style.outline_width)
     renderer.box_data.push(color_red(style.outline_color)) renderer.box_data.push(color_green(style.outline_color)) renderer.box_data.push(color_blue(style.outline_color)) renderer.box_data.push(color_alpha(style.outline_color))
     renderer.box_data.push(style.outline_offset) renderer.box_data.push(renderer.box_geometry[8]) renderer.box_data.push(renderer.box_geometry[9]) renderer.box_data.push(0.0)
     renderer.box_data.push(renderer.box_geometry[10]) renderer.box_data.push(renderer.box_geometry[11]) renderer.box_data.push(renderer.box_geometry[12]) renderer.box_data.push(renderer.box_geometry[13])
-    record_render_run(renderer,RENDER_RUN_BOX,renderer.box_count,1,0)
+    local vectorRun = RENDER_RUN_VECTOR_FAST
+    local shapeMode = renderer.box_geometry[8]
+    if color_alpha(style.shadow_color) > 0.001 or (style.outline_width > 0.0 and color_alpha(style.outline_color) > 0.001) or (shapeMode > 1.5 and shapeMode < 2.5) then
+        vectorRun = RENDER_RUN_VECTOR_EFFECT
+    end
+    record_render_run(renderer,vectorRun,renderer.box_count,1,null)
     renderer.box_count = renderer.box_count + 1
 end
 
@@ -619,10 +1138,11 @@ fn submit_text_at(renderer:Renderer,style:UI.Style,text:string,x:f32,y:f32,clipX
     local appended = Font.append_text_instances(
         renderer.face,renderer.atlas,text,x,y,scale,renderer.text_data,
         color_red(style.text_color),color_green(style.text_color),color_blue(style.text_color),color_alpha(style.text_color) * style.opacity,
-        clipX,clipY,clipWidth,clipHeight
+        clipX,clipY,clipWidth,clipHeight,
+        renderer.active_clip_top_left,renderer.active_clip_top_right,renderer.active_clip_bottom_right,renderer.active_clip_bottom_left
     )
     if appended > 0 then
-        record_render_run(renderer,RENDER_RUN_TEXT,renderer.text_glyph_count,appended,0)
+        record_render_run(renderer,RENDER_RUN_TEXT,renderer.text_glyph_count,appended,null)
         renderer.text_glyph_count = renderer.text_glyph_count + appended
         renderer.text_count = renderer.text_count + 1
     end
@@ -1081,8 +1601,8 @@ fn submit_scrollbars(renderer:Renderer,element:UI.Element,style:UI.Style,parentC
     end
 end
 
-fn submit_image(renderer:Renderer,texture:u32,x:f32,y:f32,width:f32,height:f32,color:u32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
-    if texture == 0 or width <= 0.0 or height <= 0.0 then return end
+fn submit_image(renderer:Renderer,texture:LSG.Texture,x:f32,y:f32,width:f32,height:f32,color:u32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32)
+    if texture == null or not texture.ready() or width <= 0.0 or height <= 0.0 then return end
 
     -- Preserve painter order while collapsing consecutive uses of the same
     -- texture into one instanced draw. A texture atlas therefore stays one
@@ -1108,6 +1628,10 @@ fn submit_image(renderer:Renderer,texture:u32,x:f32,y:f32,width:f32,height:f32,c
     renderer.image_data.push(clipY)
     renderer.image_data.push(clipWidth)
     renderer.image_data.push(clipHeight)
+    renderer.image_data.push(renderer.active_clip_top_left)
+    renderer.image_data.push(renderer.active_clip_top_right)
+    renderer.image_data.push(renderer.active_clip_bottom_right)
+    renderer.image_data.push(renderer.active_clip_bottom_left)
     record_render_run(renderer,RENDER_RUN_IMAGE,renderer.image_count,1,texture)
     renderer.image_count = renderer.image_count + 1
 end
@@ -1388,16 +1912,18 @@ end
 
 fn submit_tree(renderer:Renderer,element:UI.Element,parentClipX:f32,parentClipY:f32,parentClipWidth:f32,parentClipHeight:f32)
     if element == null or element.hidden then return end
+    -- Keep rounded clipping in renderer state instead of passing four extra
+    -- scalar values through every recursive call. This trims hot-tree call
+    -- overhead and keeps all four corner values intact across deep UI trees.
+    local parentClipTopLeft = renderer.active_clip_top_left
+    local parentClipTopRight = renderer.active_clip_top_right
+    local parentClipBottomRight = renderer.active_clip_bottom_right
+    local parentClipBottomLeft = renderer.active_clip_bottom_left
     if element.kind == UI.ELEMENT_CANVAS_SHAPE then return end
     local style = element.current_style()
     if not style.visibility or style.display == UI.DISPLAY_NONE then return end
     renderer.retained_count = renderer.retained_count + 1
 
-    -- Keep all overlap math inline. The O6 native emitter may keep scalar
-    -- floats in volatile XMM registers across ordinary helper calls, so the
-    -- previous maximum()/minimum() chain could overwrite an earlier bound and
-    -- classify the entire root as offscreen. Sequential branches avoid those
-    -- call boundaries and also avoid constructing a compound float boolean.
     local parentRight = parentClipX + parentClipWidth
     local parentBottom = parentClipY + parentClipHeight
     local visibleLeft = parentClipX
@@ -1418,31 +1944,26 @@ fn submit_tree(renderer:Renderer,element:UI.Element,parentClipX:f32,parentClipY:
     local clipsChildren = style.overflow_x ~= UI.OVERFLOW_VISIBLE or style.overflow_y ~= UI.OVERFLOW_VISIBLE
     if not elementVisible then
         renderer.culled_count = renderer.culled_count + 1
-        -- A clipped/offscreen subtree cannot contribute any pixels. Overflow-
-        -- visible containers may still have children extending into the viewport.
         if clipsChildren or element.children.length() == 0 then return end
         local overflowIndex = 0
         while overflowIndex < element.children.length() do
+            set_active_clip_radii(renderer,parentClipTopLeft,parentClipTopRight,parentClipBottomRight,parentClipBottomLeft)
             submit_tree(renderer,element.children.at(overflowIndex),parentClipX,parentClipY,parentClipWidth,parentClipHeight)
             overflowIndex = overflowIndex + 1
         end
+        set_active_clip_radii(renderer,parentClipTopLeft,parentClipTopRight,parentClipBottomRight,parentClipBottomLeft)
         return
     end
 
-    local clipX = parentClipX
-    local clipY = parentClipY
-    local clipRight = parentRight
-    local clipBottom = parentBottom
-    if clipsChildren then
-        clipX = visibleLeft
-        clipY = visibleTop
-        clipRight = visibleRight
-        clipBottom = visibleBottom
-    end
-    local clipWidth = clipRight - clipX
-    local clipHeight = clipBottom - clipY
-    if clipWidth < 0.0 then clipWidth = 0.0 end
-    if clipHeight < 0.0 then clipHeight = 0.0 end
+    -- The element itself is clipped by its parent. Its descendants are clipped
+    -- by the inner border box when overflow is hidden/scrolling. Keeping these
+    -- as two regions prevents the element's own shadow from being cut off while
+    -- still giving images and text true CSS-style rounded overflow clipping.
+    local visualClipX = parentClipX
+    local visualClipY = parentClipY
+    local visualClipWidth = parentClipWidth
+    local visualClipHeight = parentClipHeight
+    set_active_clip_radii(renderer,parentClipTopLeft,parentClipTopRight,parentClipBottomRight,parentClipBottomLeft)
 
     renderer.element_count = renderer.element_count + 1
     if renderer.diagnostics_enabled and renderer.diagnostics_frames == 0 and renderer.element_count <= 40 then
@@ -1471,21 +1992,83 @@ fn submit_tree(renderer:Renderer,element:UI.Element,parentClipX:f32,parentClipY:
         renderer.diagnostics.number("children=",element.children.length())
     end
 
-    submit_element_box(renderer,style,element,clipX,clipY,clipWidth,clipHeight)
-    if element.texture ~= 0 then submit_image(renderer,element.texture,element.content_x,element.content_y,element.content_width,element.content_height,style.image_tint,clipX,clipY,clipWidth,clipHeight) end
-    local controlHandledText = submit_control_visual(renderer,element,style,clipX,clipY,clipWidth,clipHeight)
+    submit_element_box(renderer,style,element,visualClipX,visualClipY,visualClipWidth,visualClipHeight)
+    if element.texture ~= null then submit_image(renderer,element.texture,element.content_x,element.content_y,element.content_width,element.content_height,style.image_tint,visualClipX,visualClipY,visualClipWidth,visualClipHeight) end
+    local controlHandledText = submit_control_visual(renderer,element,style,visualClipX,visualClipY,visualClipWidth,visualClipHeight)
     if UI.is_select_control(element) and element.open then renderer.select_overlays.push(element) end
-    if element.text ~= null and not controlHandledText then submit_text_at(renderer,style,element.text,element.content_x,element.content_y,clipX,clipY,clipWidth,clipHeight) end
-    if element.kind == UI.ELEMENT_CANVAS then submit_declarative_canvas(renderer,element,clipX,clipY,clipWidth,clipHeight) end
-    if element.canvas_context ~= null then submit_canvas(renderer,element,clipX,clipY,clipWidth,clipHeight) end
+    if element.text ~= null and not controlHandledText then submit_text_at(renderer,style,element.text,element.content_x,element.content_y,visualClipX,visualClipY,visualClipWidth,visualClipHeight) end
+    if element.kind == UI.ELEMENT_CANVAS then submit_declarative_canvas(renderer,element,visualClipX,visualClipY,visualClipWidth,visualClipHeight) end
+    if element.canvas_context ~= null then submit_canvas(renderer,element,visualClipX,visualClipY,visualClipWidth,visualClipHeight) end
 
-    if clipWidth <= 0.0 or clipHeight <= 0.0 then return end
+    local childClipX = parentClipX
+    local childClipY = parentClipY
+    local childClipRight = parentRight
+    local childClipBottom = parentBottom
+    local childTopLeft = parentClipTopLeft
+    local childTopRight = parentClipTopRight
+    local childBottomRight = parentClipBottomRight
+    local childBottomLeft = parentClipBottomLeft
+
+    if clipsChildren then
+        local innerX = element.x + style.border_left_width
+        local innerY = element.y + style.border_top_width
+        local innerRight = element.x + element.width - style.border_right_width
+        local innerBottom = element.y + element.height - style.border_bottom_width
+        if innerRight < innerX then innerRight = innerX end
+        if innerBottom < innerY then innerBottom = innerY end
+
+        childClipX = parentClipX
+        if innerX > childClipX then childClipX = innerX end
+        childClipY = parentClipY
+        if innerY > childClipY then childClipY = innerY end
+        childClipRight = parentRight
+        if innerRight < childClipRight then childClipRight = innerRight end
+        childClipBottom = parentBottom
+        if innerBottom < childClipBottom then childClipBottom = innerBottom end
+
+        local innerTopLeft = style.radius_top_left - maximum(style.border_left_width,style.border_top_width)
+        local innerTopRight = style.radius_top_right - maximum(style.border_right_width,style.border_top_width)
+        local innerBottomRight = style.radius_bottom_right - maximum(style.border_right_width,style.border_bottom_width)
+        local innerBottomLeft = style.radius_bottom_left - maximum(style.border_left_width,style.border_bottom_width)
+        if innerTopLeft < 0.0 then innerTopLeft = 0.0 end
+        if innerTopRight < 0.0 then innerTopRight = 0.0 end
+        if innerBottomRight < 0.0 then innerBottomRight = 0.0 end
+        if innerBottomLeft < 0.0 then innerBottomLeft = 0.0 end
+
+        local leftFromInner = innerX >= parentClipX
+        local topFromInner = innerY >= parentClipY
+        local rightFromInner = innerRight <= parentRight
+        local bottomFromInner = innerBottom <= parentBottom
+
+        childTopLeft = 0.0
+        if leftFromInner and topFromInner then childTopLeft = innerTopLeft end
+        if not leftFromInner and not topFromInner then childTopLeft = parentClipTopLeft end
+        childTopRight = 0.0
+        if rightFromInner and topFromInner then childTopRight = innerTopRight end
+        if not rightFromInner and not topFromInner then childTopRight = parentClipTopRight end
+        childBottomRight = 0.0
+        if rightFromInner and bottomFromInner then childBottomRight = innerBottomRight end
+        if not rightFromInner and not bottomFromInner then childBottomRight = parentClipBottomRight end
+        childBottomLeft = 0.0
+        if leftFromInner and bottomFromInner then childBottomLeft = innerBottomLeft end
+        if not leftFromInner and not bottomFromInner then childBottomLeft = parentClipBottomLeft end
+    end
+
+    local childClipWidth = childClipRight - childClipX
+    local childClipHeight = childClipBottom - childClipY
+    if childClipWidth < 0.0 then childClipWidth = 0.0 end
+    if childClipHeight < 0.0 then childClipHeight = 0.0 end
+    if childClipWidth <= 0.0 or childClipHeight <= 0.0 then return end
+
     local index = 0
     while index < element.children.length() do
-        submit_tree(renderer,element.children.at(index),clipX,clipY,clipWidth,clipHeight)
+        set_active_clip_radii(renderer,childTopLeft,childTopRight,childBottomRight,childBottomLeft)
+        submit_tree(renderer,element.children.at(index),childClipX,childClipY,childClipWidth,childClipHeight)
         index = index + 1
     end
-    submit_scrollbars(renderer,element,style,parentClipX,parentClipY,parentClipWidth,parentClipHeight)
+    set_active_clip_radii(renderer,childTopLeft,childTopRight,childBottomRight,childBottomLeft)
+    submit_scrollbars(renderer,element,style,childClipX,childClipY,childClipWidth,childClipHeight)
+    set_active_clip_radii(renderer,parentClipTopLeft,parentClipTopRight,parentClipBottomRight,parentClipBottomLeft)
 end
 
 export fn create(fontPath:string,fontPixelHeight:i32) -> Renderer

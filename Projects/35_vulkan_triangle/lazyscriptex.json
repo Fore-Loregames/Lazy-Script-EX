@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/35_vulkan_triangle.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

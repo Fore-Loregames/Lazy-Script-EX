@@ -10,6 +10,7 @@ flat in vec4 cornerRadii;
 flat in vec4 borderWidths;
 flat in vec4 shadowParams;
 flat in vec4 clipRect;
+flat in vec4 clipRadii;
 flat in vec4 misc;
 flat in vec4 extra;
 flat in vec4 extra2;
@@ -72,8 +73,14 @@ vec4 selectedBorderColor(vec2 point) {
 }
 
 void main() {
+    float clipCoverage = 1.0;
     if (clipRect.z > 0.0 && clipRect.w > 0.0) {
-        if (pixelPosition.x < clipRect.x || pixelPosition.y < clipRect.y || pixelPosition.x > clipRect.x + clipRect.z || pixelPosition.y > clipRect.y + clipRect.w) discard;
+        vec2 clipCenter = clipRect.xy + clipRect.zw * 0.5;
+        vec2 clipHalf = max(clipRect.zw * 0.5, vec2(0.0));
+        float clipDistance = roundedBoxDistance(pixelPosition - clipCenter, clipHalf, clipRadii);
+        float clipAA = max(fwidth(clipDistance), 0.75);
+        clipCoverage = 1.0 - smoothstep(-clipAA, clipAA, clipDistance);
+        if (clipCoverage <= 0.001) discard;
     }
 
     vec2 center = boxRect.xy + boxRect.zw * 0.5;
@@ -137,7 +144,7 @@ void main() {
         result = over(result, vec4(extra.rgb, outlineAlpha));
     }
 
-    result.a *= misc.x;
+    result.a *= misc.x * clipCoverage;
     if (result.a <= 0.001) discard;
     outputColor = result;
 }

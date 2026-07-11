@@ -1,4 +1,80 @@
 {
+  "LSG game window": {
+    "prefix": "lsx-window",
+    "body": [
+      "use \"@LazyScript/LSG.lsx\" as LSG",
+      "",
+      "fn main()",
+      "    local window = LSG.open(\"${1:My LSX Game}\", ${2:1280}, ${3:720})",
+      "    if not window.ready() then return LSG.show_error(window.error()) end",
+      "    window.set_vsync(${4:false})",
+      "",
+      "    while window.running() do",
+      "        window.begin(${5:0.03}, ${6:0.04}, ${7:0.07})",
+      "        $0",
+      "        window.end()",
+      "    end",
+      "",
+      "    window.destroy()",
+      "    return 0",
+      "end"
+    ],
+    "description": "Create a beginner-facing LSG window with the clear begin()/end() frame pair"
+  },
+  "LSG Vulkan game window": {
+    "prefix": "lsx-vulkan-window",
+    "body": [
+      "use \"@LazyScript/LSG.lsx\" as LSG",
+      "",
+      "fn main()",
+      "    LSG.use_vulkan()",
+      "    local window = LSG.open(\"${1:My Vulkan Game}\", ${2:1280}, ${3:720})",
+      "    if not window.ready() then return LSG.show_error(window.error()) end",
+      "    window.set_vsync(${4:false})",
+      "",
+      "    while window.running() do",
+      "        window.begin(${5:0.03}, ${6:0.04}, ${7:0.07})",
+      "        $0",
+      "        window.end()",
+      "    end",
+      "",
+      "    window.destroy()",
+      "    return 0",
+      "end"
+    ],
+    "description": "Create a Vulkan LSG window without exposing Vulkan device or swapchain calls"
+  },
+  "LSG multiple windows": {
+    "prefix": "lsx-multiple-windows",
+    "body": [
+      "use \"@LazyScript/LSG.lsx\" as LSG",
+      "",
+      "fn main()",
+      "    LSG.use_vulkan()",
+      "    local first = LSG.open(\"${1:Window A}\", ${2:640}, ${3:400})",
+      "    local second = LSG.open(\"${4:Window B}\", ${5:640}, ${6:400})",
+      "    if not first.ready() then return LSG.show_error(first.error()) end",
+      "    if not second.ready() then return LSG.show_error(second.error()) end",
+      "    first.set_vsync(false)",
+      "    second.set_vsync(false)",
+      "",
+      "    while first.running() and second.running() do",
+      "        first.activate()",
+      "        first.begin(${7:0.20}, ${8:0.04}, ${9:0.06})",
+      "        first.end()",
+      "",
+      "        second.activate()",
+      "        second.begin(${10:0.03}, ${11:0.08}, ${12:0.22})",
+      "        second.end()",
+      "    end",
+      "",
+      "    second.destroy()",
+      "    first.destroy()",
+      "    return 0",
+      "end"
+    ],
+    "description": "Render independent LSG windows through activate(), begin(), and end()"
+  },
   "Native GLFW game project": {
     "prefix": "lsx-game",
     "body": [

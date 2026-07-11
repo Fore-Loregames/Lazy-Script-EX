@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/38_vulkan_indexed_cube_depth.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

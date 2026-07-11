@@ -1,0 +1,27 @@
+use "@LazyScript/LSG.lsx" as LSG
+
+fn main()
+    LSG.use_vulkan()
+    local window = LSG.open("56 - Vulkan gamepad polling",900,600)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+    local gamepad = LSG.gamepad_state(LSG.GAMEPAD_ONE)
+
+    while window.running() do
+        local red = 0.08
+        local green = 0.08
+        local blue = 0.12
+        if LSG.is_gamepad_connected(LSG.GAMEPAD_ONE) and gamepad.refresh(LSG.GAMEPAD_ONE) then
+            red = (gamepad.axis(LSG.GAMEPAD_LEFT_X) + 1.0) * 0.5
+            green = (gamepad.axis(LSG.GAMEPAD_LEFT_Y) + 1.0) * 0.5
+            blue = 0.4
+        end
+        window.begin(red,green,blue)
+        window.end()
+    end
+
+    gamepad.release()
+    gamepad.destroy()
+    window.destroy()
+    return 0
+end

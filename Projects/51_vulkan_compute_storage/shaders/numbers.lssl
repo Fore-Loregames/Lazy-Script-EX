@@ -1,0 +1,11 @@
+shader VulkanNumbers
+vulkan
+compute
+    workers = {64,1,1}
+    storage values = Number at 0
+    main = fn()
+        local index = worker.id.x
+        values[index] = Number(index) * 2.0 + 1.0
+    end
+end
+end

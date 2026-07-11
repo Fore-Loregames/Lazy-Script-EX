@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/54_vulkan_sdf_text.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

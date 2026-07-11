@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/43_vulkan_multiple_windows.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

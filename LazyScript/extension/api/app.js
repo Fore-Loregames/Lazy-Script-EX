@@ -2,9 +2,7 @@
 
 const apiData = window.LSX_API_DATA || { entries: [], stats: { total: 0, modules: {}, kinds: {} }, manifest: {} };
 
-const fullAppSource = `use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+const fullAppSource = `use "@LazyScript/LSG.lsx" as LSG
 use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
 use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
 
@@ -86,92 +84,70 @@ fn hello_clicked(element,event,props)
     return 0
 end
 
-fn fail(message)
-    Win32.MessageBoxA(0,message,"LazyUI",Win32.MB_OK+Win32.MB_ICONERROR)
-    return 1
-end
+fn fail(message) return LSG.show_error(message) end
 
 fn main()
-    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then
-        return fail("GLFW initialization failed.")
-    end
-
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
-
-    local window = GLFW.glfwCreateWindow(900,600,"My First LazyUI App",0,0)
-    if window == 0 then return fail("Window creation failed.") end
-
-    GLFW.glfwMakeContextCurrent(window)
-    GLFW.glfwSwapInterval(1)
-    if GL.lsxLoadOpenGL() < 1 then return fail("OpenGL loading failed.") end
+    LSG.use_vulkan()
+    local window = LSG.open("My First LazyUI App",900,600)
+    if not window.ready() then return fail(window.error()) end
+    window.set_vsync(true)
 
     local props = AppProps.new()
     local root = app_view(props)
     local document = UI.document(root)
     props.document = document
     local renderer = UIRenderer.create(null,64)
-    local window_input = UI.connect_window_input(window,document)
-    local framebuffer = GLFW.FramebufferSize.new()
-    local window_size = GLFW.WindowSize.new()
-    local cursor = GLFW.CursorPosition.new()
+    if not renderer.ready then
+        document.destroy()
+        props.destroy()
+        renderer.destroy()
+        window.destroy()
+        return fail("LazyUI renderer initialization failed.")
+    end
+
+    local window_input = UI.connect_graphics_input(window,document)
+    local logical_size = LSG.window_size()
+    local cursor = LSG.cursor()
     local mouse_down = false
 
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window)
-        window_size.refresh(window)
-        cursor.refresh(window)
-
-        document.resize(framebuffer.width,framebuffer.height)
+    while window.running() do
+        logical_size.refresh(window)
+        document.resize(window.width,window.height)
+        window.cursor_position(cursor)
         document.pointer_move_scaled(
             cursor.x,
             cursor.y,
-            window_size.width,
-            window_size.height
+            logical_size.width,
+            logical_size.height
         )
 
-        local pressed = GLFW.glfwGetMouseButton(
-            window,
-            GLFW.GLFW_MOUSE_BUTTON_LEFT
-        ) == GLFW.GLFW_PRESS
-
+        local pressed = window.is_mouse_down(LSG.Mouse.Left)
         if pressed and not mouse_down then
-            document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+            document.pointer_down_button(LSG.Mouse.Left)
         end
         if not pressed and mouse_down then
-            document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+            document.pointer_up_button(LSG.Mouse.Left)
         end
         mouse_down = pressed
 
-        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
-        GL.glClearColor(0.03,0.05,0.08,1.0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-
-        renderer.begin(framebuffer.width,framebuffer.height)
+        window.begin(0.03,0.05,0.08)
+        renderer.begin(window.width,window.height)
         renderer.submit(root)
         renderer.flush()
-
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
+        window.end()
     end
 
     window_input.destroy()
     cursor.destroy()
-    window_size.destroy()
-    framebuffer.destroy()
+    logical_size.destroy()
     document.destroy()
     props.destroy()
     renderer.destroy()
-    GLFW.glfwDestroyWindow(window)
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
+    window.destroy()
     return 0
 end`;
 
-const welcomeCompleteSource = `use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+const welcomeCompleteSource = `use "@LazyScript/LSG.lsx" as LSG
 use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
 use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
 
@@ -258,35 +234,13 @@ fn create_clicked(element,event,props)
     return 0
 end
 
-fn fail(message)
-    Win32.MessageBoxA(0,message,"LazyUI",Win32.MB_OK+Win32.MB_ICONERROR)
-    return 1
-end
+fn fail(message) return LSG.show_error(message) end
 
 fn run_window(root,title,width,height,props)
-    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then
-        return fail("GLFW initialization failed.")
-    end
-
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
-
-    local window = GLFW.glfwCreateWindow(width,height,title,0,0)
-    if window == 0 then
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
-        return fail("Window creation failed.")
-    end
-
-    GLFW.glfwMakeContextCurrent(window)
-    GLFW.glfwSwapInterval(1)
-    if GL.lsxLoadOpenGL() < 1 then
-        GLFW.glfwDestroyWindow(window)
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
-        return fail("OpenGL loading failed.")
-    end
+    LSG.use_vulkan()
+    local window = LSG.open(title,width,height)
+    if not window.ready() then return fail(window.error()) end
+    window.set_vsync(true)
 
     local document = UI.document(root)
     props.document = document
@@ -294,65 +248,48 @@ fn run_window(root,title,width,height,props)
     if not renderer.ready then
         document.destroy()
         renderer.destroy()
-        GLFW.glfwDestroyWindow(window)
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
+        window.destroy()
         return fail("LazyUI renderer initialization failed.")
     end
 
-    local window_input = UI.connect_window_input(window,document)
-    local framebuffer = GLFW.FramebufferSize.new()
-    local window_size = GLFW.WindowSize.new()
-    local cursor = GLFW.CursorPosition.new()
+    local window_input = UI.connect_graphics_input(window,document)
+    local logical_size = LSG.window_size()
+    local cursor = LSG.cursor()
     local mouse_down = false
 
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window)
-        window_size.refresh(window)
-        cursor.refresh(window)
-
-        document.resize(framebuffer.width,framebuffer.height)
+    while window.running() do
+        logical_size.refresh(window)
+        document.resize(window.width,window.height)
+        window.cursor_position(cursor)
         document.pointer_move_scaled(
             cursor.x,
             cursor.y,
-            window_size.width,
-            window_size.height
+            logical_size.width,
+            logical_size.height
         )
 
-        local pressed = GLFW.glfwGetMouseButton(
-            window,
-            GLFW.GLFW_MOUSE_BUTTON_LEFT
-        ) == GLFW.GLFW_PRESS
-
+        local pressed = window.is_mouse_down(LSG.Mouse.Left)
         if pressed and not mouse_down then
-            document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+            document.pointer_down_button(LSG.Mouse.Left)
         end
         if not pressed and mouse_down then
-            document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+            document.pointer_up_button(LSG.Mouse.Left)
         end
         mouse_down = pressed
 
-        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
-        GL.glClearColor(0.03,0.05,0.08,1.0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-
-        renderer.begin(framebuffer.width,framebuffer.height)
+        window.begin(0.03,0.05,0.08)
+        renderer.begin(window.width,window.height)
         renderer.submit(root)
         renderer.flush()
-
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
+        window.end()
     end
 
     window_input.destroy()
     cursor.destroy()
-    window_size.destroy()
-    framebuffer.destroy()
+    logical_size.destroy()
     document.destroy()
     renderer.destroy()
-    GLFW.glfwDestroyWindow(window)
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
+    window.destroy()
     return 0
 end
 
@@ -364,9 +301,7 @@ fn main()
     return result
 end`;
 
-const counterCompleteSource = `use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+const counterCompleteSource = `use "@LazyScript/LSG.lsx" as LSG
 use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
 use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
 
@@ -458,35 +393,13 @@ fn change_count(element,event,props)
     return 0
 end
 
-fn fail(message)
-    Win32.MessageBoxA(0,message,"LazyUI",Win32.MB_OK+Win32.MB_ICONERROR)
-    return 1
-end
+fn fail(message) return LSG.show_error(message) end
 
 fn run_window(root,title,width,height,props)
-    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then
-        return fail("GLFW initialization failed.")
-    end
-
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
-
-    local window = GLFW.glfwCreateWindow(width,height,title,0,0)
-    if window == 0 then
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
-        return fail("Window creation failed.")
-    end
-
-    GLFW.glfwMakeContextCurrent(window)
-    GLFW.glfwSwapInterval(1)
-    if GL.lsxLoadOpenGL() < 1 then
-        GLFW.glfwDestroyWindow(window)
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
-        return fail("OpenGL loading failed.")
-    end
+    LSG.use_vulkan()
+    local window = LSG.open(title,width,height)
+    if not window.ready() then return fail(window.error()) end
+    window.set_vsync(true)
 
     local document = UI.document(root)
     props.document = document
@@ -494,65 +407,48 @@ fn run_window(root,title,width,height,props)
     if not renderer.ready then
         document.destroy()
         renderer.destroy()
-        GLFW.glfwDestroyWindow(window)
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
+        window.destroy()
         return fail("LazyUI renderer initialization failed.")
     end
 
-    local window_input = UI.connect_window_input(window,document)
-    local framebuffer = GLFW.FramebufferSize.new()
-    local window_size = GLFW.WindowSize.new()
-    local cursor = GLFW.CursorPosition.new()
+    local window_input = UI.connect_graphics_input(window,document)
+    local logical_size = LSG.window_size()
+    local cursor = LSG.cursor()
     local mouse_down = false
 
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window)
-        window_size.refresh(window)
-        cursor.refresh(window)
-
-        document.resize(framebuffer.width,framebuffer.height)
+    while window.running() do
+        logical_size.refresh(window)
+        document.resize(window.width,window.height)
+        window.cursor_position(cursor)
         document.pointer_move_scaled(
             cursor.x,
             cursor.y,
-            window_size.width,
-            window_size.height
+            logical_size.width,
+            logical_size.height
         )
 
-        local pressed = GLFW.glfwGetMouseButton(
-            window,
-            GLFW.GLFW_MOUSE_BUTTON_LEFT
-        ) == GLFW.GLFW_PRESS
-
+        local pressed = window.is_mouse_down(LSG.Mouse.Left)
         if pressed and not mouse_down then
-            document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+            document.pointer_down_button(LSG.Mouse.Left)
         end
         if not pressed and mouse_down then
-            document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+            document.pointer_up_button(LSG.Mouse.Left)
         end
         mouse_down = pressed
 
-        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
-        GL.glClearColor(0.03,0.05,0.08,1.0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-
-        renderer.begin(framebuffer.width,framebuffer.height)
+        window.begin(0.03,0.05,0.08)
+        renderer.begin(window.width,window.height)
         renderer.submit(root)
         renderer.flush()
-
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
+        window.end()
     end
 
     window_input.destroy()
     cursor.destroy()
-    window_size.destroy()
-    framebuffer.destroy()
+    logical_size.destroy()
     document.destroy()
     renderer.destroy()
-    GLFW.glfwDestroyWindow(window)
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
+    window.destroy()
     return 0
 end
 
@@ -566,9 +462,7 @@ fn main()
     return result
 end`;
 
-const formCompleteSource = `use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+const formCompleteSource = `use "@LazyScript/LSG.lsx" as LSG
 use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
 use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
 
@@ -684,35 +578,13 @@ fn notes_changed(element,event,props)
     return 0
 end
 
-fn fail(message)
-    Win32.MessageBoxA(0,message,"LazyUI",Win32.MB_OK+Win32.MB_ICONERROR)
-    return 1
-end
+fn fail(message) return LSG.show_error(message) end
 
 fn run_window(root,title,width,height,props)
-    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then
-        return fail("GLFW initialization failed.")
-    end
-
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
-
-    local window = GLFW.glfwCreateWindow(width,height,title,0,0)
-    if window == 0 then
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
-        return fail("Window creation failed.")
-    end
-
-    GLFW.glfwMakeContextCurrent(window)
-    GLFW.glfwSwapInterval(1)
-    if GL.lsxLoadOpenGL() < 1 then
-        GLFW.glfwDestroyWindow(window)
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
-        return fail("OpenGL loading failed.")
-    end
+    LSG.use_vulkan()
+    local window = LSG.open(title,width,height)
+    if not window.ready() then return fail(window.error()) end
+    window.set_vsync(true)
 
     local document = UI.document(root)
     props.document = document
@@ -720,65 +592,48 @@ fn run_window(root,title,width,height,props)
     if not renderer.ready then
         document.destroy()
         renderer.destroy()
-        GLFW.glfwDestroyWindow(window)
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
+        window.destroy()
         return fail("LazyUI renderer initialization failed.")
     end
 
-    local window_input = UI.connect_window_input(window,document)
-    local framebuffer = GLFW.FramebufferSize.new()
-    local window_size = GLFW.WindowSize.new()
-    local cursor = GLFW.CursorPosition.new()
+    local window_input = UI.connect_graphics_input(window,document)
+    local logical_size = LSG.window_size()
+    local cursor = LSG.cursor()
     local mouse_down = false
 
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window)
-        window_size.refresh(window)
-        cursor.refresh(window)
-
-        document.resize(framebuffer.width,framebuffer.height)
+    while window.running() do
+        logical_size.refresh(window)
+        document.resize(window.width,window.height)
+        window.cursor_position(cursor)
         document.pointer_move_scaled(
             cursor.x,
             cursor.y,
-            window_size.width,
-            window_size.height
+            logical_size.width,
+            logical_size.height
         )
 
-        local pressed = GLFW.glfwGetMouseButton(
-            window,
-            GLFW.GLFW_MOUSE_BUTTON_LEFT
-        ) == GLFW.GLFW_PRESS
-
+        local pressed = window.is_mouse_down(LSG.Mouse.Left)
         if pressed and not mouse_down then
-            document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+            document.pointer_down_button(LSG.Mouse.Left)
         end
         if not pressed and mouse_down then
-            document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+            document.pointer_up_button(LSG.Mouse.Left)
         end
         mouse_down = pressed
 
-        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
-        GL.glClearColor(0.03,0.05,0.08,1.0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-
-        renderer.begin(framebuffer.width,framebuffer.height)
+        window.begin(0.03,0.05,0.08)
+        renderer.begin(window.width,window.height)
         renderer.submit(root)
         renderer.flush()
-
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
+        window.end()
     end
 
     window_input.destroy()
     cursor.destroy()
-    window_size.destroy()
-    framebuffer.destroy()
+    logical_size.destroy()
     document.destroy()
     renderer.destroy()
-    GLFW.glfwDestroyWindow(window)
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
+    window.destroy()
     return 0
 end
 
@@ -790,9 +645,7 @@ fn main()
     return result
 end`;
 
-const scrollingCompleteSource = `use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+const scrollingCompleteSource = `use "@LazyScript/LSG.lsx" as LSG
 use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
 use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
 
@@ -875,100 +728,61 @@ lshtml inventory_view = {(
     </ui>
 )}
 
-fn fail(message)
-    Win32.MessageBoxA(0,message,"LazyUI",Win32.MB_OK+Win32.MB_ICONERROR)
-    return 1
-end
+fn fail(message) return LSG.show_error(message) end
 
 fn run_window(root,title,width,height)
-    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then
-        return fail("GLFW initialization failed.")
-    end
-
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
-
-    local window = GLFW.glfwCreateWindow(width,height,title,0,0)
-    if window == 0 then
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
-        return fail("Window creation failed.")
-    end
-
-    GLFW.glfwMakeContextCurrent(window)
-    GLFW.glfwSwapInterval(1)
-    if GL.lsxLoadOpenGL() < 1 then
-        GLFW.glfwDestroyWindow(window)
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
-        return fail("OpenGL loading failed.")
-    end
+    LSG.use_vulkan()
+    local window = LSG.open(title,width,height)
+    if not window.ready() then return fail(window.error()) end
+    window.set_vsync(true)
 
     local document = UI.document(root)
     local renderer = UIRenderer.create(null,64)
     if not renderer.ready then
         document.destroy()
         renderer.destroy()
-        GLFW.glfwDestroyWindow(window)
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
+        window.destroy()
         return fail("LazyUI renderer initialization failed.")
     end
 
-    local window_input = UI.connect_window_input(window,document)
-    local framebuffer = GLFW.FramebufferSize.new()
-    local window_size = GLFW.WindowSize.new()
-    local cursor = GLFW.CursorPosition.new()
+    local window_input = UI.connect_graphics_input(window,document)
+    local logical_size = LSG.window_size()
+    local cursor = LSG.cursor()
     local mouse_down = false
 
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window)
-        window_size.refresh(window)
-        cursor.refresh(window)
-
-        document.resize(framebuffer.width,framebuffer.height)
+    while window.running() do
+        logical_size.refresh(window)
+        document.resize(window.width,window.height)
+        window.cursor_position(cursor)
         document.pointer_move_scaled(
             cursor.x,
             cursor.y,
-            window_size.width,
-            window_size.height
+            logical_size.width,
+            logical_size.height
         )
 
-        local pressed = GLFW.glfwGetMouseButton(
-            window,
-            GLFW.GLFW_MOUSE_BUTTON_LEFT
-        ) == GLFW.GLFW_PRESS
-
+        local pressed = window.is_mouse_down(LSG.Mouse.Left)
         if pressed and not mouse_down then
-            document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+            document.pointer_down_button(LSG.Mouse.Left)
         end
         if not pressed and mouse_down then
-            document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+            document.pointer_up_button(LSG.Mouse.Left)
         end
         mouse_down = pressed
 
-        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
-        GL.glClearColor(0.03,0.05,0.08,1.0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-
-        renderer.begin(framebuffer.width,framebuffer.height)
+        window.begin(0.03,0.05,0.08)
+        renderer.begin(window.width,window.height)
         renderer.submit(root)
         renderer.flush()
-
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
+        window.end()
     end
 
     window_input.destroy()
     cursor.destroy()
-    window_size.destroy()
-    framebuffer.destroy()
+    logical_size.destroy()
     document.destroy()
     renderer.destroy()
-    GLFW.glfwDestroyWindow(window)
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
+    window.destroy()
     return 0
 end
 
@@ -977,9 +791,7 @@ fn main()
     return run_window(root,"Scrollable Inventory",820,620)
 end`;
 
-const tabsCompleteSource = `use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+const tabsCompleteSource = `use "@LazyScript/LSG.lsx" as LSG
 use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
 use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
 
@@ -1089,35 +901,13 @@ fn open_tab(element,event,props)
     return 0
 end
 
-fn fail(message)
-    Win32.MessageBoxA(0,message,"LazyUI",Win32.MB_OK+Win32.MB_ICONERROR)
-    return 1
-end
+fn fail(message) return LSG.show_error(message) end
 
 fn run_window(root,title,width,height,props)
-    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then
-        return fail("GLFW initialization failed.")
-    end
-
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
-
-    local window = GLFW.glfwCreateWindow(width,height,title,0,0)
-    if window == 0 then
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
-        return fail("Window creation failed.")
-    end
-
-    GLFW.glfwMakeContextCurrent(window)
-    GLFW.glfwSwapInterval(1)
-    if GL.lsxLoadOpenGL() < 1 then
-        GLFW.glfwDestroyWindow(window)
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
-        return fail("OpenGL loading failed.")
-    end
+    LSG.use_vulkan()
+    local window = LSG.open(title,width,height)
+    if not window.ready() then return fail(window.error()) end
+    window.set_vsync(true)
 
     local document = UI.document(root)
     props.document = document
@@ -1125,65 +915,48 @@ fn run_window(root,title,width,height,props)
     if not renderer.ready then
         document.destroy()
         renderer.destroy()
-        GLFW.glfwDestroyWindow(window)
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
+        window.destroy()
         return fail("LazyUI renderer initialization failed.")
     end
 
-    local window_input = UI.connect_window_input(window,document)
-    local framebuffer = GLFW.FramebufferSize.new()
-    local window_size = GLFW.WindowSize.new()
-    local cursor = GLFW.CursorPosition.new()
+    local window_input = UI.connect_graphics_input(window,document)
+    local logical_size = LSG.window_size()
+    local cursor = LSG.cursor()
     local mouse_down = false
 
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window)
-        window_size.refresh(window)
-        cursor.refresh(window)
-
-        document.resize(framebuffer.width,framebuffer.height)
+    while window.running() do
+        logical_size.refresh(window)
+        document.resize(window.width,window.height)
+        window.cursor_position(cursor)
         document.pointer_move_scaled(
             cursor.x,
             cursor.y,
-            window_size.width,
-            window_size.height
+            logical_size.width,
+            logical_size.height
         )
 
-        local pressed = GLFW.glfwGetMouseButton(
-            window,
-            GLFW.GLFW_MOUSE_BUTTON_LEFT
-        ) == GLFW.GLFW_PRESS
-
+        local pressed = window.is_mouse_down(LSG.Mouse.Left)
         if pressed and not mouse_down then
-            document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+            document.pointer_down_button(LSG.Mouse.Left)
         end
         if not pressed and mouse_down then
-            document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+            document.pointer_up_button(LSG.Mouse.Left)
         end
         mouse_down = pressed
 
-        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
-        GL.glClearColor(0.03,0.05,0.08,1.0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-
-        renderer.begin(framebuffer.width,framebuffer.height)
+        window.begin(0.03,0.05,0.08)
+        renderer.begin(window.width,window.height)
         renderer.submit(root)
         renderer.flush()
-
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
+        window.end()
     end
 
     window_input.destroy()
     cursor.destroy()
-    window_size.destroy()
-    framebuffer.destroy()
+    logical_size.destroy()
     document.destroy()
     renderer.destroy()
-    GLFW.glfwDestroyWindow(window)
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
+    window.destroy()
     return 0
 end
 
@@ -1195,9 +968,7 @@ fn main()
     return result
 end`;
 
-const hudCompleteSource = `use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+const hudCompleteSource = `use "@LazyScript/LSG.lsx" as LSG
 use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
 use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
 
@@ -1312,100 +1083,61 @@ lshtml hud_view = {(
     </ui>
 )}
 
-fn fail(message)
-    Win32.MessageBoxA(0,message,"LazyUI",Win32.MB_OK+Win32.MB_ICONERROR)
-    return 1
-end
+fn fail(message) return LSG.show_error(message) end
 
 fn run_window(root,title,width,height)
-    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then
-        return fail("GLFW initialization failed.")
-    end
-
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
-
-    local window = GLFW.glfwCreateWindow(width,height,title,0,0)
-    if window == 0 then
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
-        return fail("Window creation failed.")
-    end
-
-    GLFW.glfwMakeContextCurrent(window)
-    GLFW.glfwSwapInterval(1)
-    if GL.lsxLoadOpenGL() < 1 then
-        GLFW.glfwDestroyWindow(window)
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
-        return fail("OpenGL loading failed.")
-    end
+    LSG.use_vulkan()
+    local window = LSG.open(title,width,height)
+    if not window.ready() then return fail(window.error()) end
+    window.set_vsync(true)
 
     local document = UI.document(root)
     local renderer = UIRenderer.create(null,64)
     if not renderer.ready then
         document.destroy()
         renderer.destroy()
-        GLFW.glfwDestroyWindow(window)
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
+        window.destroy()
         return fail("LazyUI renderer initialization failed.")
     end
 
-    local window_input = UI.connect_window_input(window,document)
-    local framebuffer = GLFW.FramebufferSize.new()
-    local window_size = GLFW.WindowSize.new()
-    local cursor = GLFW.CursorPosition.new()
+    local window_input = UI.connect_graphics_input(window,document)
+    local logical_size = LSG.window_size()
+    local cursor = LSG.cursor()
     local mouse_down = false
 
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window)
-        window_size.refresh(window)
-        cursor.refresh(window)
-
-        document.resize(framebuffer.width,framebuffer.height)
+    while window.running() do
+        logical_size.refresh(window)
+        document.resize(window.width,window.height)
+        window.cursor_position(cursor)
         document.pointer_move_scaled(
             cursor.x,
             cursor.y,
-            window_size.width,
-            window_size.height
+            logical_size.width,
+            logical_size.height
         )
 
-        local pressed = GLFW.glfwGetMouseButton(
-            window,
-            GLFW.GLFW_MOUSE_BUTTON_LEFT
-        ) == GLFW.GLFW_PRESS
-
+        local pressed = window.is_mouse_down(LSG.Mouse.Left)
         if pressed and not mouse_down then
-            document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+            document.pointer_down_button(LSG.Mouse.Left)
         end
         if not pressed and mouse_down then
-            document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+            document.pointer_up_button(LSG.Mouse.Left)
         end
         mouse_down = pressed
 
-        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
-        GL.glClearColor(0.03,0.05,0.08,1.0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-
-        renderer.begin(framebuffer.width,framebuffer.height)
+        window.begin(0.03,0.05,0.08)
+        renderer.begin(window.width,window.height)
         renderer.submit(root)
         renderer.flush()
-
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
+        window.end()
     end
 
     window_input.destroy()
     cursor.destroy()
-    window_size.destroy()
-    framebuffer.destroy()
+    logical_size.destroy()
     document.destroy()
     renderer.destroy()
-    GLFW.glfwDestroyWindow(window)
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
+    window.destroy()
     return 0
 end
 

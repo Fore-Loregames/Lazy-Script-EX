@@ -1,0 +1,69 @@
+shader LazyUIImage
+vulkan
+overlay
+strip
+vertex
+    storage imageData = Vector4 at 0
+    uniform viewport = Vector2
+    output uv = Vector2
+    output tint = Vector4
+    output clipRect = Vector4
+    output clipRadii = Vector4
+    output pixelPosition = Vector2
+
+    main = fn()
+        local corner = Vector2(0.0,0.0)
+        if vertex.id == 1 then
+            corner = Vector2(1.0,0.0)
+        end
+        if vertex.id == 2 then
+            corner = Vector2(0.0,1.0)
+        end
+        if vertex.id == 3 then
+            corner = Vector2(1.0,1.0)
+        end
+        local item = instance.id
+        local offset = item * 4
+        local rect = imageData[offset]
+        tint = imageData[offset + 1]
+        clipRect = imageData[offset + 2]
+        clipRadii = imageData[offset + 3]
+        pixelPosition = rect.xy + corner * rect.zw
+        uv = corner
+        local ndc = (pixelPosition / viewport) * Vector2(2.0,-2.0) + Vector2(-1.0,1.0)
+        screen.position = Vector4(ndc,0.0,1.0)
+    end
+end
+fragment
+    input uv = Vector2
+    input tint = Vector4
+    input clipRect = Vector4
+    input clipRadii = Vector4
+    input pixelPosition = Vector2
+    texture sourceTexture
+    output finalColor = Color4
+
+    main = fn()
+        local clipCoverage = Number(1.0)
+        if clipRect.z > 0.0 and clipRect.w > 0.0 then
+            local clipCenter = Vector2(clipRect.xy + clipRect.zw * 0.5)
+            local clipHalf = Vector2(max(clipRect.zw * 0.5,Vector2(0.0,0.0)))
+            local clipPoint = Vector2(pixelPosition - clipCenter)
+            local clipRadius = clipRadii.x
+            if clipPoint.x >= 0.0 and clipPoint.y < 0.0 then clipRadius = clipRadii.y end
+            if clipPoint.x >= 0.0 and clipPoint.y >= 0.0 then clipRadius = clipRadii.z end
+            if clipPoint.x < 0.0 and clipPoint.y >= 0.0 then clipRadius = clipRadii.w end
+            local clipQ = Vector2(abs(clipPoint) - clipHalf + Vector2(clipRadius,clipRadius))
+            local clipDistance = Number(min(max(clipQ.x,clipQ.y),0.0) + length(max(clipQ,Vector2(0.0,0.0))) - clipRadius)
+            local clipAA = Number(max(fwidth(clipDistance),0.75))
+            clipCoverage = 1.0 - smoothstep(-clipAA,clipAA,clipDistance)
+            if clipCoverage <= 0.001 then discard end
+        end
+        finalColor = sourceTexture.sample(uv) * tint
+        finalColor.a = finalColor.a * clipCoverage
+        if finalColor.a <= 0.001 then
+            discard
+        end
+    end
+end
+end

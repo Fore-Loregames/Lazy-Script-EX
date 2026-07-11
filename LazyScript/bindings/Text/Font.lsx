@@ -1,6 +1,7 @@
 use "FreeType.lsx" as FreeType
 use "../OpenGL/OpenGL46.lsx" as GL
 use "../OpenGL/TextureUpload.lsx" as TextureUpload
+use "../../LSG.lsx" as LSG
 
 -- FreeType-backed SDF atlas convenience layer. FreeType itself generates each
 -- SDF glyph; this file only packs the returned glyph bitmaps into one texture
@@ -95,25 +96,30 @@ export const TextInstances = {
 
 export const Texture = {
     id:u32 = 0,
+    graphics_texture:LSG.Texture = null,
     ok:bool = false,
     error_message:string = null,
 
     valid = fn() -> bool
+        if self.graphics_texture ~= null then return self.graphics_texture.ready() end
         return self.ok and self.id ~= 0
     end,
 
     bind = fn(unit:i32)
+        if self.graphics_texture ~= null then self.graphics_texture.bind(unit) return end
         GL.glActiveTexture(GL.GL_TEXTURE0 + unit)
         GL.glBindTexture(GL.GL_TEXTURE_2D,self.id)
     end,
 
     error = fn() -> string
         if self.error_message ~= null then return self.error_message end
+        if self.graphics_texture ~= null then return self.graphics_texture.error() end
         if self.valid() then return "No SDF texture error" end
-        return "OpenGL SDF texture upload failed"
+        return "SDF texture upload failed"
     end,
 
     destroy = fn()
+        if self.graphics_texture ~= null then self.graphics_texture.destroy() self.graphics_texture = null end
         if self.id ~= 0 then GL.deleteTexture(self.id) self.id = 0 end
         self.ok = false
         self.error_message = null
@@ -150,9 +156,33 @@ export fn create_atlas(face:FreeType.Face, firstCodepoint:i32, glyphCount:i32, c
         return result
     end
 
-    local cell = face.pixel_height + padding * 2
-    result.width = cell * columns
-    result.height = cell * rows
+    -- FreeType SDF bitmaps include their distance-field spread and can be
+    -- taller or wider than the requested pixel height. Measure the actual
+    -- glyph set before allocating the grid instead of assuming every glyph
+    -- fits inside pixelHeight + fixed padding. That assumption was what cut
+    -- off descenders such as y and p in the Vulkan text example.
+    local maximumBitmapWidth = 1
+    local maximumBitmapRows = 1
+    local measureIndex:i32 = 0
+    while measureIndex < glyphCount do
+        local measureCodepoint = firstCodepoint + measureIndex
+        if not face.load_char(measureCodepoint,FreeType.RENDER_SDF) then
+            result.error_message = face.error()
+            return result
+        end
+        local measuredWidth = face.bitmap_width()
+        local measuredRows = face.bitmap_rows()
+        if measuredWidth > maximumBitmapWidth then maximumBitmapWidth = measuredWidth end
+        if measuredRows > maximumBitmapRows then maximumBitmapRows = measuredRows end
+        measureIndex = measureIndex + 1
+    end
+
+    local guard = padding
+    if guard < 4 then guard = 4 end
+    local cellWidth = maximumBitmapWidth + guard * 2
+    local cellHeight = maximumBitmapRows + guard * 2
+    result.width = cellWidth * columns
+    result.height = cellHeight * rows
     result.first_codepoint = firstCodepoint
     result.glyph_count = glyphCount
     result.line_height = face.line_height()
@@ -174,8 +204,10 @@ export fn create_atlas(face:FreeType.Face, firstCodepoint:i32, glyphCount:i32, c
         local bitmapRows = face.bitmap_rows()
         local column = index % columns
         local row = index / columns
-        local destinationX = column * cell + (cell - bitmapWidth) / 2
-        local destinationY = row * cell + (cell - bitmapRows) / 2
+        local cellX = column * cellWidth
+        local cellY = row * cellHeight
+        local destinationX = cellX + guard + (maximumBitmapWidth - bitmapWidth) / 2
+        local destinationY = cellY + guard + (maximumBitmapRows - bitmapRows) / 2
         if not face.copy_bitmap(result.pixels.byte_data(),result.width,result.height,destinationX,destinationY) then
             result.error_message = "FreeType glyph did not fit in the SDF atlas"
             return result
@@ -183,14 +215,17 @@ export fn create_atlas(face:FreeType.Face, firstCodepoint:i32, glyphCount:i32, c
 
         glyph.codepoint = codepoint
         glyph.advance = face.advance_x()
-        glyph.x0 = face.bitmap_left()
-        glyph.y0 = 0 - face.bitmap_top()
-        glyph.x1 = glyph.x0 + bitmapWidth
-        glyph.y1 = glyph.y0 + bitmapRows
-        glyph.u0 = destinationX * 1.0 / result.width
-        glyph.v0 = destinationY * 1.0 / result.height
-        glyph.u1 = (destinationX + bitmapWidth) * 1.0 / result.width
-        glyph.v1 = (destinationY + bitmapRows) * 1.0 / result.height
+        -- Include the entire transparent gutter in the quad. The extra area is
+        -- invisible, but gives linear filtering and fwidth room to finish the
+        -- SDF transition instead of ending exactly at the glyph bitmap edge.
+        glyph.x0 = face.bitmap_left() - guard
+        glyph.y0 = 0 - face.bitmap_top() - guard
+        glyph.x1 = face.bitmap_left() + bitmapWidth + guard
+        glyph.y1 = 0 - face.bitmap_top() + bitmapRows + guard
+        glyph.u0 = (destinationX - guard) * 1.0 / result.width
+        glyph.v0 = (destinationY - guard) * 1.0 / result.height
+        glyph.u1 = (destinationX + bitmapWidth + guard) * 1.0 / result.width
+        glyph.v1 = (destinationY + bitmapRows + guard) * 1.0 / result.height
         result.glyphs.push(glyph)
         glyph.destroy()
         index = index + 1
@@ -333,7 +368,7 @@ end
 -- Append final colored/clipped glyph instance records directly into an
 -- existing renderer batch. This avoids allocating a TextInstances object and
 -- temporary quad table for every label on every frame.
-export fn append_text_instances(face:FreeType.Face,atlas:Atlas,text:string,x:f32,y:f32,scale:f32,output,red:f32,green:f32,blue:f32,alpha:f32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32) -> i64
+export fn append_text_instances(face:FreeType.Face,atlas:Atlas,text:string,x:f32,y:f32,scale:f32,output,red:f32,green:f32,blue:f32,alpha:f32,clipX:f32,clipY:f32,clipWidth:f32,clipHeight:f32,clipTopLeft:f32,clipTopRight:f32,clipBottomRight:f32,clipBottomLeft:f32) -> i64
     if not face.valid() or not atlas.valid() or text == null or scale <= 0.0 then return 0 end
     local penX = x
     local penY = y + face.ascender() * scale
@@ -376,6 +411,10 @@ export fn append_text_instances(face:FreeType.Face,atlas:Atlas,text:string,x:f32
                 output.push(clipY)
                 output.push(clipWidth)
                 output.push(clipHeight)
+                output.push(clipTopLeft)
+                output.push(clipTopRight)
+                output.push(clipBottomRight)
+                output.push(clipBottomLeft)
                 appended = appended + 1
             end
             penX = penX + glyphItem.advance * scale
@@ -390,6 +429,28 @@ end
 export fn upload_atlas(atlas:Atlas) -> Texture
     local result = Texture.new()
     if not atlas.valid() then result.error_message = atlas.error() return result end
+    if LSG.current_backend() == LSG.VULKAN then
+        local image = LSG.pixel_image(atlas.width,atlas.height)
+        if not image.ready() then result.error_message = image.error() image.destroy() return result end
+        local source = atlas.pixels.byte_data()
+        local destination = image.bytes.byte_data()
+        local count = atlas.width * atlas.height
+        local index = 0
+        while index < count do
+            local value = memory.read_u8(source,index)
+            local offset = index * 4
+            memory.write_u8(destination,offset,value)
+            memory.write_u8(destination,offset + 1,value)
+            memory.write_u8(destination,offset + 2,value)
+            memory.write_u8(destination,offset + 3,255)
+            index += 1
+        end
+        result.graphics_texture = LSG.texture_from_rgba(atlas.width,atlas.height,image.bytes)
+        image.destroy()
+        if not result.graphics_texture.ready() then result.error_message = result.graphics_texture.error() return result end
+        result.ok = true
+        return result
+    end
     while GL.glGetError() ~= GL.GL_NO_ERROR do end
     result.id = GL.createTexture()
     if result.id == 0 then result.error_message = "OpenGL texture creation failed" return result end

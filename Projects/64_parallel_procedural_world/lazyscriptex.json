@@ -1,0 +1,7 @@
+{
+  "entry": "main.lsx",
+  "output": "build/64_parallel_procedural_world.exe",
+  "subsystem": "windows",
+  "optimization": 6,
+  "targetCpu": "avx2-fma"
+}

@@ -1,271 +1,89 @@
-use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
+use "@LazyScript/LSG.lsx" as LSG
 use "@LazyScript/bindings/System/Threading.lsx" as Threading
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
 
 const Work = {
-    counter = null,
-    progress = null,
+    counter = null
+    progress = null
     iterations = 0
 }
 
-fn main()
-    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then
-        return fail("GLFW initialization failed.")
-    end
-
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
-
-    local window = GLFW.glfwCreateWindow(
-        900,
-        620,
-        "18 - Native threads - WORKING...",
-        0,
-        0
-    )
-
-    if window == 0 then
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
-        return fail("Window creation failed.")
-    end
-
-    GLFW.glfwMakeContextCurrent(window)
-    GLFW.glfwSwapInterval(1)
-
-    if GL.lsxLoadOpenGL() < 1 then
-        GLFW.glfwDestroyWindow(window)
-        GLFW.glfwTerminate()
-        GLFW.lsxUnloadLibraries()
-        return fail("OpenGL initialization failed.")
-    end
-
-    local iterations = 250000
-    local expectedTotal = iterations * 4
-
-    local counter = Threading.AtomicI64.new()
-
-    local firstProgress = Threading.AtomicI64.new()
-    local secondProgress = Threading.AtomicI64.new()
-    local thirdProgress = Threading.AtomicI64.new()
-    local fourthProgress = Threading.AtomicI64.new()
-
-    local firstWork = Work.new()
-    local secondWork = Work.new()
-    local thirdWork = Work.new()
-    local fourthWork = Work.new()
-
-    firstWork.counter = counter
-    firstWork.progress = firstProgress
-    firstWork.iterations = iterations
-
-    secondWork.counter = counter
-    secondWork.progress = secondProgress
-    secondWork.iterations = iterations
-
-    thirdWork.counter = counter
-    thirdWork.progress = thirdProgress
-    thirdWork.iterations = iterations
-
-    fourthWork.counter = counter
-    fourthWork.progress = fourthProgress
-    fourthWork.iterations = iterations
-
-    local first = Threading.Thread.start(count_on_worker,firstWork)
-    local second = Threading.Thread.start(count_on_worker,secondWork)
-    local third = Threading.Thread.start(count_on_worker,thirdWork)
-    local fourth = Threading.Thread.start(count_on_worker,fourthWork)
-
-    local started =
-        first.valid() and
-        second.valid() and
-        third.valid() and
-        fourth.valid()
-
-    local completed = false
-    local titleChanged = false
-    local framebuffer = GLFW.FramebufferSize.new()
-
-    if not started then
-        GLFW.glfwSetWindowTitle(
-            window,
-            "18 - Native threads - FAILED TO START ALL THREADS"
-        )
-    end
-
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        local firstValue = firstProgress.load()
-        local secondValue = secondProgress.load()
-        local thirdValue = thirdProgress.load()
-        local fourthValue = fourthProgress.load()
-
-        completed =
-            started and
-            firstValue == iterations and
-            secondValue == iterations and
-            thirdValue == iterations and
-            fourthValue == iterations and
-            counter.load() == expectedTotal
-
-        if completed and not titleChanged then
-            GLFW.glfwSetWindowTitle(
-                window,
-                "18 - Native threads - SUCCESS: ALL 4 THREADS COMPLETED"
-            )
-
-            titleChanged = true
-        end
-
-        framebuffer.refresh(window)
-
-        GL.glViewport(
-            0,
-            0,
-            framebuffer.width,
-            framebuffer.height
-        )
-
-        GL.glDisable(GL.GL_SCISSOR_TEST)
-
-        if completed then
-            GL.glClearColor(0.015,0.08,0.035,1)
-        else
-            GL.glClearColor(0.025,0.03,0.05,1)
-        end
-
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-        GL.glEnable(GL.GL_SCISSOR_TEST)
-
-        draw_thread_bar(
-            firstValue,
-            iterations,
-            framebuffer.width,
-            430
-        )
-
-        draw_thread_bar(
-            secondValue,
-            iterations,
-            framebuffer.width,
-            320
-        )
-
-        draw_thread_bar(
-            thirdValue,
-            iterations,
-            framebuffer.width,
-            210
-        )
-
-        draw_thread_bar(
-            fourthValue,
-            iterations,
-            framebuffer.width,
-            100
-        )
-
-        GL.glDisable(GL.GL_SCISSOR_TEST)
-
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
-    end
-
-    first.join()
-    second.join()
-    third.join()
-    fourth.join()
-
-    local correct =
-        started and
-        counter.load() == expectedTotal and
-        firstProgress.load() == iterations and
-        secondProgress.load() == iterations and
-        thirdProgress.load() == iterations and
-        fourthProgress.load() == iterations
-
-    first.close()
-    second.close()
-    third.close()
-    fourth.close()
-
-    firstWork.destroy()
-    secondWork.destroy()
-    thirdWork.destroy()
-    fourthWork.destroy()
-
-    counter.destroy()
-
-    firstProgress.destroy()
-    secondProgress.destroy()
-    thirdProgress.destroy()
-    fourthProgress.destroy()
-
-    framebuffer.destroy()
-
-    GLFW.glfwDestroyWindow(window)
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
-
-    if correct then return 0 end
-    return 1
-end
-
 fn count_on_worker(work)
     local index = 0
-
     while index < work.iterations do
         work.counter.increment()
         work.progress.increment()
         index = index + 1
-
-        -- Makes each progress bar visible long enough to confirm it is moving.
-        if index % 1000 == 0 then
-            system.sleep(1)
-        end
+        if index % 1000 == 0 then system.sleep(1) end
     end
-
     return 0
 end
 
 fn draw_thread_bar(value,total,width,y)
     local trackWidth = width - 120
     local filledWidth = value * trackWidth / total
-
-    GL.glScissor(
-        60,
-        y,
-        trackWidth,
-        54
-    )
-
-    GL.glClearColor(0.10,0.12,0.17,1)
-    GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-
-    GL.glScissor(
-        60,
-        y,
-        filledWidth,
-        54
-    )
-
+    LSG.set_scissor(60,y,trackWidth,54)
+    LSG.clear_screen(0.10,0.12,0.17,1.0,LSG.COLOR)
+    LSG.set_scissor(60,y,filledWidth,54)
     if value == total then
-        GL.glClearColor(0.12,0.85,0.30,1)
+        LSG.clear_screen(0.12,0.85,0.30,1.0,LSG.COLOR)
     else
-        GL.glClearColor(0.15,0.48,1.0,1)
+        LSG.clear_screen(0.15,0.48,1.0,1.0,LSG.COLOR)
     end
-
-    GL.glClear(GL.GL_COLOR_BUFFER_BIT)
 end
 
-fn fail(message)
-    Win32.MessageBoxA(
-        0,
-        message,
-        "LazyScriptEX native thread test",
-        Win32.MB_OK + Win32.MB_ICONERROR
-    )
+fn main()
+    local window = LSG.open("18 - Native threads - WORKING...",900,620)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
 
+    local iterations = 250000
+    local expectedTotal = iterations * 4
+    local counter = Threading.AtomicI64.new()
+    local firstProgress = Threading.AtomicI64.new()
+    local secondProgress = Threading.AtomicI64.new()
+    local thirdProgress = Threading.AtomicI64.new()
+    local fourthProgress = Threading.AtomicI64.new()
+    local firstWork = Work.new()
+    local secondWork = Work.new()
+    local thirdWork = Work.new()
+    local fourthWork = Work.new()
+    firstWork.counter = counter firstWork.progress = firstProgress firstWork.iterations = iterations
+    secondWork.counter = counter secondWork.progress = secondProgress secondWork.iterations = iterations
+    thirdWork.counter = counter thirdWork.progress = thirdProgress thirdWork.iterations = iterations
+    fourthWork.counter = counter fourthWork.progress = fourthProgress fourthWork.iterations = iterations
+
+    local first = Threading.Thread.start(count_on_worker,firstWork)
+    local second = Threading.Thread.start(count_on_worker,secondWork)
+    local third = Threading.Thread.start(count_on_worker,thirdWork)
+    local fourth = Threading.Thread.start(count_on_worker,fourthWork)
+    local started = first.valid() and second.valid() and third.valid() and fourth.valid()
+    if not started then window.set_title("18 - Native threads - FAILED TO START") end
+    local titleChanged = false
+
+    while window.running() do
+        local firstValue = firstProgress.load()
+        local secondValue = secondProgress.load()
+        local thirdValue = thirdProgress.load()
+        local fourthValue = fourthProgress.load()
+        local completed = started and firstValue == iterations and secondValue == iterations and thirdValue == iterations and fourthValue == iterations and counter.load() == expectedTotal
+        if completed and not titleChanged then window.set_title("18 - Native threads - SUCCESS") titleChanged = true end
+
+        if completed then window.begin(0.015,0.08,0.035) else window.begin(0.025,0.03,0.05) end
+        LSG.scissor_test(true)
+        draw_thread_bar(firstValue,iterations,window.width,430)
+        draw_thread_bar(secondValue,iterations,window.width,320)
+        draw_thread_bar(thirdValue,iterations,window.width,210)
+        draw_thread_bar(fourthValue,iterations,window.width,100)
+        LSG.scissor_test(false)
+        window.end()
+    end
+
+    first.join() second.join() third.join() fourth.join()
+    local correct = started and counter.load() == expectedTotal and firstProgress.load() == iterations and secondProgress.load() == iterations and thirdProgress.load() == iterations and fourthProgress.load() == iterations
+    first.close() second.close() third.close() fourth.close()
+    firstWork.destroy() secondWork.destroy() thirdWork.destroy() fourthWork.destroy()
+    counter.destroy() firstProgress.destroy() secondProgress.destroy() thirdProgress.destroy() fourthProgress.destroy()
+    window.destroy()
+    if correct then return 0 end
     return 1
 end

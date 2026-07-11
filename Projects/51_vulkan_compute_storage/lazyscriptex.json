@@ -1,0 +1,7 @@
+{
+  "name": "51_vulkan_compute_storage",
+  "entry": "main.lsx",
+  "output": "build/51_vulkan_compute_storage.exe",
+  "subsystem": "windows",
+  "optimize": 6
+}

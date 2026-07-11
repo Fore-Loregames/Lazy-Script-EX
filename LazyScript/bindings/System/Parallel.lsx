@@ -1,0 +1,180 @@
+-- LazyScriptEX persistent worker pool for large CPU kernels.
+--
+-- This is the advanced runtime used by the loop accelerator. Threads are
+-- created once and reused across dispatches; one atomic chunk counter balances
+-- uneven procedural-generation, simulation, and math work without creating a
+-- thread for every loop or every iteration.
+
+use "Threading.lsx" as Threading
+
+const WorkerState = {
+    pool = null
+}
+
+fn run_chunks(pool)
+    local start = pool.next.add(pool.grain) - pool.grain
+    while start < pool.count do
+        local finish = start + pool.grain
+        if finish > pool.count then finish = pool.count end
+        ffi.call3(pool.callback,start,finish,pool.context)
+        start = pool.next.add(pool.grain) - pool.grain
+    end
+end
+
+fn parallel_worker(state)
+    local pool = state.pool
+    local seen = 0
+    while pool.shutdown.load() == 0 do
+        pool.start_event.wait(Threading.INFINITE)
+        if pool.shutdown.load() == 0 then
+            local generation = pool.generation.load()
+            if generation ~= seen then
+                seen = generation
+                run_chunks(pool)
+                if pool.remaining.decrement() == 0 then
+                    pool.start_event.reset()
+                    pool.done_event.set()
+                end
+            else
+                Threading.yield()
+            end
+        end
+    end
+    return 0
+end
+
+export const Pool = {
+    threads = {}
+    states = {}
+    start_event = null
+    done_event = null
+    dispatch_lock = null
+    next = null
+    remaining = null
+    generation = null
+    shutdown = null
+    callback:fnptr = null
+    context:u64 = 0
+    count:i64 = 0
+    grain:i64 = 256
+    worker_count:i32 = 0
+    initialized:bool = false
+
+    create = fn(requestedWorkers)
+        local pool = Pool.new()
+        local available = Threading.cpu_count()
+        local workers = requestedWorkers
+        if workers < 1 then workers = available - 1 end
+        if workers < 1 then workers = 1 end
+        if workers > 32 then workers = 32 end
+
+        pool.start_event = Threading.Event.create(true,false)
+        pool.done_event = Threading.Event.create(true,false)
+        pool.dispatch_lock = Threading.Mutex.create(false)
+        pool.next = Threading.AtomicI64.new()
+        pool.remaining = Threading.AtomicI32.new()
+        pool.generation = Threading.AtomicI64.new()
+        pool.shutdown = Threading.AtomicI32.new()
+        pool.worker_count = workers
+
+        local index = 0
+        while index < workers do
+            local state = WorkerState.new()
+            state.pool = pool
+            local worker = Threading.Thread.start(parallel_worker,state)
+            if not worker.valid() then
+                state.pool = null
+                state.destroy()
+                pool.worker_count = index
+                pool.close()
+                return pool
+            end
+            pool.states.push(state)
+            pool.threads.push(worker)
+            index = index + 1
+        end
+        pool.initialized = true
+        return pool
+    end
+
+    ready = fn()
+        return self.initialized and self.worker_count > 0
+    end
+
+    workers = fn()
+        return self.worker_count
+    end
+
+    run = fn(callback,context,count,grain)
+        if not self.ready() or callback == null or count <= 0 then return count <= 0 end
+        if grain < 1 then grain = 256 end
+        if not self.dispatch_lock.lock() then return false end
+
+        self.callback = callback
+        self.context = 0
+        if context ~= null then self.context = memory.ptr(context,0) end
+        self.count = count
+        self.grain = grain
+        self.next.store(0)
+        self.remaining.store(self.worker_count + 1)
+        self.done_event.reset()
+        self.generation.increment()
+        self.start_event.set()
+
+        -- The calling thread participates instead of sleeping while workers run.
+        run_chunks(self)
+        if self.remaining.decrement() == 0 then
+            self.start_event.reset()
+            self.done_event.set()
+        end
+        local completed = self.done_event.wait(Threading.INFINITE) == Threading.WAIT_OBJECT_0
+        self.callback = null
+        self.context = 0
+        self.dispatch_lock.unlock()
+        return completed
+    end
+
+    close = fn()
+        if self.shutdown == null and not self.initialized then return true end
+        if self.shutdown ~= null then self.shutdown.store(1) end
+        if self.start_event ~= null then self.start_event.set() end
+        local index = 0
+        while index < self.threads.length() do
+            local worker = self.threads.at(index)
+            worker.join()
+            worker.close()
+            index = index + 1
+        end
+        index = 0
+        while index < self.states.length() do
+            local state = self.states.at(index)
+            state.pool = null
+            state.destroy()
+            index = index + 1
+        end
+        self.threads.destroy()
+        self.states.destroy()
+        if self.start_event ~= null then self.start_event.close() self.start_event.destroy() self.start_event = null end
+        if self.done_event ~= null then self.done_event.close() self.done_event.destroy() self.done_event = null end
+        if self.dispatch_lock ~= null then self.dispatch_lock.close() self.dispatch_lock.destroy() self.dispatch_lock = null end
+        if self.next ~= null then self.next.destroy() self.next = null end
+        if self.remaining ~= null then self.remaining.destroy() self.remaining = null end
+        if self.generation ~= null then self.generation.destroy() self.generation = null end
+        if self.shutdown ~= null then self.shutdown.destroy() self.shutdown = null end
+        self.worker_count = 0
+        self.initialized = false
+        return true
+    end
+
+    destroy = fn()
+        self.close()
+    end
+}
+
+export fn create()
+    return Pool.create(0)
+end
+
+export fn create_with_workers(count)
+    return Pool.create(count)
+end

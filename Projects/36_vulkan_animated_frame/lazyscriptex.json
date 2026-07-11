@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/36_vulkan_animated_frame.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

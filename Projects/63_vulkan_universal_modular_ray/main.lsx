@@ -1,0 +1,136 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "@LazyScript/bindings/Math/GLM.lsx" as GLM
+use "@LazyScript/bindings/Math/Camera.lsx" as Camera
+use "shaders/material.lssl" as Material
+
+fn fail(message)
+    return LSG.show_error(message)
+end
+
+fn cube_vertices()
+    return {
+        -1.0,-1.0,-1.0, 0.0,0.0,-1.0,  1.0,-1.0,-1.0, 0.0,0.0,-1.0,  1.0,1.0,-1.0, 0.0,0.0,-1.0, -1.0,1.0,-1.0, 0.0,0.0,-1.0,
+        -1.0,-1.0, 1.0, 0.0,0.0, 1.0,  1.0,-1.0, 1.0, 0.0,0.0, 1.0,  1.0,1.0, 1.0, 0.0,0.0, 1.0, -1.0,1.0, 1.0, 0.0,0.0, 1.0,
+        -1.0,-1.0,-1.0,-1.0,0.0,0.0, -1.0,1.0,-1.0,-1.0,0.0,0.0, -1.0,1.0,1.0,-1.0,0.0,0.0, -1.0,-1.0,1.0,-1.0,0.0,0.0,
+         1.0,-1.0,-1.0, 1.0,0.0,0.0,  1.0,-1.0,1.0, 1.0,0.0,0.0,  1.0,1.0,1.0, 1.0,0.0,0.0,  1.0,1.0,-1.0, 1.0,0.0,0.0,
+        -1.0,-1.0,-1.0, 0.0,-1.0,0.0, -1.0,-1.0,1.0, 0.0,-1.0,0.0,  1.0,-1.0,1.0, 0.0,-1.0,0.0,  1.0,-1.0,-1.0, 0.0,-1.0,0.0,
+        -1.0, 1.0,-1.0, 0.0, 1.0,0.0,  1.0, 1.0,-1.0, 0.0, 1.0,0.0,  1.0,1.0,1.0, 0.0,1.0,0.0, -1.0,1.0,1.0, 0.0,1.0,0.0
+    }
+end
+
+fn cube_indices()
+    return {
+         0, 1, 2, 2, 3, 0,  4, 6, 5, 6, 4, 7,
+         8, 9,10,10,11, 8, 12,13,14,14,15,12,
+        16,17,18,18,19,16, 20,21,22,22,23,20
+    }
+end
+
+fn main()
+    LSG.use_vulkan()
+    LSG.set_ray_tracing(true)
+    if not GLM.ready() then return fail("LSXMath.dll / GLM failed to load.") end
+
+    local window = LSG.open("63 - Universal modular LSSL ray tracing",1100,720)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return fail(window.error()) end
+    local shader = Material.create()
+    if not shader.ready() then return fail(shader.error()) end
+
+    local vertices = cube_vertices()
+    local indices = cube_indices()
+    local redCube = LSG.indexed_mesh(vertices,indices,Material.vertex_layout)
+    local blueCube = LSG.indexed_mesh(vertices,indices,Material.vertex_layout)
+    local floor = LSG.indexed_mesh(vertices,indices,Material.vertex_layout)
+    if not redCube.ready() then return fail(redCube.error()) end
+    if not blueCube.ready() then return fail(blueCube.error()) end
+    if not floor.ready() then return fail(floor.error()) end
+    local rayTarget = LSG.framebuffer(825,540)
+    if not rayTarget.ready() then return fail(rayTarget.error()) end
+
+    redCube.set_ray_material(0.95,0.16,0.08,0.28,0.05,0.0)
+    blueCube.set_ray_material(0.08,0.32,0.95,0.12,0.72,0.0)
+    floor.set_ray_material(0.18,0.22,0.27,0.34,0.35,0.0)
+    LSG.set_ray_sun(-0.45,-0.85,-0.30,1.0,0.94,0.84,2.0,0.10)
+    LSG.clear_ray_point_lights()
+    LSG.add_ray_point_light(0.0,4.5,1.5,0.35,0.55,1.0,12.0,12.0)
+
+    local camera = Camera.create()
+    camera.set_position(5.0,4.0,8.0)
+    camera.look_at(0.0,0.6,0.0)
+    camera.set_perspective(56.0,1100.0 / 720.0,0.1,100.0)
+    local view = camera.view()
+    local projection = camera.projection()
+    local identityRotation = GLM.quat_identity()
+    local floorPosition = GLM.vec3(0.0,-1.2,0.0)
+    local floorScale = GLM.vec3(6.0,0.10,6.0)
+    local floorModel = GLM.trs(floorPosition,identityRotation,floorScale)
+    local axis = GLM.vec3(0.0,1.0,0.0)
+    local redPosition = GLM.vec3(-1.55,0.0,0.0)
+    local bluePosition = GLM.vec3(1.55,-0.15,-0.65)
+    local redScale = GLM.vec3(0.92,1.25,0.92)
+    local blueScale = GLM.vec3(1.08,1.08,1.08)
+    local projectionWidth = window.width
+    local projectionHeight = window.height
+    floor.set_ray_transform(floorModel)
+    shader.bind()
+    shader.matrix4("view",view)
+    shader.matrix4("projection",projection)
+    shader.vector3("cameraPosition",5.0,4.0,8.0)
+    LSG.depth_test(true)
+
+    while window.running() do
+        if window.width ~= projectionWidth or window.height ~= projectionHeight then
+            projectionWidth = window.width
+            projectionHeight = window.height
+            camera.set_aspect_from_size(projectionWidth,projectionHeight)
+            projection.destroy()
+            projection = camera.projection()
+            shader.bind()
+            shader.matrix4("projection",projection)
+        end
+
+        local angle = LSG.time_seconds() * 0.38
+        local redRotation = GLM.quat_angle_axis(angle,axis)
+        local blueRotation = GLM.quat_angle_axis(-angle * 0.65,axis)
+        local redModel = GLM.trs(redPosition,redRotation,redScale)
+        local blueModel = GLM.trs(bluePosition,blueRotation,blueScale)
+
+        -- Only moving meshes dirty the shared ray scene. Static transforms and
+        -- camera uniforms stay cached instead of being resubmitted every frame.
+        redCube.set_ray_transform(redModel)
+        blueCube.set_ray_transform(blueModel)
+
+        rayTarget.begin(0.025,0.035,0.065)
+        shader.bind()
+
+        shader.matrix4("model",floorModel)
+        shader.vector4("objectColor",0.18,0.22,0.27,1.0)
+        floor.draw()
+
+        shader.matrix4("model",redModel)
+        shader.vector4("objectColor",0.95,0.16,0.08,1.0)
+        redCube.draw()
+
+        shader.matrix4("model",blueModel)
+        shader.vector4("objectColor",0.08,0.32,0.95,1.0)
+        blueCube.draw()
+        rayTarget.display(window,LSG.LINEAR)
+        window.end()
+
+        redModel.destroy() blueModel.destroy()
+        redRotation.destroy() blueRotation.destroy()
+    end
+
+    LSG.depth_test(false)
+    redPosition.destroy() bluePosition.destroy()
+    redScale.destroy() blueScale.destroy() axis.destroy()
+    floorModel.destroy() floorPosition.destroy() floorScale.destroy() identityRotation.destroy()
+    projection.destroy() view.destroy() camera.destroy()
+    rayTarget.destroy()
+    floor.destroy() blueCube.destroy() redCube.destroy()
+    indices.destroy() vertices.destroy()
+    shader.destroy() window.destroy()
+    return 0
+end

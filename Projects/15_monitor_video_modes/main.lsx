@@ -1,60 +1,29 @@
-use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
-
-fn fail(message)
-    Win32.MessageBoxA(0,message,"LazyScriptEX Native GameKit",Win32.MB_OK+Win32.MB_ICONERROR)
-    return 1
-end
+use "@LazyScript/LSG.lsx" as LSG
 
 fn main()
-    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return fail("GLFW failed.") end
+    local monitor = LSG.primary_monitor()
+    local monitors = LSG.monitors()
+    local work = LSG.monitor_work_area(monitor)
+    local physical = LSG.monitor_physical_size(monitor)
+    local modes = LSG.video_modes(monitor)
+    local mode = LSG.video_mode()
+    local scale = LSG.monitor_scale(monitor)
+    if modes.count > 0 then mode.read(modes.items,modes.count - 1) end
 
-    local monitors = GLFW.MonitorList.new()
-    local work = GLFW.MonitorWorkArea.new()
-    local physical = GLFW.MonitorPhysicalSize.new()
-    local scale = GLFW.ContentScale.new()
-    local modes = GLFW.VideoModeList.new()
-    local mode = GLFW.VideoMode.new()
-
-    monitors.refresh()
-    local monitor = GLFW.glfwGetPrimaryMonitor()
-    if monitor ~= 0 then
-        work.refresh(monitor)
-        physical.refresh(monitor)
-        scale.refresh_monitor(monitor)
-        modes.refresh(monitor)
-        if modes.count > 0 then mode.read(modes.items, modes.count - 1) end
+    local window = LSG.open("15 - Monitor and video mode API",900,600)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+    while window.running() do
+        window.begin(scale.x * 0.08,scale.y * 0.08,0.16)
+        window.end()
     end
 
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
-    local window = GLFW.glfwCreateWindow(900,600,"15 - Monitor and video mode typed API",0,0)
-    if window == 0 then return fail("Window failed.") end
-    GLFW.glfwMakeContextCurrent(window)
-    GL.lsxLoadOpenGL()
-    GLFW.glfwSetWindowTitle(window, "15 - Monitor and video mode typed API")
-
-    local framebuffer = GLFW.FramebufferSize.new()
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window)
-        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
-        GL.glClearColor(scale.x * 0.08, scale.y * 0.08, 0.16, 1)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
-    end
-
-    framebuffer.destroy()
+    scale.destroy()
     mode.destroy()
     modes.destroy()
-    scale.destroy()
     physical.destroy()
     work.destroy()
     monitors.destroy()
-    GLFW.glfwDestroyWindow(window)
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
+    window.destroy()
     return 0
 end

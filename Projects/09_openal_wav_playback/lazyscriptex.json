@@ -6,6 +6,7 @@
   "runtimeFiles": [
     "@LazyScript/native/LSXGameKit.dll",
     "@LazyScript/runtime/glfw3.dll",
-    "@LazyScript/runtime/OpenAL32.dll"
+    "@LazyScript/runtime/OpenAL32.dll",
+    "tone.wav"
   ]
 }

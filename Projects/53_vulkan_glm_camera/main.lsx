@@ -1,0 +1,74 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "@LazyScript/bindings/Math/GLM.lsx" as GLM
+use "@LazyScript/bindings/Math/Camera.lsx" as Camera
+use "@LazyScript/bindings/System/Log.lsx" as Log
+use "shaders/camera.lssl" as CameraShader
+
+fn fail(logger,message)
+    logger.error_line(message)
+    logger.close()
+    return LSG.show_error(message)
+end
+
+fn main()
+    LSG.use_vulkan()
+    local logger = Log.open_default()
+    if not GLM.ready() then return fail(logger,"LSXMath.dll / GLM failed to load.") end
+    local window = LSG.open("53 - Vulkan GLM camera and transforms",1000,700)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return fail(logger,window.error()) end
+    local shader = CameraShader.create()
+    if not shader.ready() then return fail(logger,shader.error()) end
+
+    local vertices = {
+        -1.0,-1.0,-1.0, 1.0,-1.0,-1.0, 1.0,1.0,-1.0, -1.0,1.0,-1.0,
+        -1.0,-1.0, 1.0, 1.0,-1.0, 1.0, 1.0,1.0, 1.0, -1.0,1.0, 1.0
+    }
+    local indices = {
+        0,1,2,2,3,0, 4,6,5,6,4,7, 0,4,5,5,1,0,
+        3,2,6,6,7,3, 1,5,6,6,2,1, 0,3,7,7,4,0
+    }
+    local cube = LSG.indexed_mesh(vertices,indices,CameraShader.vertex_layout)
+    LSG.depth_test(true)
+
+    local camera = Camera.create()
+    camera.set_position(4.0,3.0,6.0)
+    camera.look_at(0.0,0.0,0.0)
+    camera.set_perspective(60.0,1000.0 / 700.0,0.1,100.0)
+    local view = camera.view()
+    local projection = camera.projection()
+    local firstFrame = true
+
+    while window.running() do
+        camera.set_aspect_from_size(window.width,window.height)
+        projection.destroy()
+        projection = camera.projection()
+        local angle = LSG.time_seconds() * 0.7
+        local rawAxis = GLM.vec3(0.25,1.0,0.1)
+        local axis = rawAxis.normalized()
+        rawAxis.destroy()
+        local rotation = GLM.quat_angle_axis(angle,axis)
+        local position = GLM.vec3(0.0,0.0,0.0)
+        local scale = GLM.vec3_one()
+        local model = GLM.trs(position,rotation,scale)
+
+        window.begin_3d(0.025,0.03,0.05)
+        shader.bind()
+        shader.matrix4("model",model)
+        shader.matrix4("view",view)
+        shader.matrix4("projection",projection)
+        cube.draw()
+        window.end()
+
+        model.destroy() position.destroy() rotation.destroy() scale.destroy() axis.destroy()
+        if firstFrame then logger.success("First GLM camera frame rendered") firstFrame = false end
+    end
+
+    projection.destroy() view.destroy() camera.destroy()
+    LSG.depth_test(false)
+    cube.destroy() indices.destroy() vertices.destroy() shader.destroy() window.destroy()
+    logger.success("GLM camera example completed normally")
+    logger.close()
+    return 0
+end

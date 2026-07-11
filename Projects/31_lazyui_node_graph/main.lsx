@@ -1,6 +1,4 @@
-use "@LazyScript/bindings/GLFW/GLFW.lsx" as GLFW
-use "@LazyScript/bindings/OpenGL/OpenGL46.lsx" as GL
-use "@LazyScript/bindings/Platform/Win32.lsx" as Win32
+use "@LazyScript/LSG.lsx" as LSG
 use "@LazyScript/bindings/UI/LazyUI.lsx" as UI
 use "@LazyScript/bindings/UI/Renderer.lsx" as UIRenderer
 
@@ -1011,7 +1009,7 @@ end
 fn ensure_pointer_gesture_started(props,root,button,x,y)
     if props == null or root == null then return end
     local target = UI.hit_test(root,x,y)
-    if button == GLFW.GLFW_MOUSE_BUTTON_MIDDLE and point_inside_graph(props,x,y) then
+    if button == LSG.Mouse.Middle and point_inside_graph(props,x,y) then
         if not props.panning then
             props.panning = true
             props.panning_moved = false
@@ -1022,7 +1020,7 @@ fn ensure_pointer_gesture_started(props,root,button,x,y)
         end
         return
     end
-    if button ~= GLFW.GLFW_MOUSE_BUTTON_LEFT then return end
+    if button ~= LSG.Mouse.Left then return end
     if props.space_down and point_inside_graph(props,x,y) then
         if not props.panning then
             props.panning = true
@@ -1078,7 +1076,7 @@ fn update_active_graph_gesture(props,x,y)
 end
 
 fn node_drag_start(element,event,props)
-    if event.button ~= GLFW.GLFW_MOUSE_BUTTON_LEFT then return 0 end
+    if event.button ~= LSG.Mouse.Left then return 0 end
     local nodeElement = element.parent
     if nodeElement == null or props.graph == null then return 0 end
     local node = find_graph_node(props,nodeElement)
@@ -1112,8 +1110,8 @@ fn node_drag_end(element,event,props)
 end
 
 fn graph_pan_start(element,event,props)
-    local valid = event.button == GLFW.GLFW_MOUSE_BUTTON_MIDDLE
-    if event.button == GLFW.GLFW_MOUSE_BUTTON_LEFT and props.space_down then valid = true end
+    local valid = event.button == LSG.Mouse.Middle
+    if event.button == LSG.Mouse.Left and props.space_down then valid = true end
     if not valid then return 0 end
     props.panning = true
     props.panning_moved = false
@@ -1174,7 +1172,7 @@ fn minimap_pan_to_xy(props,x,y)
 end
 
 fn minimap_pan_start(element,event,props)
-    if event.button ~= GLFW.GLFW_MOUSE_BUTTON_LEFT then return 0 end
+    if event.button ~= LSG.Mouse.Left then return 0 end
     props.minimap_dragging = true
     minimap_pan_to_xy(props,event.x,event.y)
     set_status(props,"Navigator moving camera")
@@ -1197,7 +1195,7 @@ fn minimap_pan_end(element,event,props)
 end
 
 fn port_drag_start(element,event,props)
-    if event.button ~= GLFW.GLFW_MOUSE_BUTTON_LEFT or element.min_value < 0.5 then return 0 end
+    if event.button ~= LSG.Mouse.Left or element.min_value < 0.5 then return 0 end
     clear_pending_output(props)
     props.pending_output = element
     props.dragging_wire = true
@@ -1361,9 +1359,9 @@ fn verify_graph_interactions(document,props)
     local originalNodeX = node.world_x
     local originalNodeY = node.world_y
     document.pointer_move(titleX,titleY)
-    document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+    document.pointer_down_button(LSG.Mouse.Left)
     document.pointer_move(titleX+42.0,titleY+26.0)
-    document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+    document.pointer_up_button(LSG.Mouse.Left)
     if graph_absolute_value(node.world_x-(originalNodeX+42.0/props.zoom)) > 0.75 then passed = false end
     if graph_absolute_value(node.world_y-(originalNodeY+26.0/props.zoom)) > 0.75 then passed = false end
     set_world_position(node,originalNodeX,originalNodeY)
@@ -1378,9 +1376,9 @@ fn verify_graph_interactions(document,props)
     local originalPanX = props.pan_x
     local originalPanY = props.pan_y
     document.pointer_move(blankX,blankY)
-    document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_MIDDLE)
+    document.pointer_down_button(LSG.Mouse.Middle)
     document.pointer_move(blankX+36.0,blankY-22.0)
-    document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_MIDDLE)
+    document.pointer_up_button(LSG.Mouse.Middle)
     if graph_absolute_value(props.pan_x-(originalPanX+36.0)) > 0.75 then passed = false end
     if graph_absolute_value(props.pan_y-(originalPanY-22.0)) > 0.75 then passed = false end
     if props.graph.scroll_x ~= 0.0 or props.graph.scroll_y ~= 0.0 then passed = false end
@@ -1403,9 +1401,9 @@ fn verify_graph_interactions(document,props)
     local panBeforeMapX = props.pan_x
     local panBeforeMapY = props.pan_y
     document.pointer_move(mapStartX,mapStartY)
-    document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+    document.pointer_down_button(LSG.Mouse.Left)
     document.pointer_move(mapStartX+24.0,mapStartY+16.0)
-    document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+    document.pointer_up_button(LSG.Mouse.Left)
     if graph_absolute_value(props.pan_x-panBeforeMapX) < 1.0 and graph_absolute_value(props.pan_y-panBeforeMapY) < 1.0 then passed = false end
 
     -- Pins connect using pointer capture and final hit-testing at release.
@@ -1416,9 +1414,9 @@ fn verify_graph_interactions(document,props)
     local inputX = input.x+input.width*0.5
     local inputY = input.y+input.height*0.5
     document.pointer_move(outputX,outputY)
-    document.pointer_down_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+    document.pointer_down_button(LSG.Mouse.Left)
     document.pointer_move(inputX,inputY)
-    document.pointer_up_button(GLFW.GLFW_MOUSE_BUTTON_LEFT)
+    document.pointer_up_button(LSG.Mouse.Left)
     local connected = find_connection_to(props,input)
     if connected == null or connected.output == null or connected.output.id_hash ~= output.id_hash then passed = false end
 
@@ -1495,21 +1493,14 @@ fn main()
     local props = GraphProps.new()
     local root = graph_view(props)
     initialize_graph(props,root)
-    if GLFW.lsxLoadLibraries() < 1 or GLFW.glfwInit() == 0 then return fail("GLFW initialization failed.") end
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR,4)
-    GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR,6)
-    GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE,GLFW.GLFW_OPENGL_CORE_PROFILE)
-    local window = GLFW.glfwCreateWindow(1460,860,"31 - LazyUI infinite draggable node graph",0,0)
-    if window == 0 then return fail("Window creation failed.") end
-    GLFW.glfwMakeContextCurrent(window)
-    GLFW.glfwSwapInterval(1)
-    if GL.lsxLoadOpenGL() < 1 then return fail("OpenGL initialization failed.") end
+    local window = LSG.open("31 - LazyUI infinite draggable node graph",1460,860)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return fail(window.error()) end
     local renderer = UIRenderer.create(null,64)
     local document = UI.document(root)
-    local windowInput = UI.connect_window_input(window,document)
-    local framebuffer = GLFW.FramebufferSize.new()
-    local windowSize = GLFW.WindowSize.new()
-    local cursor = GLFW.CursorPosition.new()
+    local windowInput = UI.connect_graphics_input(window,document)
+    local logicalSize = LSG.window_size()
+    local cursor = LSG.cursor()
     local mouseButtonDown = -1
     local previousWidth = 0
     local previousHeight = 0
@@ -1517,45 +1508,36 @@ fn main()
     local plusKeyDown = false
     local minusKeyDown = false
 
-    framebuffer.refresh(window)
-    windowSize.refresh(window)
-    document.resize(framebuffer.width,framebuffer.height)
+    window.running()
+    logicalSize.refresh(window)
+    document.resize(window.width,window.height)
     apply_all_node_positions(props)
-    document.resize(framebuffer.width,framebuffer.height)
+    document.resize(window.width,window.height)
     update_graph_visuals(props)
-    -- Do not synthesize a full interaction sequence before the first visible
-    -- frame. On a real GLFW window that can route pointer capture through an
-    -- unpainted document and terminate the example before the window appears.
-    -- The same verification routine remains available to compiler/runtime tests.
     set_status(props,"Ready - drag nodes, pins, empty graph space, wheel, and minimap")
 
-    while GLFW.glfwWindowShouldClose(window) == 0 do
-        framebuffer.refresh(window)
-        windowSize.refresh(window)
-        if framebuffer.width ~= previousWidth or framebuffer.height ~= previousHeight then props.graph_dirty = true previousWidth = framebuffer.width previousHeight = framebuffer.height end
-        document.resize(framebuffer.width,framebuffer.height)
-        cursor.refresh(window)
-        props.space_down = GLFW.glfwGetKey(window,GLFW.GLFW_KEY_SPACE) == GLFW.GLFW_PRESS
-        local framePressed = GLFW.glfwGetKey(window,GLFW.GLFW_KEY_F) == GLFW.GLFW_PRESS
-        local plusPressed = GLFW.glfwGetKey(window,GLFW.GLFW_KEY_EQUAL) == GLFW.GLFW_PRESS
-        local minusPressed = GLFW.glfwGetKey(window,GLFW.GLFW_KEY_MINUS) == GLFW.GLFW_PRESS
+    while window.running() do
+        logicalSize.refresh(window)
+        if window.width ~= previousWidth or window.height ~= previousHeight then props.graph_dirty = true previousWidth = window.width previousHeight = window.height end
+        document.resize(window.width,window.height)
+        window.cursor_position(cursor)
+        props.space_down = window.is_key_down(LSG.Key.Space)
+        local framePressed = window.is_key_down(LSG.Key.F)
+        local plusPressed = window.is_key_down(LSG.Key.Equal)
+        local minusPressed = window.is_key_down(LSG.Key.Minus)
         if framePressed and not frameKeyDown then frame_graph_contents(props) set_status(props,"All graph nodes framed") end
         if plusPressed and not plusKeyDown then zoom_graph_center(props,1.20) end
         if minusPressed and not minusKeyDown then zoom_graph_center(props,0.8333333) end
         frameKeyDown = framePressed
         plusKeyDown = plusPressed
         minusKeyDown = minusPressed
-        document.pointer_move_scaled(cursor.x,cursor.y,windowSize.width,windowSize.height)
+        document.pointer_move_scaled(cursor.x,cursor.y,logicalSize.width,logicalSize.height)
         props.pointer_x = document.pointer_x props.pointer_y = document.pointer_y
         local pressedButton = -1
-        if GLFW.glfwGetMouseButton(window,GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS then pressedButton = GLFW.GLFW_MOUSE_BUTTON_LEFT
-        elseif GLFW.glfwGetMouseButton(window,GLFW.GLFW_MOUSE_BUTTON_MIDDLE) == GLFW.GLFW_PRESS then pressedButton = GLFW.GLFW_MOUSE_BUTTON_MIDDLE end
+        if window.is_mouse_down(LSG.Mouse.Left) then pressedButton = LSG.Mouse.Left
+        elseif window.is_mouse_down(LSG.Mouse.Middle) then pressedButton = LSG.Mouse.Middle end
         if pressedButton >= 0 and mouseButtonDown < 0 then
             document.pointer_down_button(pressedButton)
-            -- The retained Document provides normal pointer capture. This
-            -- graph-owned fallback mirrors the source editor controller and
-            -- guarantees title dragging/MMB panning/minimap navigation even
-            -- when a decorative child is the exact hit target.
             ensure_pointer_gesture_started(props,root,pressedButton,document.pointer_x,document.pointer_y)
         end
         if pressedButton >= 0 then update_active_graph_gesture(props,document.pointer_x,document.pointer_y) end
@@ -1570,33 +1552,24 @@ fn main()
             if props.dragging_wire then clear_pending_output(props) end
         end
         mouseButtonDown = pressedButton
-        document.resize(framebuffer.width,framebuffer.height)
+        document.resize(window.width,window.height)
         update_graph_visuals(props)
 
-        GL.glViewport(0,0,framebuffer.width,framebuffer.height)
-        GL.glClearColor(0.015,0.02,0.03,1.0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-        renderer.begin(framebuffer.width,framebuffer.height)
+        window.begin(0.015,0.02,0.03)
+        renderer.begin(window.width,window.height)
         renderer.submit(root)
         renderer.flush()
-        GLFW.glfwSwapBuffers(window)
-        GLFW.glfwPollEvents()
+        window.end()
     end
 
     windowInput.destroy()
     cursor.destroy()
-    windowSize.destroy()
-    framebuffer.destroy()
+    logicalSize.destroy()
     document.destroy()
     renderer.destroy()
     destroy_graph_props(props)
-    GLFW.glfwDestroyWindow(window)
-    GLFW.glfwTerminate()
-    GLFW.lsxUnloadLibraries()
+    window.destroy()
     return 0
 end
 
-fn fail(message)
-    Win32.MessageBoxA(0,message,"LazyUI",Win32.MB_OK+Win32.MB_ICONERROR)
-    return 1
-end
+fn fail(message) return LSG.show_error(message) end

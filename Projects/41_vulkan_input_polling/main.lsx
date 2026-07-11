@@ -1,0 +1,24 @@
+use "@LazyScript/LSG.lsx" as LSG
+fn main()
+    LSG.use_vulkan()
+    local window = LSG.open("41 - Vulkan input polling | arrows change clear color",960,540)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+    local red = 0.03
+    local green = 0.05
+    while window.running() do
+        if window.is_key_down(LSG.Key.Left) then red -= 0.004 end
+        if window.is_key_down(LSG.Key.Right) then red += 0.004 end
+        if window.is_key_down(LSG.Key.Down) then green -= 0.004 end
+        if window.is_key_down(LSG.Key.Up) then green += 0.004 end
+        if window.is_key_down(LSG.Key.Escape) then window.close() end
+        if red < 0.0 then red = 0.0 end
+        if red > 1.0 then red = 1.0 end
+        if green < 0.0 then green = 0.0 end
+        if green > 1.0 then green = 1.0 end
+        window.begin(red,green,0.12)
+        window.end()
+    end
+    window.destroy()
+    return 0
+end

@@ -1,0 +1,161 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "@LazyScript/bindings/System/Parallel.lsx" as Parallel
+use "shaders/world.lssl" as WorldShader
+
+const WorldMap = {
+    image = null
+    width = 0
+    height = 0
+    seed = 1
+}
+
+fn wrap_angle(value)
+    local result = value
+    while result > 3.14159265 do result -= 6.28318530 end
+    while result < -3.14159265 do result += 6.28318530 end
+    return result
+end
+
+fn fast_sine(value)
+    local x = wrap_angle(value)
+    local base = 1.27323954 * x
+    local curve = 0.405284735 * x * x
+    local result = base - curve
+    if x < 0.0 then result = base + curve end
+    local magnitude = result
+    if magnitude < 0.0 then magnitude = -magnitude end
+    return result + (result * magnitude - result) * 0.225
+end
+
+fn wave(value)
+    return fast_sine(value) * 0.5 + 0.5
+end
+
+fn terrain_height(x,y,seed)
+    local fx = x * 0.0062 + seed * 0.173
+    local fy = y * 0.0062 - seed * 0.119
+    local large = wave(fx + fast_sine(fy * 0.73) * 1.6) * 0.48
+    local ridges = wave(fx * 2.1 - fy * 1.7 + fast_sine(fx * 0.42) * 1.2) * 0.27
+    local hills = wave(fx * 4.7 + fy * 3.3) * 0.16
+    local detail = wave(fx * 10.9 - fy * 8.1) * 0.09
+    return large + ridges + hills + detail
+end
+
+fn terrain_moisture(x,y,seed)
+    local fx = x * 0.0047 + seed * 0.071
+    local fy = y * 0.0047 + seed * 0.137
+    return wave(fx * 1.3 - fy + fast_sine(fy * 0.8)) * 0.68 + wave(fx * 4.1 + fy * 3.7) * 0.32
+end
+
+fn generate_world(begin,finish,world)
+    local index = begin
+    while index < finish do
+        local x = index % world.width
+        local y = index / world.width
+        local height = terrain_height(x,y,world.seed)
+        local moisture = terrain_moisture(x,y,world.seed)
+
+        local red = 18
+        local green = 48
+        local blue = 92
+        if height > 0.40 then
+            red = 46
+            green = 105
+            blue = 72
+        end
+        if height > 0.48 then
+            red = 58
+            green = 132 + moisture * 45
+            blue = 62
+        end
+        if height > 0.61 then
+            red = 110
+            green = 104
+            blue = 78
+        end
+        if height > 0.72 then
+            red = 150
+            green = 150
+            blue = 146
+        end
+        if height > 0.81 then
+            red = 236
+            green = 241
+            blue = 246
+        end
+        if height > 0.37 and height <= 0.40 then
+            red = 210
+            green = 188
+            blue = 116
+        end
+        if height <= 0.37 then
+            local depth = (0.37 - height) * 220.0
+            red = 14
+            green = 72 - depth
+            blue = 126 - depth * 0.35
+        end
+        if moisture < 0.30 and height > 0.48 and height < 0.68 then
+            red = 188
+            green = 154
+            blue = 82
+        end
+
+        world.image.set_rgba(x,y,red,green,blue,255)
+        index += 1
+    end
+    return 0
+end
+
+fn main()
+    LSG.use_vulkan()
+    local window = LSG.open("64 - Parallel procedural world generation",1100,720)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+
+    local shader = WorldShader.create()
+    if not shader.ready() then return LSG.show_error(shader.error()) end
+    local world = WorldMap.new()
+    world.width = 1024
+    world.height = 1024
+    world.seed = 7
+    world.image = LSG.pixel_image(world.width,world.height)
+    if not world.image.ready() then return LSG.show_error(world.image.error()) end
+
+    local workers = Parallel.create()
+    if not workers.ready() then return LSG.show_error("The persistent procedural-generation worker pool could not start.") end
+    if not workers.run(generate_world,world,world.width * world.height,2048) then return LSG.show_error("The procedural world generation job did not complete.") end
+
+    local texture = LSG.texture_from_pixels(world.image)
+    world.image.destroy()
+    world.image = null
+    if not texture.ready() then return LSG.show_error(texture.error()) end
+
+    local vertices = {
+        -0.98,-0.98, 0.0,1.0,
+         0.98,-0.98, 1.0,1.0,
+        -0.98, 0.98, 0.0,0.0,
+        -0.98, 0.98, 0.0,0.0,
+         0.98,-0.98, 1.0,1.0,
+         0.98, 0.98, 1.0,0.0
+    }
+    local quad = LSG.mesh(vertices,WorldShader.vertex_layout)
+    if not quad.ready() then return LSG.show_error(quad.error()) end
+
+    while window.running() do
+        window.begin(0.008,0.012,0.020)
+        shader.bind()
+        texture.bind(0)
+        quad.draw()
+        window.end()
+    end
+
+    quad.destroy()
+    vertices.destroy()
+    texture.destroy()
+    workers.destroy()
+    world.destroy()
+    shader.destroy()
+    window.destroy()
+    return 0
+end

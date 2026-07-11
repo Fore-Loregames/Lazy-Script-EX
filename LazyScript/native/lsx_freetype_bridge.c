@@ -157,6 +157,7 @@ typedef FT_UInt (__cdecl *PFN_FT_Get_Char_Index)(FT_Face, FT_ULong);
 typedef FT_Error (__cdecl *PFN_FT_Get_Kerning)(FT_Face, FT_UInt, FT_UInt, FT_UInt, FT_Vector*);
 typedef void (__cdecl *PFN_FT_Library_Version)(FT_Library, FT_Int*, FT_Int*, FT_Int*);
 typedef const char* (__cdecl *PFN_FT_Error_String)(FT_Error);
+typedef FT_Error (__cdecl *PFN_FT_Property_Set)(FT_Library, const char*, const char*, const void*);
 
 static HMODULE g_freetype_module;
 static PFN_FT_Init_FreeType p_FT_Init_FreeType;
@@ -170,6 +171,7 @@ static PFN_FT_Get_Char_Index p_FT_Get_Char_Index;
 static PFN_FT_Get_Kerning p_FT_Get_Kerning;
 static PFN_FT_Library_Version p_FT_Library_Version;
 static PFN_FT_Error_String p_FT_Error_String;
+static PFN_FT_Property_Set p_FT_Property_Set;
 static int g_runtime_state;
 
 #define LSX_FT_FACE_CAPACITY 64
@@ -182,6 +184,7 @@ typedef struct LSXFTFace_ {
     FT_Face face;
     int pixel_width;
     int pixel_height;
+    unsigned int sdf_spread;
 } LSXFTFace;
 
 static LSXFTFace g_faces[LSX_FT_FACE_CAPACITY];
@@ -209,6 +212,7 @@ static int load_runtime(void) {
     p_FT_Get_Kerning = (PFN_FT_Get_Kerning)load_proc("FT_Get_Kerning");
     p_FT_Library_Version = (PFN_FT_Library_Version)load_proc("FT_Library_Version");
     p_FT_Error_String = (PFN_FT_Error_String)load_proc("FT_Error_String");
+    p_FT_Property_Set = (PFN_FT_Property_Set)load_proc("FT_Property_Set");
 
     if (!p_FT_Init_FreeType || !p_FT_Done_FreeType || !p_FT_New_Face ||
         !p_FT_Done_Face || !p_FT_Set_Pixel_Sizes || !p_FT_Load_Char ||
@@ -233,6 +237,7 @@ static LSXFTFace* allocate_face(void) {
             g_faces[i].face = NULL;
             g_faces[i].pixel_width = 0;
             g_faces[i].pixel_height = 0;
+            g_faces[i].sdf_spread = 16;
             return &g_faces[i];
         }
     }
@@ -286,6 +291,15 @@ __declspec(dllexport) LSXFTFace* __cdecl _lsxFTCreateFace(const char* path, int 
     handle->last_error = error;
     if (error != 0 || !handle->library) goto failed;
 
+    /* FreeType defaults to an 8-pixel SDF spread. At larger display scales
+       descenders can reach that bitmap edge and look hard-clipped. The shipped
+       runtime supports the public sdf/spread property, so use a wider field.
+       Dynamic atlas sizing in Font.lsx accounts for the larger bitmaps. */
+    if (p_FT_Property_Set) {
+        FT_UInt spread = (FT_UInt)handle->sdf_spread;
+        p_FT_Property_Set(handle->library, "sdf", "spread", &spread);
+    }
+
     handle->last_stage = 2;
     error = p_FT_New_Face(handle->library, path, 0, &handle->face);
     handle->last_error = error;
@@ -333,7 +347,10 @@ __declspec(dllexport) int __cdecl _lsxFTLoadGlyph(LSXFTFace* handle, unsigned in
     FT_GlyphSlot slot;
     if (!valid_face(handle)) return 0;
     handle->last_stage = 4;
-    error = p_FT_Load_Char(handle->face, (FT_ULong)codepoint, 0);
+    /* SDF outlines should not use embedded bitmaps or grid hinting. Keeping the
+       original outline gives the distance renderer a clean, unclipped contour. */
+    FT_Int32 load_flags = render_mode == 5 ? ((1L << 1) | (1L << 3)) : 0;
+    error = p_FT_Load_Char(handle->face, (FT_ULong)codepoint, load_flags);
     handle->last_error = error;
     if (error != 0) return 0;
     slot = handle->face->glyph;

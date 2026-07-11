@@ -1,4 +1,4 @@
-# Generated project and test output
+# Generated project, compiler-test, and benchmark output
 **/build/
 **/out/
 **/dist/
@@ -8,6 +8,18 @@
 **/node_modules/
 **/.cache/
 **/__pycache__/
+
+# Native compiler/linker output outside normal build folders
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.pgo
+
+# Temporary generated shader diagnostics
+*.generated.glsl
+*.generated.spv
+*.compute.spv
 
 # Temporary/editor files
 *.log

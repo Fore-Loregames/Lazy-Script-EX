@@ -1,27 +1,13 @@
-LazyScriptEX offline guide and API
-==================================
+LazyScriptEX 0.21.5 Offline API
 
-Open the documentation from the repository root with:
+Open index.html in a web browser or run open-api.bat from the repository root.
 
-  open-api.bat
+The Front-end API contains normal LSX language features, LSG, LSSL, inheritance, high-level modules, LazyUI, LSHTML, LSCSS, events, and programmatic element creation.
 
-You may also open LazyScript/api/index.html directly in a browser.
+The Backend tab contains raw native functions, Vulkan/OpenGL/OpenAL declarations, fixed-layout fields, compatibility aliases, compiler records, and renderer internals.
 
-The offline documentation contains:
+Regenerate and synchronize this API with:
 
-- required runtime and Visual Studio Code setup;
-- project creation, build, and run instructions;
-- a complete native window example;
-- beginner language lessons;
-- tables, objects, functions, conditions, loops, inheritance, and ownership;
-- a complete imports guide covering relative paths, named roots, shared folders, moduleRoots, and VS Code path completion;
-- LSHTML, LSCSS, scrolling, controls, and complete UI applications;
-- a Front-end API tab containing normal LSX, inheritance, high-level modules, LSHTML, LSCSS, document lookup, and events;
-- a separate Backend tab for raw functions, native constants, fixed-layout fields, ABI details, and renderer/compiler internals;
-- a LazyUI Start Here section with copy-ready workflows instead of internal records;
-- practical LSX examples and plain-language explanations for beginner-facing features;
-- exact native signatures and source locations only in the Backend tab.
+    update-api.bat
 
-Keep this folder at LazyScript/api. Projects may live anywhere: run
-"LazyScriptEX: Select LazyScript/API Folder" in VS Code and select LazyScript,
-this api folder, or the toolkit root.
+The API data is generated from the current source tree and validated against the compiler version.

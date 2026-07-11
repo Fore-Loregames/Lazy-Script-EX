@@ -1,0 +1,6 @@
+{
+  "entry": "main.lsx",
+  "output": "build/63_vulkan_universal_modular_ray.exe",
+  "subsystem": "windows",
+  "optimization": 6
+}

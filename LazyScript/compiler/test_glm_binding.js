@@ -25,6 +25,12 @@ for (const name of names) {
 assert(!/->\s*ptr\b/.test(front), 'public GLM wrapper exposes a pointer return');
 assert(!/export\s+extern/.test(front), 'public GLM wrapper exposes native externs');
 assert(!/\bptr\b/.test(camera), 'camera wrapper exposes native pointers');
+assert(camera.includes('set_position = fn(x,y,z)'), 'camera set_position is not inference-only');
+assert(camera.includes('translate = fn(x,y,z)'), 'camera translate is not inference-only');
+assert(camera.includes('self.position.x += x'), 'camera translate does not use compound assignment');
+assert(!/set_position\s*=\s*fn\([^)]*:/.test(camera), 'camera set_position exposes explicit parameter types');
+assert(!/translate\s*=\s*fn\([^)]*:/.test(camera), 'camera translate exposes explicit parameter types');
+
 for (const feature of ['Vec2','Vec3','Vec4','Mat2','Mat3','Mat4','Quat','DualQuat','Decomposition']) {
   assert(front.includes(`export const ${feature}`), `public GLM feature missing: ${feature}`);
 }

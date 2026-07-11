@@ -1,8 +1,8 @@
 {
   "name": "lazyscriptex-native-gamekit",
   "displayName": "LazyScriptEX Native GameKit",
-  "description": "Native LazyScriptEX tooling with constructors, inheritance, GetTypeName/IsType, circular object graphs with borrowed back-references, project-wide inference, replacement-safe completion, project-aware diagnostics, LSHTML/LSCSS, and a beginner-first offline API that separates front-end features from backend/native declarations.",
-  "version": "0.18.28",
+  "description": "LazyScriptEX language support with clear LSG front-end names, complete OpenGL/Vulkan LSG and LSSL APIs, autocomplete, signatures, hovers, formatting, diagnostics, and the beginner API browser.",
+  "version": "0.21.5",
   "publisher": "nissyokugames",
   "license": "MIT",
   "engines": {
@@ -41,11 +41,20 @@
     "canvas",
     "game UI",
     "editor UI",
-    "declarative canvas"
+    "declarative canvas",
+    "LSG",
+    "LSSL",
+    "shader language",
+    "GLSL",
+    "graphics",
+    "Vulkan",
+    "SPIR-V",
+    "ray tracing"
   ],
   "activationEvents": [
     "onLanguage:lazyscriptex",
     "workspaceContains:**/*.lsx",
+    "workspaceContains:**/*.lssl",
     "onCommand:lazyscriptex.refreshIndex",
     "onCommand:lazyscriptex.selectLazyScriptRoot",
     "onCommand:lazyscriptex.selectApiPath",
@@ -58,10 +67,12 @@
         "id": "lazyscriptex",
         "aliases": [
           "LazyScriptEX",
-          "LSX"
+          "LSX",
+          "LSSL"
         ],
         "extensions": [
-          ".lsx"
+          ".lsx",
+          ".lssl"
         ],
         "configuration": "./language-configuration.json",
         "icon": {

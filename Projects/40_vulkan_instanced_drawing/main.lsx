@@ -1,0 +1,25 @@
+use "@LazyScript/LSG.lsx" as LSG
+use "@LazyScript/LSSL.lsx" as LSSL
+use "shaders/instances.lssl" as Instances
+fn main()
+    LSG.use_vulkan()
+    local window = LSG.open("40 - Vulkan instanced drawing",960,540)
+    if window.ready() then window.set_vsync(false) end
+    if not window.ready() then return LSG.show_error(window.error()) end
+    local shader = Instances.create()
+    if not shader.ready() then return LSG.show_error(shader.error()) end
+    local vertices = {-1.0,-1.0,1.0,0.2,0.1, 1.0,-1.0,0.1,1.0,0.3, 0.0,1.0,0.15,0.4,1.0}
+    local triangle = LSG.mesh(vertices,Instances.vertex_layout)
+    if not triangle.ready() then return LSG.show_error(triangle.error()) end
+    while window.running() do
+        window.begin(0.015,0.02,0.035)
+        shader.bind()
+        triangle.draw_instances(48)
+        window.end()
+    end
+    triangle.destroy()
+    vertices.destroy()
+    shader.destroy()
+    window.destroy()
+    return 0
+end
